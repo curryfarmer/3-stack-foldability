@@ -1,0 +1,13 @@
+# OS / editor cruft
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Node (report tooling)
+node_modules/
+report/node_modules/
+
+# Personal local Claude settings (machine-specific; keep out of the repo)
+.claude/settings.local.json

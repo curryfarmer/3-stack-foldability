@@ -1,0 +1,102 @@
+[
+  {
+    "grid": "6x4",
+    "id": 1,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"D\",\"D\",\"R\",\"U\",\"U\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"R\",\"R\",\"D\",\"D\",\"D\",\"L\",\"U\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 8,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x4",
+    "id": 2,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,1]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,0]],\"arrows\":[\"L\",\"L\",\"L\",\"U\",\"R\",\"U\",\"L\"]},{\"kind\":\"2chain\",\"base\":[[0,1],[1,1]],\"arrows\":[\"U\",\"U\",\"U\",\"U\",\"L\",\"D\",\"D\"]}]}",
+    "shape": "L",
+    "orient": "V",
+    "K": 8,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x5",
+    "id": 1,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"R\",\"D\",\"L\",\"D\",\"D\",\"R\",\"U\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"R\",\"R\",\"D\",\"L\",\"D\",\"R\",\"D\",\"D\",\"L\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 10,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x5",
+    "id": 2,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"D\",\"D\",\"D\",\"R\",\"U\",\"U\",\"U\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"R\",\"R\",\"D\",\"D\",\"D\",\"D\",\"L\",\"U\",\"U\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 10,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x5",
+    "id": 3,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[0,2]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,2]],\"arrows\":[\"D\",\"D\",\"R\",\"R\",\"R\",\"R\",\"R\",\"U\",\"U\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[0,1]],\"arrows\":[\"R\",\"D\",\"R\",\"U\",\"R\",\"D\",\"R\",\"U\",\"R\"]}]}",
+    "shape": "Rect",
+    "orient": "V",
+    "K": 10,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x5",
+    "id": 4,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[0,2]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,0]],\"arrows\":[\"R\",\"D\",\"D\",\"R\",\"U\",\"U\",\"R\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,1],[0,2]],\"arrows\":[\"D\",\"R\",\"R\",\"R\",\"U\",\"R\",\"D\",\"R\",\"U\"]}]}",
+    "shape": "Rect",
+    "orient": "V",
+    "K": 10,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x5",
+    "id": 5,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[0,2]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,0]],\"arrows\":[\"R\",\"R\",\"R\",\"D\",\"D\",\"R\",\"U\",\"U\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,1],[0,2]],\"arrows\":[\"D\",\"R\",\"U\",\"R\",\"D\",\"R\",\"R\",\"R\",\"U\"]}]}",
+    "shape": "Rect",
+    "orient": "V",
+    "K": 10,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x6",
+    "id": 7,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"R\",\"D\",\"L\",\"D\",\"D\",\"D\",\"R\",\"U\",\"U\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"R\",\"R\",\"D\",\"L\",\"D\",\"R\",\"D\",\"D\",\"D\",\"L\",\"U\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 12,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x6",
+    "id": 1,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"U\",\"U\",\"U\",\"U\",\"L\",\"D\",\"D\",\"D\",\"D\",\"L\",\"L\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"L\",\"L\",\"U\",\"U\",\"U\",\"U\",\"U\",\"R\",\"D\",\"D\",\"D\"]}]}",
+    "shape": "L",
+    "orient": "V",
+    "K": 12,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "9x4",
+    "id": 8,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[0,2]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,2]],\"arrows\":[\"U\",\"U\",\"U\",\"U\",\"U\",\"U\",\"L\",\"L\",\"L\",\"D\",\"D\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[0,1]],\"arrows\":[\"L\",\"U\",\"U\",\"U\",\"L\",\"D\",\"D\",\"D\",\"L\",\"U\",\"U\"]}]}",
+    "shape": "Rect",
+    "orient": "H",
+    "K": 12,
+    "foldable": null,
+    "notes": ""
+  }
+]

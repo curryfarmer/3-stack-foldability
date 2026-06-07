@@ -1,0 +1,13 @@
+networkx==3.3
+numpy==1.26.4
+matplotlib==3.8.4
+
+# Additional dependencies that might be needed
+# Note: The following are part of Python standard library and don't need to be installed:
+# - os
+# - sys
+# - json
+# - subprocess
+# - ast
+# - collections
+# - concurrent.futures

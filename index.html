@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Grid Folding Simulator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <button id="addGridBtn">+ Add Grid</button>
+    <span class="sep"></span>
+    <label>m <input id="mInput" type="number" min="1" max="40" value="6" /></label>
+    <label>n <input id="nInput" type="number" min="1" max="40" value="6" /></label>
+    <span class="hint">(focused grid)</span>
+  </header>
+
+  <main>
+    <aside id="palette">
+      <h3>Tools</h3>
+      <div class="tools">
+        <label><input type="radio" name="tool" value="pen" checked /> Pen</label>
+        <label><input type="radio" name="tool" value="eraser" /> Eraser</label>
+        <label><input type="radio" name="tool" value="highlight" /> Highlighter</label>
+        <label><input type="radio" name="tool" value="footprint" /> Footprint</label>
+        <label><input type="radio" name="tool" value="group" /> Group select</label>
+        <label><input type="radio" name="tool" value="fold" /> Fold (drag)</label>
+        <label><input type="radio" name="tool" value="vector" /> Vector (drag)</label>
+      </div>
+
+      <h3>Color</h3>
+      <input type="color" id="colorPicker" value="#ee9944" />
+
+      <h3>Active group</h3>
+      <select id="activeGroupSelect"><option value="">(none)</option></select>
+
+      <h3>Fold rules</h3>
+      <label class="opt"><input type="checkbox" id="preventOverlapChk" checked /> Prevent fold overlap</label>
+
+      <h3>Display</h3>
+      <label class="opt"><input type="checkbox" id="showLabelsChk" checked /> Show group labels</label>
+      <label class="opt"><input type="checkbox" id="showVectorsChk" checked /> Show vectors</label>
+      <label class="opt"><input type="checkbox" id="showFoldArrowsChk" checked /> Show fold chevrons</label>
+      <label class="opt"><input type="checkbox" id="showPlacementsChk" checked /> Show fold placements</label>
+      <label class="opt"><input type="checkbox" id="showFootprintChk" checked /> Show footprint outline</label>
+      <label class="opt"><input type="checkbox" id="showPaintChk" checked /> Show paint/highlight</label>
+      <label class="opt">Vector size <input type="range" id="vectorSize" min="6" max="20" value="10" /></label>
+      <label class="opt">Placement inset <input type="range" id="placementInset" min="0" max="10" value="3" /></label>
+      <label class="opt">Chevron size <input type="range" id="chevronSize" min="8" max="28" value="16" /></label>
+
+      <h3>Search (3-stack)</h3>
+      <label class="opt">m <input id="searchM" type="number" min="2" max="14" value="6" style="width:46px"> n <input id="searchN" type="number" min="2" max="14" value="4" style="width:46px"></label>
+      <label class="opt"><input type="checkbox" id="searchShapeL" checked /> Shape L</label>
+      <label class="opt"><input type="checkbox" id="searchShapeRect" checked /> Shape Rect</label>
+      <label class="opt"><input type="checkbox" id="searchDec21" checked /> Decomp 2+1</label>
+      <label class="opt"><input type="checkbox" id="searchDec111" checked /> Decomp 1+1+1</label>
+      <label class="opt"><input type="checkbox" id="searchAllowNonCorner" /> Allow non-corner footprints</label>
+      <label class="opt"><input type="checkbox" id="searchDedup" checked /> Dedup (D4 canonical)</label>
+      <div style="display:flex; gap:6px; margin:6px 0">
+        <button id="searchRunBtn">Run</button>
+        <button id="searchStopBtn" disabled>Stop</button>
+      </div>
+      <div id="searchProgressWrap"><div id="searchProgress"></div></div>
+      <div id="searchCounters" class="hint" style="font-size:11px; line-height:1.5; margin-top:4px"></div>
+      <div style="display:flex; gap:6px; margin-top:6px">
+        <button id="searchExportCsv" disabled>CSV</button>
+        <button id="searchExportJson" disabled>JSON</button>
+        <button id="searchClearBtn">Clear</button>
+      </div>
+      <label class="opt" style="margin-top:6px">Load results JSON (from Python <code>generate.py</code>)
+        <input type="file" id="searchLoadJson" accept="application/json,.json" style="font-size:11px">
+      </label>
+      <p class="hint" style="font-size:11px; margin-top:2px">Loads 3-stack <em>or</em> 2-stack (<code>--stacks 2</code>, RSPA Hamiltonian-circuit) files; the table + grid adapt to the file. 2-stack draws the kirigami pattern: creases (red) / slits (gray) / cut (green).</p>
+      <p class="hint" style="font-size:11px; margin-top:4px">Twist = pairwise-loop balance (Tw=0 on every pair of stacks), non-filtering. Decided for 1+1+1 only; 2+1 shows — (2-chain pending). Hover ✓/✗ for pair twists.</p>
+
+      <h3>Legend</h3>
+      <ul class="legend">
+        <li><span class="sw" style="background:#fff;border:1px solid #888"></span> empty cell</li>
+        <li><span class="sw" style="background:#222"></span> footprint outline</li>
+        <li><span class="sw" style="background:#ee9944"></span> painted</li>
+        <li><span class="sw" style="background:#fffd6a;opacity:.6"></span> highlighter</li>
+        <li><span class="sw" style="background:#39c"></span> group placement</li>
+        <li>→ vector arrow (group color)</li>
+        <li>▶ fold direction (orange)</li>
+      </ul>
+    </aside>
+
+    <section id="mainCol">
+      <section id="searchNav" style="display:none">
+        <span id="searchNavCounter" class="mono">Result 0 of 0</span>
+        <button id="searchPrevBtn">◀ Prev</button>
+        <button id="searchNextBtn">Next ▶</button>
+        <span class="sep"></span>
+        <span id="searchNavSummary" class="mono"></span>
+        <span class="spacer"></span>
+        <label class="opt" style="margin:0">Decomp
+          <select id="searchDecompFilter"><option value="">all</option><option value="2+1">2+1</option><option value="1+1+1">1+1+1</option></select>
+        </label>
+        <label class="opt" style="margin:0">Shape
+          <select id="searchShapeFilter"><option value="">all</option><option value="L">L</option><option value="Rect">Rect</option></select>
+        </label>
+        <label class="opt" style="margin:0"><input type="checkbox" id="searchTw0Only" /> Tw=0 only</label>
+        <span id="searchNavShowing" class="hint"></span>
+      </section>
+      <section id="grids"></section>
+      <section id="searchResults" style="display:none">
+        <h3 style="margin:16px 0 6px; font-size:14px">Search results <span id="searchResultsCount" style="color:#888;font-weight:normal"></span></h3>
+        <div id="searchResultsTableWrap"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="fold.js"></script>
+  <script src="grid.js"></script>
+  <script src="search.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
