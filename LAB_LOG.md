@@ -41,12 +41,32 @@ sub-chain length) ports, and produce 3 examples each of 1+1+1 / 2+1.
 closed loop), `tiling_111_{1,2,3}.png` (non-closing 1+1+1 tilings — visually: starts clustered at
 the footprint, ends scattered to 3 far corners), `tiling_21.png`.
 
-**Next (decision pending with lead):** the square port reproduces all the *math* but reveals an
-existence/parity wall on small triangle grids. Options: (a) prove the parity obstruction as a
-theorem (no closing trapezoid-to-trapezoid 1+1+1 on triangles); (b) adapt the triangle
-footprint/exit model (different footprint shape, or translated/disconnected exit); (c) search
-much larger / specially-shaped grids for a closing fold; (d) accept the open-path twist as the PoC
-signal. See `TODO.md` research-extensions.
+**Adaptation attempts (2026-06-08, lead chose "adapt the model" + "try irregular grids"):**
+characterized the exit shape — on the hexagon the start trapezoid has pairwise dual-distances
+(1,1,2) but the 3 chain-ends sit at **(3,3,6)** (a *scale-3* spread), from the hexagon's C6
+symmetry. Tried (1) C2 "disk" regions (edge-midpoint centred, 14/24/28 balanced tris); (2) per
+the lead's irregular-grid idea, **free-roaming chains in a large ambient lattice — chains define
+their own irregular region, no pre-set shape** (the most general case). Results, all **0 closing**:
+- 1+1+1, free-roam, K up to 8, 6 footprints, **1.67M configs** exhausted → 0 closing.
+- 2+1 (rigid rhombus-ribbon + 1-chain, reduced strand loop), free-roam, K=6 (61k) and K=8 (1.18M
+  configs) → 0 closing.
+- For contrast, **2-stack closing works** (the 6-ring is exactly 2 disjoint paths between two
+  adjacent pairs → clean Tw=0). So the obstruction is specific to **≥3 chains sharing a footprint**.
+
+**Conclusion (robust): the square 3-stack fold does not transfer to the triangular lattice.**
+No closing 3-chain fold (1+1+1 or 2+1) exists up to K=8 over regular AND irregular regions, even
+though parity permits it ({c1,c1,c2}→{c2,c2,c1}) and the *math* (σ, reflection, closed-loop twist)
+ports exactly. Intuition: a 3-stack hub is a 3-cell trapezoid; for 3 disjoint chains to share a
+trapezoid hub at *both* ends, they must diverge then reconverge through the degree-3 honeycomb
+dual, which is too rigid (the degree-4 square grid reconverges — square ends form an L at the
+opposite corner; the honeycomb cannot). 2-stack (hub = an adjacent pair = any edge) is unaffected.
+
+**Next (decision pending with lead):** (a) try to PROVE the obstruction (a winding/twist or
+disjoint-path argument that ≥3 chains can't co-share a trapezoid hub at both ends on the honeycomb
+dual); (b) push K≥10 with a real disjoint-path-cover solver (brute force is exhausted); (c)
+reformulate triangle 3-stack with a different hub (e.g. fold onto a single triangle, or a
+hexagon-cell footprint, or a 3-fold-symmetric central hub instead of a theta graph). See
+`TODO.md`.
 
 ---
 
