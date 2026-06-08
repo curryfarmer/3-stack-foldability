@@ -87,13 +87,18 @@ hypotenuse + leg).
   hypotenuse+leg hub; the two-legs hub has none through 12). Higher than equilateral (10) and
   square (8) but NOT impossible — the "solid packing helps" bet was wrong (degree-3 dual with
   girth-4 square-cycles is more constrained, not less), yet it still closes by K=12.
-- **K=12 HL twist census (32 closing)**: **8 FOLDABLE (Tw=0), of which 2 are HOLE-FREE.** All
-  twists clean (multiples of 360, fractional=0); cocycle AC=AB+BC holds; histogram (0,0,0)×8 +
-  twisted (±720,0,±720)/(±720,±720,±1440)/(±720,∓720,0). **This is the first foldable AND
-  hole-free 3-stack fold found on any non-square grid** — the prize equilateral couldn't give ≤K=12.
-- Examples rendered: `report/tri/tetra_foldable_hf_{1,2}.png`.
+- **K=12 HL census (32 closing)**: 8 are Tw=0 (2 hole-free), all twists clean (cocycle AC=AB+BC
+  holds). **BUT side-matching (vector-reflection condition) fails on ALL 32** (`sidematch_scan.py`,
+  saved `results/tri_K12_hl_all.json`): every fold swaps `A·B long→short, B·C short→long`, so
+  **0/32 are physically valid**. Tw=0 is necessary but not sufficient on a tiling with unequal
+  (long hypotenuse / short leg) edges — the exit must rejoin each chain-pair on the same edge type
+  as the start. The swap is uniform → likely a forced invariant of the asymmetric HL hub; the
+  symmetric LL hub (both seams short) has no closing fold ≤12.
+- Examples (Tw=0 but side-swapped, not valid): `report/tri/tetra_foldable_hf_{1,2}.png`;
+  sheets `report/tri/tetra_foldsheet_{1,2}.png`.
 
-**Result: 45-45-90 supports foldable, hole-free 3-stack folds at K=12.** Done (modulo physical fold).
+**Result: 45-45-90 closes at K=12, but the genuine filter (Tw=0 + side-matching + hole-free) is
+NOT met there — valid threshold > 12.**
 
 ---
 
@@ -121,12 +126,18 @@ positively by 45-45-90.
 |------|------|------|-----------------|---------------------------|
 | square | quad | deg-4 | 8 | ≤8 (yes) |
 | equilateral | 60-60-60 | deg-3 honeycomb | 10 | none ≤12 (K=14 pending) |
-| 45-45-90 | tetrakis | deg-3 girth-4 | **12** (HL hub; LL=0 @12) | **12** (8 foldable, 2 hole-free) |
+| 45-45-90 | tetrakis | deg-3 girth-4 | **12** (HL hub; LL=0 @12) | Tw=0 @12 (8) but **0 side-match** |
 | 30-60-90 | kisrhombille | deg-3 | **>12** (K≤12 all 0) | — |
 
-**Headline:** closing 3-stack folds exist for square (8), equilateral (10), 45-45-90 (12) — NOT
-only quadrilaterals. *Foldable* (Tw=0) folds confirmed for square AND **45-45-90** (first non-square
-foldable+hole-free fold, K=12); equilateral still none ≤12 (K=14 pending).
+The **genuine foldability filter is Tw=0 AND side-matching AND hole-free** (side-matching = the
+vector-reflection condition: each chain-pair must rejoin on the same edge type at start and exit;
+automatic on equal-edge tilings square/equilateral, binding on the right-triangle tilings).
+
+**Headline:** *closing* folds exist for square (8), equilateral (10), 45-45-90 (12) — not
+quadrilateral-only at the closing level. But under the full filter, **only the square grid has a
+confirmed valid fold so far**: equilateral's are all twisted ≤K=12 (Tw=0 is K≥14), and all 45-45-90
+K=12 Tw=0 folds fail side-matching. So the quadrilateral-only question is open again, correctly
+scoped to the tightened filter.
 
 ---
 

@@ -4,7 +4,7 @@ Running log. Newest entry on top. Each entry: date, what was done, what was foun
 
 ---
 
-## 2026-06-08 — right-triangle grids: 45-45-90 gives a FOLDABLE + hole-free 3-stack fold
+## 2026-06-08 — right-triangle grids: Tw=0 folds exist on 45-45-90 but FAIL side-matching (filter tightened)
 
 Tested the other bipartite reflection (kaleidoscope) tilings — the only grids where a fold maps a
 tile onto its neighbour (every edge a mirror line). Complete single-tile set: square (done, K≥8),
@@ -14,26 +14,38 @@ equilateral (done, K≥10), **45-45-90** (tetrakis), **30-60-90** (kisrhombille)
 all dual edges, twist anchor Tw=0); `tritwist.loop_twist` generalized to take cent/σ callables;
 generic renderer `render_general.py`. Coverage recorded in `TEST_COVERAGE.md`.
 
-**45-45-90 (tetrakis) — the win.** Two hub types (LL = two-legs, HL = hyp+leg; both WLOG). Closing
-3-stack folds: 0 for K=2..11 (both hubs), **K=12 HL = 32 closing** (LL still 0). Census of the 32
-(all twists clean, fractional=0, cocycle AC=AB+BC holds): **8 FOLDABLE (Tw=0 on all loops), 2 of
-them HOLE-FREE** (simply-connected 36-tile region). This is the **first foldable + hole-free
-3-stack fold on any non-square grid** — equilateral has none through K=12 (its closing folds at
-K=10/12 are all twisted; foldable there is a K≥14 object). Rendered:
-`report/tri/tetra_foldable_hf_{1,2}.png`. So tetrakis is *higher-threshold* than equilateral (K=12
-vs 10) but actually *reaches foldability sooner* — the solid-square packing pays off for hole-free.
+**45-45-90 (tetrakis).** Two hub types (LL = two-legs, HL = hyp+leg; both WLOG). Closing 3-stack
+folds: 0 for K=2..11 (both hubs), **K=12 HL = 32 closing** (LL still 0). Census of the 32 (all
+twists clean, fractional=0, cocycle AC=AB+BC holds): 8 are Tw=0 on all loops, 2 hole-free.
+
+**CORRECTION — Tw=0 is NOT sufficient; side-matching (the vector-reflection condition) fails.**
+Lead's physical fold + vector-parity check flagged it. On unequal-edge tilings the exit footprint
+must reproduce *which edge type* each chain-pair meets on: the HL hub joins A·B on the **long**
+(hypotenuse) edge and B·C on the **short** (leg) edge at the start, so a valid fold must keep that
+at the exit (B central, A·B long, B·C short). **Result (`sidematch_scan.py`, all 32 closing folds
+saved `results/tri_K12_hl_all.json`): 0/32 side-match — every one swaps `A·B long→short,
+B·C short→long`.** So all 8 "foldable" K=12 folds are disqualified; tetrakis has **no valid
+(Tw=0 + side-matching) fold at K=12.** (On equilateral every edge is identical ⇒ side-matching is
+automatic, which is why it only surfaced here.) The swap is uniform (32/32) → looks structurally
+forced on the HL hub; the symmetric LL hub — where both seams are short, so matching is natural —
+has no closing fold until higher K. So the genuine filter is **Tw=0 AND side-matching AND
+hole-free**, and only the **square** grid satisfies all three so far.
 
 **30-60-90 (scalene).** 3 hub types; **K=2..12 all → 0 closing** (exhaustive) — threshold >12, the
 hardest grid; its finer barycentric structure (6 tiles/face, mixed 30/60/90 angles) delays
 reconvergence past where 45-45-90 (K=12) and equilateral (K=10) close. Not blocking — foldability
 is already shown on 45-45-90.
 
-**Takeaway.** 3-stack closing folds exist for square, equilateral AND 45-45-90 → *not* a
-quadrilateral-only phenomenon. Foldable (Tw=0) is confirmed for square and 45-45-90. The honest
-open question is whether *every* valid (bipartite reflection) tiling eventually admits a foldable
-fold — equilateral (K=14) and scalene (K=12+) are the next data points.
+**Takeaway.** *Closing* 3-stack folds exist for square, equilateral AND 45-45-90 → not
+quadrilateral-only at the closing level. But a *physically valid* fold needs **Tw=0 AND
+side-matching AND hole-free**, and with the side-matching filter added, **only the square grid
+qualifies so far** — every non-square candidate is still open. So the "quadrilateral-only" question
+is live again, now correctly scoped to the tightened filter.
 
-**Next:** finish scalene K=12; render/log; equilateral K=14; physically fold a 45-45-90 foldable.
+**Next:** (a) does the side-swap on tetrakis HL ever resolve (K=14/16), or is it a forced
+invariant (prove it)? (b) tetrakis LL hub at higher K — the symmetric hub where side-matching is
+natural; (c) equilateral K=14 (side-matching free there) for its first Tw=0; (d) bake the
+side-matching predicate into `count_closing`/the search so it filters from the start.
 
 ---
 
