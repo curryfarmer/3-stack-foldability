@@ -76,16 +76,15 @@ research extensions. Cross-references: `context.md` (Q1–Q7), `LAB_LOG.md` (fin
 ## Research extensions (lead)
 
 - [~] **Extend 3-stack ideas to right triangles, equilateral triangles, and hexagons.**
-      *Equilateral PoC done (2026-06-08, `py/tri/`):* the math ports exactly — bipartite σ
-      (UP/DOWN), `_reflect_point` folds, and the closed-loop twist (6-ring → all γ=120°, Tw=0,
-      clean) all verified. **Blocker found:** 3-stack tilings exist but never close to a
-      congruent exit footprint on small grids (0 closing 1+1+1 across 6 grids incl. hexagon
-      side-2) — a parity/geometry obstruction → the closed-loop twist criterion has no valid
-      instance yet. Decision pending (see LAB_LOG 2026-06-08 triangle entry): (a) prove the
-      obstruction as a theorem; (b) adapt the triangle footprint/exit model; (c) search larger
-      grids; (d) accept open-path twist as the PoC signal.
-      *Still TODO:* the original general port — generalised reflection geometry in
-      `fold.py`/`fold.js`, per-tiling footprint enumeration, σ/γ tables per polygon; right
-      triangles + hexagons-as-cells. The 2-stack reference programme builds these lattices
-      (`resources/twist_reference_code/kirigami-programme/python files/lattice.py`). Cf.
-      `context.md` Q5.
+      *Equilateral PoC done + SUCCEEDS (2026-06-08, `py/tri/`):* math ports exactly — bipartite σ
+      (UP/DOWN), `_reflect_point` folds, closed-loop twist (6-ring → γ=120°, Tw=0, clean) all
+      verified — and **closing 3-stack folds EXIST at K≥10** (proof-by-exhaustion: 0 closing for
+      K=2..9, 2 at K=10; the earlier "no closing fold" was a finite-size artifact of K≤8). The two
+      K=10 folds have clean twists (AB=±720, BC=∓720, AC=0) and are twisted → criterion discriminates.
+      *Next on triangles:* (a) find a *foldable* (all-loops Tw=0) example (search K=11/12 — both
+      K=10 cases are twisted); (b) port the 2+1 rhombus-ribbon reduction to K≥10; (c) physical
+      fold of a predicted example.
+      *Still TODO (general port):* generalised reflection geometry in `fold.py`/`fold.js`,
+      per-tiling footprint enumeration, σ/γ tables per polygon; right triangles + hexagons-as-cells.
+      2-stack reference builds these lattices
+      (`resources/twist_reference_code/kirigami-programme/python files/lattice.py`). Cf. `context.md` Q5.

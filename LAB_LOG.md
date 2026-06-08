@@ -21,7 +21,8 @@ sub-chain length) ports, and produce 3 examples each of 1+1+1 / 2+1.
   doubled), **Tw = 0**, a clean multiple of 360 — the triangle analog of "no 936° pathology".
   `tritwist.loop_twist` is the square `_pair_loop_twist` verbatim (atan2 odd/even σ-weighted).
 
-**The obstruction (a genuine negative result, not a port bug):**
+**The apparent obstruction at small K (SUPERSEDED — see CORRECTION below; closing folds exist at
+K≥10, this was a finite-size artifact of searching only K≤8):**
 - 3-stack TILINGS exist (e.g. 24 distinct 1+1+1 tilings on the hexagon side-2, K=8; 48 2+1
   rib+1-chain covers on the 2×3) — chains start at a trapezoid footprint and tile the region.
 - **But none CLOSE:** the three chain-ends never reform a congruent exit footprint. Tested across
@@ -53,19 +54,24 @@ their own irregular region, no pre-set shape** (the most general case). Results,
 - For contrast, **2-stack closing works** (the 6-ring is exactly 2 disjoint paths between two
   adjacent pairs → clean Tw=0). So the obstruction is specific to **≥3 chains sharing a footprint**.
 
-**Conclusion (robust): the square 3-stack fold does not transfer to the triangular lattice.**
-No closing 3-chain fold (1+1+1 or 2+1) exists up to K=8 over regular AND irregular regions, even
-though parity permits it ({c1,c1,c2}→{c2,c2,c1}) and the *math* (σ, reflection, closed-loop twist)
-ports exactly. Intuition: a 3-stack hub is a 3-cell trapezoid; for 3 disjoint chains to share a
-trapezoid hub at *both* ends, they must diverge then reconverge through the degree-3 honeycomb
-dual, which is too rigid (the degree-4 square grid reconverges — square ends form an L at the
-opposite corner; the honeycomb cannot). 2-stack (hub = an adjacent pair = any edge) is unaffected.
+**CORRECTION (2026-06-08, later): there is NO obstruction — the square 3-stack fold DOES transfer
+to triangles; closing folds just need K ≥ 10.** Lead asked to "prove the obstruction"; proof-by-
+exhaustion (`py/tri/prove_obstruction.py`, canonical hub WLOG by p6m-transitivity on trapezoids,
+mid-chain forced) found **0 closing folds for K = 2..9** but **2 closing folds at K = 10** — so the
+earlier "no closing fold" conclusion was a *finite-size artifact* (my free-roam search only reached
+K=8; the threshold is K=10, one above the square K≥8). The two K=10 folds are genuine: 3 vertex-
+disjoint length-10 chains, start AND end both trapezoids, region = 30-triangle irregular hexagon
+(`report/tri/fold_111_K10_{1,2}.png`). Their pairwise-loop twists are **clean** — AB=±720,
+BC=∓720, AC=0 (all multiples of 360, no fractional pathology) — and both are *twisted* (a loop
+carries ±720 ⇒ predicted non-foldable), so the twist criterion ports AND discriminates.
 
-**Next (decision pending with lead):** (a) try to PROVE the obstruction (a winding/twist or
-disjoint-path argument that ≥3 chains can't co-share a trapezoid hub at both ends on the honeycomb
-dual); (b) push K≥10 with a real disjoint-path-cover solver (brute force is exhausted); (c)
-reformulate triangle 3-stack with a different hub (e.g. fold onto a single triangle, or a
-hexagon-cell footprint, or a 3-fold-symmetric central hub instead of a theta graph). See
+**So the PoC SUCCEEDS:** lattice/σ/reflection/closed-loop-twist all port and verify, 2-stack
+closing works (6-ring), and 3-stack closing folds exist at K≥10 with clean, discriminating twist.
+The honeycomb dual *does* reconverge — it just needs longer chains than the square grid.
+
+**Next:** (a) find a *foldable* (all-loops Tw=0) triangle example (search K=11,12 — the 2 K=10
+cases are both twisted); (b) port the 2+1 rhombus-ribbon reduction to K≥10 and confirm it closes;
+(c) the original general engine port (per-tiling footprints, right-triangle/hexagon cells). See
 `TODO.md`.
 
 ---
