@@ -98,5 +98,35 @@
     "K": 12,
     "foldable": null,
     "notes": ""
+  },
+  {
+    "grid": "6x6",
+    "id": 13,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,1]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[1,1]],\"arrows\":[\"D\",\"L\",\"L\",\"U\",\"R\",\"U\",\"R\",\"U\",\"L\",\"L\",\"D\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[0,1]],\"arrows\":[\"U\",\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\",\"D\",\"R\",\"U\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 12,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x6",
+    "id": 18,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,1]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[1,1]],\"arrows\":[\"U\",\"R\",\"R\",\"D\",\"L\",\"D\",\"L\",\"D\",\"R\",\"R\",\"U\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[0,1]],\"arrows\":[\"D\",\"D\",\"R\",\"R\",\"R\",\"R\",\"R\",\"U\",\"U\",\"L\",\"D\"]}]}",
+    "shape": "L",
+    "orient": "V",
+    "K": 12,
+    "foldable": null,
+    "notes": ""
+  },
+  {
+    "grid": "6x7",
+    "id": 8,
+    "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,1]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[1,1]],\"arrows\":[\"D\",\"L\",\"L\",\"L\",\"U\",\"R\",\"R\",\"U\",\"R\",\"U\",\"L\",\"L\",\"D\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[0,1]],\"arrows\":[\"U\",\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\",\"D\",\"R\",\"U\",\"R\"]}]}",
+    "shape": "L",
+    "orient": "H",
+    "K": 14,
+    "foldable": null,
+    "notes": ""
   }
 ]

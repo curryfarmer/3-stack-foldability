@@ -38,6 +38,10 @@ CURATED = [
     ("6x5", 1), ("6x5", 2), ("6x5", 3), ("6x5", 4), ("6x5", 5),  # K=10, suspected non-foldables
     ("6x6", 7), ("6x6", 1),                          # K=12 cross-check (L-H / L-V)
     ("9x4", 8),                                      # K=12, Rect footprint
+    # predicted NEGATIVES by the 2+1 canonical-strand twist criterion (2026-06-07,
+    # py/analyze_2plus1_reduction.py): canonical Tw=±720 — these test the criterion's
+    # twisted predictions; everything above is predicted FOLDABLE (canonical Tw=0).
+    ("6x6", 13), ("6x6", 18), ("6x7", 8),
 ]
 
 
@@ -141,7 +145,7 @@ def render(pat, out_path):
     for i, (color, ls, lab) in enumerate(legend_items):
         ly = yy + i * 0.6
         dash = (3, 2.2) if ls == "dash" else None
-        kw = dict(color=color, lw=2.8, zorder=10)
+        kw = dict(color=color, lw=2.8, zorder=10, clip_on=False)  # legend sits outside xlim
         if dash:
             kw["dashes"] = dash
         ax.plot([tx, tx + 0.55], [ly, ly], **kw)

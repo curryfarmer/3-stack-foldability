@@ -213,15 +213,16 @@ def node(ax, c, r=0.10, color=None, z=8, label=None, fs=11, lab_dy=0.0):
 
 
 def legend(ax, items, x, y, dy=0.42, fs=11):
-    """items: list of (color, linestyle, label). linestyle in {'solid','dash','dot','fill'}."""
+    """items: list of (color, linestyle, label). linestyle in {'solid','dash','dot','fill'}.
+    Swatches use clip_on=False so legends placed outside the data limits still render."""
     for i, (color, ls, lab) in enumerate(items):
         yy = y - i * dy
         if ls == "fill":
             ax.add_patch(Rectangle((x, yy - 0.12), 0.34, 0.24, facecolor=color,
-                                   edgecolor="none", zorder=10))
+                                   edgecolor="none", zorder=10, clip_on=False))
         else:
             dash = {"solid": None, "dash": (5, 3), "dot": (1, 2.2)}[ls]
-            kw = dict(color=color, linewidth=2.6, zorder=10)
+            kw = dict(color=color, linewidth=2.6, zorder=10, clip_on=False)
             if dash:
                 kw["dashes"] = dash
             ax.plot([x, x + 0.34], [yy, yy], **kw)
