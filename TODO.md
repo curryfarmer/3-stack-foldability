@@ -81,9 +81,12 @@ research extensions. Cross-references: `context.md` (Q1–Q7), `LAB_LOG.md` (fin
       verified — and **closing 3-stack folds EXIST at K≥10** (proof-by-exhaustion: 0 closing for
       K=2..9, 2 at K=10; the earlier "no closing fold" was a finite-size artifact of K≤8). The two
       K=10 folds have clean twists (AB=±720, BC=∓720, AC=0) and are twisted → criterion discriminates.
-      *Next on triangles:* (a) find a *foldable* (all-loops Tw=0) example (search K=11/12 — both
-      K=10 cases are twisted); (b) port the 2+1 rhombus-ribbon reduction to K≥10; (c) physical
-      fold of a predicted example.
+      *Next on triangles:* (a) find a *foldable* (all-loops Tw=0) example — K=12 hole-free hunt
+      running (`py/tri/hunt_foldable.py`, ~30 min); if empty, **K=14 (even only) is the next
+      target — NOT today**: brute force is ~19 h (40×/+2K growth, ~280K it/s), so first write a
+      smarter disjoint-path solver (target a translated/rotated exit hub + prune dead branches +
+      exploit forced mid-chain/symmetry) → likely a few hours, then run overnight.
+      (b) port the 2+1 rhombus-ribbon reduction to K≥10; (c) physical fold of a predicted example.
       *Still TODO (general port):* generalised reflection geometry in `fold.py`/`fold.js`,
       per-tiling footprint enumeration, σ/γ tables per polygon; right triangles + hexagons-as-cells.
       2-stack reference builds these lattices
