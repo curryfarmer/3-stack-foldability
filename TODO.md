@@ -75,10 +75,17 @@ research extensions. Cross-references: `context.md` (Q1–Q7), `LAB_LOG.md` (fin
 
 ## Research extensions (lead)
 
-- [ ] **Extend 3-stack ideas to right triangles, equilateral triangles, and hexagons.**
-      The 2-stack reference programme already builds these lattices + dual graphs
-      (`resources/twist_reference_code/kirigami-programme/python files/lattice.py`; worked
-      examples in `plots/`); the paper gives γ = ±2π/3 for triangles. Needs: generalised
-      reflection geometry in `fold.py`/`fold.js`, footprint enumeration per tiling, and the
-      twist σ/γ tables per polygon. Cf. `context.md` Q5 (deferred until square-grid Q1–Q4
-      settle — Q1 is now criterion-complete pending physical labels).
+- [~] **Extend 3-stack ideas to right triangles, equilateral triangles, and hexagons.**
+      *Equilateral PoC done (2026-06-08, `py/tri/`):* the math ports exactly — bipartite σ
+      (UP/DOWN), `_reflect_point` folds, and the closed-loop twist (6-ring → all γ=120°, Tw=0,
+      clean) all verified. **Blocker found:** 3-stack tilings exist but never close to a
+      congruent exit footprint on small grids (0 closing 1+1+1 across 6 grids incl. hexagon
+      side-2) — a parity/geometry obstruction → the closed-loop twist criterion has no valid
+      instance yet. Decision pending (see LAB_LOG 2026-06-08 triangle entry): (a) prove the
+      obstruction as a theorem; (b) adapt the triangle footprint/exit model; (c) search larger
+      grids; (d) accept open-path twist as the PoC signal.
+      *Still TODO:* the original general port — generalised reflection geometry in
+      `fold.py`/`fold.js`, per-tiling footprint enumeration, σ/γ tables per polygon; right
+      triangles + hexagons-as-cells. The 2-stack reference programme builds these lattices
+      (`resources/twist_reference_code/kirigami-programme/python files/lattice.py`). Cf.
+      `context.md` Q5.

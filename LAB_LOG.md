@@ -4,6 +4,52 @@ Running log. Newest entry on top. Each entry: date, what was done, what was foun
 
 ---
 
+## 2026-06-08 — triangle-lattice PoC (extend 3-stack to equilateral triangles)
+
+New self-contained module `py/tri/` (lattice / fold / twist / search / render + `run_poc.py`),
+run via `.\.venv\Scripts\python.exe`. Region = triangular lattice, bipartite by orientation
+(UP σ=+1, DOWN σ=−1). Goal: test whether the square machinery (twist `Tw=0`, vector reflection,
+sub-chain length) ports, and produce 3 examples each of 1+1+1 / 2+1.
+
+**What ported + verified (the math transfers exactly):**
+- Lattice + bipartite σ: 12-tri parallelogram and 24-tri hexagon built; every dual edge joins
+  UP↔DOWN (σ alternates) — the triangle analog of the square checkerboard, verified.
+- Reflection geometry: reusing `py/twostack.py _reflect_point`, all 26 directed dual adjacencies
+  reflect a triangle exactly onto its neighbor (tol 1e-9) — folding across a triangle edge = the
+  dual move, confirmed.
+- Closed-loop twist: the 6-triangle ring around an interior vertex gives every γ = 120° (60° turn
+  doubled), **Tw = 0**, a clean multiple of 360 — the triangle analog of "no 936° pathology".
+  `tritwist.loop_twist` is the square `_pair_loop_twist` verbatim (atan2 odd/even σ-weighted).
+
+**The obstruction (a genuine negative result, not a port bug):**
+- 3-stack TILINGS exist (e.g. 24 distinct 1+1+1 tilings on the hexagon side-2, K=8; 48 2+1
+  rib+1-chain covers on the 2×3) — chains start at a trapezoid footprint and tile the region.
+- **But none CLOSE:** the three chain-ends never reform a congruent exit footprint. Tested across
+  6 grids (parallelograms 2×3/4×3/5×3/3×5/4×6, hexagon side-2, big triangle side-6): **closing
+  1+1+1 = 0 everywhere.** On every hexagon tiling the 3 ends are pairwise non-adjacent (degrees
+  0,0,0); the 2+1 has 0 covers with both hubs adjacent.
+- Cause = parity/geometry: a trapezoid footprint is color {c1,c1,c2}; even-K paths flip color, so
+  ends are {c2,c2,c1}, and the lone c1 end is never adjacent to both c2 ends on small grids.
+  Also: parallelograms' honeycomb dual is too thin to host 3 disjoint equal paths at all; big
+  triangles are color-unbalanced (#UP−#DOWN = s) so no balanced 1+1+1. The hexagon is the only
+  balanced+fat small region, and it tiles but does not close.
+- Consequence: the closed-loop twist CRITERION needs the loop's 2nd hub (the exit footprint);
+  with no closing tiling, the pairwise-loop twist is fractional (e.g. AB=−404, BC=+404, AC=−240
+  on a hex tiling) — i.e. undefined, exactly as expected for an open seam.
+
+**Figures** (`report/tri/`): `lattice_hex2.png` (bipartite σ), `ring_twist.png` (verified Tw=0
+closed loop), `tiling_111_{1,2,3}.png` (non-closing 1+1+1 tilings — visually: starts clustered at
+the footprint, ends scattered to 3 far corners), `tiling_21.png`.
+
+**Next (decision pending with lead):** the square port reproduces all the *math* but reveals an
+existence/parity wall on small triangle grids. Options: (a) prove the parity obstruction as a
+theorem (no closing trapezoid-to-trapezoid 1+1+1 on triangles); (b) adapt the triangle
+footprint/exit model (different footprint shape, or translated/disconnected exit); (c) search
+much larger / specially-shaped grids for a closing fold; (d) accept the open-path twist as the PoC
+signal. See `TODO.md` research-extensions.
+
+---
+
 ## 2026-06-08 — consolidated session report
 
 Theme: hardening the 2+1 twist criterion. Three findings, one experiment designed. Test bed
