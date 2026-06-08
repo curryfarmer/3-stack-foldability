@@ -69,10 +69,21 @@ carries ±720 ⇒ predicted non-foldable), so the twist criterion ports AND disc
 closing works (6-ring), and 3-stack closing folds exist at K≥10 with clean, discriminating twist.
 The honeycomb dual *does* reconverge — it just needs longer chains than the square grid.
 
-**Next:** (a) find a *foldable* (all-loops Tw=0) triangle example (search K=11,12 — the 2 K=10
-cases are both twisted); (b) port the 2+1 rhombus-ribbon reduction to K≥10 and confirm it closes;
-(c) the original general engine port (per-tiling footprints, right-triangle/hexagon cells). See
-`TODO.md`.
+**K=12 census (exhaustive, `py/tri/hunt_tw0.py`, 476M iters, canonical hub WLOG):** 94 closing
+folds, **all twisted, 0 foldable**. Twist spectrum (all clean multiples of 720, no fractional —
+even K): (+720,−720,0)×39, (−720,+720,0)×39, (+720,+720,+1440)×8, (−720,−720,−1440)×8. Two facts:
+(i) the **theta cocycle AC = AB + BC holds exactly** in all 94 (cycle rank 2, AC dependent — the
+twist algebra ports); (ii) the clean arm–mid loops **AB, BC are always ±720, never 0**, so Tw=0 is
+impossible at K≤12. Also `py/tri/hunt_foldable.py`: all 94 K=12 closing folds **have holes** (0
+hole-free) — the theta graph encloses 2 bounded faces that width-1 chains can't fill until they are
+long enough to weave (like the square 6×4 solid tiling). **Conclusion: a *foldable* (Tw=0) and/or
+*hole-free* triangle 1+1+1 fold is a K≥14 object; everything K≤12 is twisted AND holey.**
+
+**Next:** (a) **K=14 (even, ~42 triangles)** is the real target for foldable + hole-free — brute
+force ~19 h (40×/+2K, ~280K it/s), so first write a targeted disjoint-path solver (translated/
+rotated exit hub + prune dead branches + forced mid-chain/symmetry); run overnight. (b) port the
+2+1 rhombus-ribbon reduction to K≥10; (c) general engine port (per-tiling footprints, right-tri/
+hexagon cells). See `TODO.md`.
 
 ---
 
