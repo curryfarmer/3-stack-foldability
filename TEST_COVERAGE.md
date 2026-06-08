@@ -105,10 +105,13 @@ inequivalent hub types (omitVM / omitMG / omitVG, by which neighbour-edge the mi
 
 - **Lattice verified**: bipartite OK; reflect-to-neighbor exact on all 264 dual edges (genuine
   foldable reflection tiling); face 6-ring twist anchor γ=120°, Tw=0 clean.
-- **Existence — all 3 hub types**: K=2..10 → **0 closing**. K=11,12 scan IN PROGRESS.
+- **Existence — all 3 hub types**: **K=2..12 → 0 closing** (exhaustive, ambient 2K+6). So the
+  scalene threshold is **> 12** — the hardest of the four grids so far. Contrast 45-45-90 (also a
+  right triangle, also degree-3) which closes at K=12: the kisrhombille's finer barycentric
+  structure (6 tiles/face, mixed 30/60/90 angles, 3 hub classes) pushes reconvergence past K=12.
 
-**Pending:** K=11,12 results; if all 0, this + 45-45-90 = both right-triangle tilings empty
-through K=12 (while equilateral closes at K=10) → strong signal the difficulty is geometry-specific.
+**Pending:** K≥13 (or accept >12); not blocking — the foldability question is already answered
+positively by 45-45-90.
 
 ---
 
@@ -119,7 +122,7 @@ through K=12 (while equilateral closes at K=10) → strong signal the difficulty
 | square | quad | deg-4 | 8 | ≤8 (yes) |
 | equilateral | 60-60-60 | deg-3 honeycomb | 10 | none ≤12 (K=14 pending) |
 | 45-45-90 | tetrakis | deg-3 girth-4 | **12** (HL hub; LL=0 @12) | **12** (8 foldable, 2 hole-free) |
-| 30-60-90 | kisrhombille | deg-3 | **>10** (K=11,12 pending) | — |
+| 30-60-90 | kisrhombille | deg-3 | **>12** (K≤12 all 0) | — |
 
 **Headline:** closing 3-stack folds exist for square (8), equilateral (10), 45-45-90 (12) — NOT
 only quadrilaterals. *Foldable* (Tw=0) folds confirmed for square AND **45-45-90** (first non-square

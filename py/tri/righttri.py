@@ -42,8 +42,12 @@ def _edges(verts):
     return [frozenset((a, b)), frozenset((b, c)), frozenset((c, a))]
 
 
+def tile_cart(tid):
+    return [vcart(v) for v in tile_vertices(tid)]
+
+
 def centroid(tid):
-    vs = [vcart(v) for v in tile_vertices(tid)]
+    vs = tile_cart(tid)
     return (sum(p[0] for p in vs) / 3.0, sum(p[1] for p in vs) / 3.0)
 
 

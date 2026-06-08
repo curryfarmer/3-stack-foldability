@@ -23,7 +23,10 @@ K=10/12 are all twisted; foldable there is a K≥14 object). Rendered:
 `report/tri/tetra_foldable_hf_{1,2}.png`. So tetrakis is *higher-threshold* than equilateral (K=12
 vs 10) but actually *reaches foldability sooner* — the solid-square packing pays off for hole-free.
 
-**30-60-90 (scalene).** 3 hub types; K=2..11 all → 0 closing; K=12 in progress.
+**30-60-90 (scalene).** 3 hub types; **K=2..12 all → 0 closing** (exhaustive) — threshold >12, the
+hardest grid; its finer barycentric structure (6 tiles/face, mixed 30/60/90 angles) delays
+reconvergence past where 45-45-90 (K=12) and equilateral (K=10) close. Not blocking — foldability
+is already shown on 45-45-90.
 
 **Takeaway.** 3-stack closing folds exist for square, equilateral AND 45-45-90 → *not* a
 quadrilateral-only phenomenon. Foldable (Tw=0) is confirmed for square and 45-45-90. The honest
