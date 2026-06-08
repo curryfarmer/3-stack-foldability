@@ -28,27 +28,32 @@ def signed_turn_deg(p1, p2, p3):
     return math.degrees(math.atan2(cross, dot))
 
 
-def loop_twist(loop_tids):
-    """Closed loop of triangle ids -> dict with sigma-weighted twist (deg) + diagnostics.
+def loop_twist(loop_tids, cent=None, sigma=None):
+    """Closed loop of tile ids -> dict with sigma-weighted twist (deg) + diagnostics.
+
+    `cent`/`sigma` are callables tid->centroid / tid->+-1; default to the equilateral-triangle
+    lattice, so any other reflection tiling (e.g. righttri) just passes its own.
 
     Tw_sigma   = sum_k sigma(tri_k) * gamma_k          (the physical twist)
     Tw_index   = sum_k (-1)^k * gamma_k                 (index-parity bucketing; == +/-Tw_sigma
                                                           iff sigma strictly alternates round loop)
     gamma_k    = 2 * signed_turn at vertex k (cyclic)
     """
+    cent = cent or TL.centroid
+    sigma = sigma or TL.sigma
     n = len(loop_tids)
-    cents = [TL.centroid(t) for t in loop_tids]
+    cents = [cent(t) for t in loop_tids]
     gammas, sigs = [], []
     tw_sigma = tw_index = 0.0
     for k in range(n):
         p1, p2, p3 = cents[(k - 1) % n], cents[k], cents[(k + 1) % n]
         g = 2.0 * signed_turn_deg(p1, p2, p3)
-        s = TL.sigma(loop_tids[k])
+        s = sigma(loop_tids[k])
         gammas.append(round(g, 3))
         sigs.append(s)
         tw_sigma += s * g
         tw_index += (1 if k % 2 == 0 else -1) * g
-    alternates = all(TL.sigma(loop_tids[k]) != TL.sigma(loop_tids[(k + 1) % n]) for k in range(n))
+    alternates = all(sigma(loop_tids[k]) != sigma(loop_tids[(k + 1) % n]) for k in range(n))
     return {
         "Tw": round(tw_sigma, 3),
         "Tw_index": round(tw_index, 3),

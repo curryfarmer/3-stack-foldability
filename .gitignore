@@ -12,3 +12,6 @@ report/node_modules/
 
 # Personal local Claude settings (machine-specific; keep out of the repo)
 .claude/settings.local.json
+
+# tri scan logs
+py/tri/_*.log
