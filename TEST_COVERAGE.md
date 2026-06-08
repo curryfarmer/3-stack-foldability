@@ -83,14 +83,47 @@ hypotenuse + leg).
 - **Lattice verified (3×3 = 36 tiles)**: bipartite OK; reflect-to-neighbor exact on all 96 dual
   edges (genuine foldable reflection tiling); 4-ring twist anchor γ=−180°, Tw=0 clean.
 - **Existence — exhaustive from canonical hub, both LL+HL (corrected ambient 2K+4)**:
-  **K=2..11 (odd AND even) → 0 closing.** Both hub types complete (LL+HL = WLOG: *442 is transitive
-  on tiles and the 2 legs are mirror-symmetric). So the 45-45-90 threshold is **> 11** — *harder*
-  than equilateral (10) and square (8), despite tiling solid squares (the "solid packing helps"
-  bet was wrong; the degree-3 dual with girth-4 squares is more constrained, not less).
-- **K=12 scan**: IN PROGRESS (background).
+  K=2..11 (odd AND even) → 0; **K=12: LL=0, HL=32 closing**. So **first closing K = 12** (on the
+  hypotenuse+leg hub; the two-legs hub has none through 12). Higher than equilateral (10) and
+  square (8) but NOT impossible — the "solid packing helps" bet was wrong (degree-3 dual with
+  girth-4 square-cycles is more constrained, not less), yet it still closes by K=12.
+- **K=12 HL twist census (32 closing)**: **8 FOLDABLE (Tw=0), of which 2 are HOLE-FREE.** All
+  twists clean (multiples of 360, fractional=0); cocycle AC=AB+BC holds; histogram (0,0,0)×8 +
+  twisted (±720,0,±720)/(±720,±720,±1440)/(±720,∓720,0). **This is the first foldable AND
+  hole-free 3-stack fold found on any non-square grid** — the prize equilateral couldn't give ≤K=12.
+- Examples rendered: `report/tri/tetra_foldable_hf_{1,2}.png`.
 
-**Pending:** K=12+ existence (find/confirm threshold or an obstruction); twist census + hole-free at
-threshold; render examples.
+**Result: 45-45-90 supports foldable, hole-free 3-stack folds at K=12.** Done (modulo physical fold).
+
+---
+
+## 30-60-90 right-triangle (kisrhombille *632) lattice (`py/tri/scalene.py`) — in progress
+
+Barycentric subdivision of the equilateral lattice (each face → 6 right-scalene tiles
+{vertex, edge-midpoint, centroid}). Bipartite σ = orientation. γ ∈ {0,±60,±120,±180}. Three
+inequivalent hub types (omitVM / omitMG / omitVG, by which neighbour-edge the mid-chain exits).
+
+- **Lattice verified**: bipartite OK; reflect-to-neighbor exact on all 264 dual edges (genuine
+  foldable reflection tiling); face 6-ring twist anchor γ=120°, Tw=0 clean.
+- **Existence — all 3 hub types**: K=2..10 → **0 closing**. K=11,12 scan IN PROGRESS.
+
+**Pending:** K=11,12 results; if all 0, this + 45-45-90 = both right-triangle tilings empty
+through K=12 (while equilateral closes at K=10) → strong signal the difficulty is geometry-specific.
+
+---
+
+## Running threshold table (first K with a closing 3-stack fold)
+
+| grid | tile | dual | first closing K | first *foldable* (Tw=0) K |
+|------|------|------|-----------------|---------------------------|
+| square | quad | deg-4 | 8 | ≤8 (yes) |
+| equilateral | 60-60-60 | deg-3 honeycomb | 10 | none ≤12 (K=14 pending) |
+| 45-45-90 | tetrakis | deg-3 girth-4 | **12** (HL hub; LL=0 @12) | **12** (8 foldable, 2 hole-free) |
+| 30-60-90 | kisrhombille | deg-3 | **>10** (K=11,12 pending) | — |
+
+**Headline:** closing 3-stack folds exist for square (8), equilateral (10), 45-45-90 (12) — NOT
+only quadrilaterals. *Foldable* (Tw=0) folds confirmed for square AND **45-45-90** (first non-square
+foldable+hole-free fold, K=12); equilateral still none ≤12 (K=14 pending).
 
 ---
 

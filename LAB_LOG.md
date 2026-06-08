@@ -4,6 +4,36 @@ Running log. Newest entry on top. Each entry: date, what was done, what was foun
 
 ---
 
+## 2026-06-08 — right-triangle grids: 45-45-90 gives a FOLDABLE + hole-free 3-stack fold
+
+Tested the other bipartite reflection (kaleidoscope) tilings — the only grids where a fold maps a
+tile onto its neighbour (every edge a mirror line). Complete single-tile set: square (done, K≥8),
+equilateral (done, K≥10), **45-45-90** (tetrakis), **30-60-90** (kisrhombille). Mixed-tile
+(kagome) and hexagon-cells excluded (no tile→tile fold / dual not bipartite). New modules
+`py/tri/righttri.py`, `py/tri/scalene.py` (both verified: bipartite, reflect-to-neighbour exact on
+all dual edges, twist anchor Tw=0); `tritwist.loop_twist` generalized to take cent/σ callables;
+generic renderer `render_general.py`. Coverage recorded in `TEST_COVERAGE.md`.
+
+**45-45-90 (tetrakis) — the win.** Two hub types (LL = two-legs, HL = hyp+leg; both WLOG). Closing
+3-stack folds: 0 for K=2..11 (both hubs), **K=12 HL = 32 closing** (LL still 0). Census of the 32
+(all twists clean, fractional=0, cocycle AC=AB+BC holds): **8 FOLDABLE (Tw=0 on all loops), 2 of
+them HOLE-FREE** (simply-connected 36-tile region). This is the **first foldable + hole-free
+3-stack fold on any non-square grid** — equilateral has none through K=12 (its closing folds at
+K=10/12 are all twisted; foldable there is a K≥14 object). Rendered:
+`report/tri/tetra_foldable_hf_{1,2}.png`. So tetrakis is *higher-threshold* than equilateral (K=12
+vs 10) but actually *reaches foldability sooner* — the solid-square packing pays off for hole-free.
+
+**30-60-90 (scalene).** 3 hub types; K=2..11 all → 0 closing; K=12 in progress.
+
+**Takeaway.** 3-stack closing folds exist for square, equilateral AND 45-45-90 → *not* a
+quadrilateral-only phenomenon. Foldable (Tw=0) is confirmed for square and 45-45-90. The honest
+open question is whether *every* valid (bipartite reflection) tiling eventually admits a foldable
+fold — equilateral (K=14) and scalene (K=12+) are the next data points.
+
+**Next:** finish scalene K=12; render/log; equilateral K=14; physically fold a 45-45-90 foldable.
+
+---
+
 ## 2026-06-08 — triangle-lattice PoC (extend 3-stack to equilateral triangles)
 
 New self-contained module `py/tri/` (lattice / fold / twist / search / render + `run_poc.py`),
