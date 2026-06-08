@@ -22,10 +22,10 @@ MNT, VLY, CUT = "#d83232", "#3399cc", "#2a8"
 def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_name, K):
     region = sorted(set().union(*[set(c) for c in chains]))
     sub = LatClass(cells=region)
-    crease = {}                                  # frozenset(a,b) -> sigma of the "from" tile
+    crease = {}                                  # shared-edge (vertex keys) -> sigma of "from" tile
     for w in chains:
         for k in range(len(w) - 1):
-            crease[frozenset((w[k], w[k + 1]))] = sigma(w[k])
+            crease[sub.shared[(w[k], w[k + 1])]] = sigma(w[k])
     edge_owners = {}
     for t in region:
         for e in sub.edges[t]:
