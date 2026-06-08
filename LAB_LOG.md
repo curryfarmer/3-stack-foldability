@@ -4,6 +4,133 @@ Running log. Newest entry on top. Each entry: date, what was done, what was foun
 
 ---
 
+## 2026-06-08 — consolidated session report
+
+Theme: hardening the 2+1 twist criterion. Three findings, one experiment designed. Test bed
+for all computational claims: **every cached 2+1 solution — 303 across 7 grids** (6×4:2,
+6×5:5×2 files, 6×6:14×2 files, 6×7:41, 8×6:129, 9×4:11, 12×4:82), replayed from
+`results/*.json` via `py/fold.py`, twist via the shipped `_pair_loop_twist` primitive
+(itself validated 2026-06-07: oracle 936/936 on stored 1+1+1 pairwise twists + paper 2×4 /
+3×3-hole cases). All checks are read-only post-processing; no engine change. Physical
+ground truth still pending (`results/twoplus1_labels.json` all-null).
+
+**Finding 1 — "Filled" half-tile reduction: the strand loop made honest; recipe finalized.**
+*Claim.* Lead objection: kept-strand 3-jumps are not panel-adjacent ⇒ strand "loop" isn't a
+true loop. Fix: **fill each 3-jump through the two holes it skips** (= twin strand's old+new
+cells, `P_k→Q_k→Q_{k+1}→P_{k+1}`). Lemma: inserted vertices are collinear (γ=0, contribute
+nothing) and shift later indices by 2 (σ phase preserved) ⇒ **Tw(filled) ≡ Tw(jump)**.
+*Verified by.* Per-solution assertions over all 303: unit-seam strand exists 303/303; filled
+loop every step unit incl. seams+wrap 303/303; fills land only on holes + path simple (no
+revisit) 303/303; loop length even 303/303; **Tw(filled) == Tw(jump) exactly 303/303**;
+verdict histogram unchanged {0: 292, ±720: 11}.
+*Consequence.* The filled loop is a genuine closed unit-step panel loop on the holey grid ⇒
+the RSPA 2-stack theorem applies verbatim — no ansatz left in the strand model. Canonical
+rule tightened from "non-DIAG strand" to **unit-seam strand** (base edge-adjacent to the
+1-chain base; Rect 2JMP seams would need a single-cell insertion = odd index shift = σ-phase
+break). Final recipe: (1) keep adjacent strand, (2) delete twin → holes, (3) fill 3-jumps,
+(4) close with reversed 1-chain + unit hub seams; foldable ⟺ Tw=0. Bonus: the fill's ribbon
+zigzag recovers a partial per-panel HC order of the 2-chain — the old "2-chain inverse
+problem" largely dissolves.
+
+**Finding 2 — Hub-exception domino tiling (lead's proposal): angle issue resolved, but it is
+a THIRD inequivalent invariant.**
+*Claim.* Keep the domino-level (centroid) body but connect at each hub through the single
+tile adjacent to the 1-chain (2×1→1×1 transition). The cell-center↔centroid offset is ±0.5
+purely along the domino axis ⇒ inserting it as an axis-aligned half-step removes all
+fractional angles.
+*Verified by.* Same 303-solution sweep: hybrid loop all steps axis-aligned 303/303;
+**0 loops with fractional turns** (the ±212.52° = 4·2·atan(½) centroid-seam artifact is
+gone). BUT **Tw(hybrid) ≠ Tw(strand) on 16/303**, differences all full twists
+(−720×12, +720×3, +1440×1); hybrid flags 20 twisted vs strand's 11; on 8×6 #265 hybrid says
++720 where strand AND pure-centroid both say −720.
+*Conclusion.* Angle-clean ≠ equivalent: the junction framing carries real turn content. The
+hybrid is a third distinct invariant, still an ansatz (centroid vertices are not panels,
+half-steps are not panel adjacencies), whereas the filled strand is theorem-grade.
+
+**Finding 3 — Model-selection experiment designed; sheets ready.**
+The strand-vs-hybrid conflicts land on already-printed sheets, giving a direct physical
+discriminator with zero new fabrication. Priority folds (PNG + PDF in `report/foldsheets/`,
+outcome table in `TODO.md`): **6×5 #1** (strand FOLD / hybrid JAM), **6×7 #8** (strand JAM /
+hybrid FOLD), **6×6 #13** (both JAM — model-independent test of the twist criterion),
+**6×6 #7** (both FOLD — positive control). Outcomes: (fold,jam) ⇒ strand wins; (jam,fold) ⇒
+hybrid wins; (fold,fold) ⇒ both invariants wrong; (jam,jam) ⇒ both partially right, sharper
+theory needed. Verdicts go in `results/twoplus1_labels.json` per `FOLDING.md`.
+
+*Artifacts this session:* fill-recipe + hybrid validation runs (inline, reproducible against
+`py/analyze_2plus1_reduction.py` helpers); `hypothesis_2plus1_reduction.md` §3b (loop-repair
+lemma + tightened canonical rule); priority-fold PNGs `{6x5_1,6x7_8,6x6_13,6x6_7}.png`;
+`TODO.md` priority-folds section.
+
+## 2026-06-07
+
+**Foldsheets regenerated (13 cases) + positive validation case chosen + `TODO.md` created.**
+Lead requested one 6×6 2+1 predicted-foldable pattern → **6×6 #7** (L, 2chain-H, K=12;
+canonical strand P unit/unit, Tw=0; self-checks clean). Re-rendered the curated make-sheets on
+this machine (`report/foldsheets/`, was empty here) **adding the 3 predicted NEGATIVES**
+(6×6 #13/#18, 6×7 #8, canonical Tw=±720) so hand-folding tests the criterion both ways;
+`results/twoplus1_labels.json` template now 13 entries (all null). `6x6_7.png` rendered for
+reference. Python deps now live in `.venv/` (matplotlib; gitignored). New `TODO.md` holds the
+validation queue + lead's additions (clean up 3-stack code; physically exhaust 6×5; physical
+models for bipartite-tiling necessity; extend to right/equilateral triangles + hexagons).
+NB: criterion predicts **all five 6×5 2+1 fold** — opposite of the prior suspicion; those
+sheets are the highest-information folds. Also new: `py/render_reduction.py` draws the
+half-tile-reduced view of any 2+1 case (holey grid, kept-strand walk, ghost deleted strand,
+hub seams, σ marks) — `report/foldsheets/6x6_7_reduced.png` rendered for #7; fixed a latent
+legend-clipping bug (`clip_on`) in `make_foldsheets.py`/`explainer/lib.py` and re-rendered
+all 13 sheets.
+
+**Q1 2+1 — strand reduction VALIDATED on cache (canonical-strand rule); §5.1 strand-equivalence
+DISPROVED; domino-bipartite variant subsumed. New `py/analyze_2plus1_reduction.py`** (303 2+1
+sols across 6×4/6×5/6×6/6×7/8×6/9×4/12×4; oracle: trivial reduction on 1+1+1 reproduces all 936
+stored pairwise twists).
+- **Reduction preconditions all hold (303/303 self-checks)** but two §2 claims in
+  `hypothesis_2plus1_reduction.md` are FALSE as stated: strand steps are **{1,3}** not unit
+  (along-axis folds throw the far strand by 3), and `Q = P + fixed d` fails (d flips sign each
+  along-axis fold — strands swap sides; `reflect_cells` preserves list order, so cells[0]/[1] do
+  track material halves). Salvaged invariants: axis-aligned odd-length steps ⇒ checkerboard
+  alternation intact, turns ∈ 90°·ℤ ⇒ twist physical. The 936° centroid pathology is gone.
+- **§5.1 disproved → canonical-strand rule confirmed:** P/Q verdicts disagree 66/303. The
+  DIAG-seam strand (L footprint, strand diagonal to the 1-chain base) carries a quantized
+  **±360 (half-twist) seam artifact**: `tw_DIAG − tw_canon ∈ {0,±360}` in all 201 single-DIAG
+  cases, never anything else. **Canonical strand = the non-DIAG one** (edge-adjacent to the
+  1-chain base; the doc's own fallback rule). Canonical loop is always physical:
+  tw ∈ {0,±720} (integer Tw), 303/303. Rect strands (unit/2JMP) agree exactly — choice
+  immaterial when both loops are non-degenerate.
+- **Approach A (domino-level bipartite / centroid path) is subsumed:** index parity IS the
+  domino bipartite; centroid body is axis-aligned (steps 2/1) but the hub seam is off-lattice
+  for L (±212.52 = 4×2·atan(½) artifact, the analog of the old 936°); centroid tw == canonical
+  tw exactly on all 227 cases where the seam artifact vanishes (all Rect + offset-0 L). Use B.
+- **Criterion (conjecture, cache-validated): 2+1 foldable ⟺ Tw(canonical-strand loop)=0.**
+  After reduction the structure has cycle rank 1, so the single loop is the whole cycle space —
+  no 1+1+1-style all-pairs subtlety. **Flagged twisted (11/303):** 6×6 #13(+720) #18(−720),
+  6×7 #8(+720), 8×6 #41/#42/#44(+720) #127/#128(−720) #265(Rect,−720). **All 6×5 pass** —
+  predicts the lead's suspected-nonfoldable 6×5 set actually folds (or the criterion is
+  incomplete). Convention flips (σ phase / γ sign / both / orientation): 0 verdict changes.
+- **Action:** physical labels are the decider (`twoplus1_labels.json` still all-null) — and the
+  curated foldsheet set contains NO predicted-twisted case; add 6×6 #13/#18 + 6×7 #8 to the
+  make-sheets so hand-folding can test the negatives, not just the positives.
+
+**1+1+1 loop math validated against the two structural objections (new `py/analyze_loop_seams.py`).**
+Question (lead): the three pairwise theta loops AB/AC/BC share chains (rank-2 cycle space), and one
+loop literally closes with a diagonal step — does the math survive? Read-only sweep over all cached
+1+1+1 (312 sols / 936 loops: 6×4, 6×6 ×2, 8×6, 9×4, 12×4):
+- **Seam census:** every solution has exactly ONE degenerate-seam loop — the non-adjacent base
+  pair (L: diagonal `(0,1)~(1,0)`; Rect: colinear 2-jump `(0,0)~(0,2)`) — degenerate at BOTH hubs
+  (zero mixed loops ⇒ each chain keeps its footprint role at exit). The other two loops are honest
+  unit-step lattice cycles where index parity = checkerboard, so the paper's Tw applies verbatim.
+- **Diagonal artifacts cancel (empirically):** seam-flank doubled-turns are ±90/±270 (impossible
+  on-lattice), contributing 0/±180 to odd−even with the body always compensating; all 936 loop
+  values ∈ {0, 720} — integer Tw only, no 936°-style pathology. Cancellation is empirical, not
+  theorem-backed (paper Tw is defined for unit-step loops) — "discriminates, not yet exact" stands.
+- **Rank-2 ≠ 2 tests:** cocycle `Tw01−Tw02+Tw12 ≠ 0` in 55/312 (always ±720, pattern {0,0,720}) —
+  twist is not additive over cycle sums (reconfirms 2026-06-04 disproof). Testing any fixed 2 loops
+  misclassifies vs stored verdicts (drop12 → 51 wrong, drop02 → 4 wrong).
+- **NEW — twist lives ONLY on the degenerate loop:** 624/624 unit-seam (adjacent-pair) loops have
+  Tw=0; all 55 nonzero twists sit on the non-adjacent pair (L: pair 12, Rect: pair 02).
+  **Conjecture:** adjacent-pair loops are identically Tw=0 ⇒ the 1+1+1 criterion reduces to a
+  SINGLE loop test, `Tw(non-adjacent pair)=0`. Caveat: population is conditioned on
+  exit+parity+reflection passing — test on the pre-twist candidate pool before believing the lemma.
+
 ## 2026-06-04
 
 **2+1 — ground-truth fold harness + reduction hypothesis.** Decided to make physical labels

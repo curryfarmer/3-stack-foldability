@@ -252,6 +252,20 @@ it, and the concrete next step / relevant code & data.
 
 ## Q1. Twist criterion for 2+1 and 1+1+1
 
+**UPDATE 2026-06-07 — 2+1 criterion now CONJECTURED + cache-validated (strand reduction).**
+`py/analyze_2plus1_reduction.py` (303 2+1 sols, 7 grids; oracle 936/936): the half-tile
+reduction (`hypothesis_2plus1_reduction.md`) works with a **canonical-strand rule** — replace
+the rigid 2-chain by its strand **edge-adjacent to the 1-chain base** (cells[i] per placement;
+order-preserved by `reflect_cells`), close the single loop with the 1-chain, require `Tw=0`.
+Canonical loop twist is always physical ({0,±720}); the *other* (diagonal-seam) strand carries
+a quantized ±360 half-twist artifact (§5.1 strand-equivalence disproved; doc corrected). The
+domino-level-bipartite/centroid variant is subsumed (off-lattice seam for L). Cycle rank 1
+after reduction ⇒ single loop suffices structurally. **Flagged twisted: 11/303** (6×6 #13/#18,
+6×7 #8, 8×6 #41/#42/#44/#127/#128/#265); **all 6×5 suspects PASS** — physical labels
+(`FOLDING.md`) are now the decider; foldsheet set should add the predicted negatives
+(6×6 #13/#18, 6×7 #8). Convention invariance (σ phase / γ sign / orientation flips) verified:
+0 verdict changes across all cached loops (1+1+1 + 2+1).
+
 **UPDATE 2026-06-04 — 1+1+1 unified equation pinned.** Validated (read-only `py/analyze_twist.py`,
 68 1+1+1 sols 6×6/12×4/9×4/6×4): the **correct** criterion is `Tw(L_ij)=0` on **all three**
 pairwise theta loops (= the shipped `twist_check`) — **68/68**. The EXPLAINER §2.5 *proposed*
