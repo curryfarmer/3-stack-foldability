@@ -19,12 +19,16 @@ The heavy search (footprint enumeration + fold DFS + verdicts) is also available
 Python CLI — faster to iterate on, and it caches results so you don't regenerate.
 
 ```bash
-cd "Folding Drawer. /py"
-python3 generate.py --m 6 --n 6                 # generate + cache
-python3 generate.py --m 6 --n 5 --decomps 2+1 --allow-non-corner
-python3 generate.py --m 6 --n 6 --force         # ignore cache
-python3 generate.py --list                      # show what's cached
+python py/generate.py --m 6 --n 6               # generate + cache
+python py/generate.py --m 6 --n 5 --decomps 2+1 --allow-non-corner
+python py/generate.py --m 6 --n 6 --force       # ignore cache
+python py/generate.py --list                    # show what's cached
+python py/generate.py --m 6 --n 6 --jobs 8      # multiprocessing (orthogonal: FOLD_PY=pypy)
 ```
+
+**Full command reference** (searches, tests, analysis, rendering, triangle lattice, perf toggles):
+see [`COMMANDS.md`](COMMANDS.md). Performance toggles (`--jobs`/`FOLD_JOBS`, `FOLD_PY=pypy`) and
+their measured speedups are documented in [`tests/README.md`](tests/README.md).
 
 **2-stack mode** (RSPA baseline, Yang-You-Rosen): `generate.py --stacks 2 --m 6 --n 5`
 enumerates Hamiltonian circuits on the grid graph and applies the paper's two conditions
