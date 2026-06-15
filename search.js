@@ -372,26 +372,22 @@ const Search = (() => {
     return shape === startShape;
   }
 
-  // --- Stage 6: reflection ---
-  // Drive a canonical T,+1 vector through each chain's folds; collect the screen tangent on the final placement.
-  // Verdict: all chains' final tangents agree (with edge label kept as a discriminator — see plan empirical note).
+  // --- Stage 6: reflection (orientation-aware) ---
+  // Seed the SHARED crease between each adjacent pair of chains as one world segment, reflect each
+  // side to its far end, and require the images to coincide as oriented grid segments. Covers 2+1
+  // (one pair) and 1+1+1 (the pairwise footprint creases). The old gate seeded an arbitrary T,+1 at
+  // baseCells[0] and compared lossy (edge,sign) labels, which false-passed jamming 2+1 folds
+  // (e.g. 6x5#1) — see Fold.reflectionVerdict.
   function reflectionCheck(chains) {
-    const tangents = [];
+    const res = Fold.reflectionVerdict(chains);
+    for (const d of res.pairs) {
+      chains[d.i].finalVector = { edge: d.imgI.edge, sign: d.imgI.sign };
+      chains[d.j].finalVector = { edge: d.imgJ.edge, sign: d.imgJ.sign };
+    }
     for (const c of chains) {
-      const baseCell = c.baseCells[0];
-      const v0 = { x: baseCell.x, y: baseCell.y, edge: 'T', sign: 1 };
-      // Re-project through the last placement's transformChain
-      const lastPlacement = c.placements[c.placements.length - 1];
-      const vFinal = Fold.projectVector(v0, lastPlacement.transformChain);
-      c.finalVector = { edge: vFinal.edge, sign: vFinal.sign };
-      tangents.push(c.finalVector);
+      if (c.finalVector === undefined) c.finalVector = null;
     }
-    // Compare: all must agree on (edge, sign).
-    const ref = tangents[0];
-    for (const t of tangents) {
-      if (t.edge !== ref.edge || t.sign !== ref.sign) return false;
-    }
-    return true;
+    return res.pass;
   }
 
   // --- Stage 7: twist (Calugareanu-White-Fuller, Tw = 0) ---

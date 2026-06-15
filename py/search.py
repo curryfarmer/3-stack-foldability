@@ -298,18 +298,18 @@ def exit_footprint_check(chains, start_shape):
 # --- Stage 6: reflection ---
 
 def reflection_check(chains):
-    ref = None
+    # Orientation-aware: seed the SHARED crease between each adjacent pair of chains as one
+    # world segment, reflect each side to its far end, require the images to coincide as oriented
+    # grid segments. Covers 2+1 (one pair) and 1+1+1 (the pairwise footprint creases). The old
+    # gate seeded an arbitrary T,+1 at baseCells[0] and compared lossy (edge,sign) labels, which
+    # false-passed jamming 2+1 folds (e.g. 6x5#1) — see Fold.reflection_verdict.
+    res = Fold.reflection_verdict(chains)
+    for d in res["pairs"]:
+        chains[d["i"]]["finalVector"] = {"edge": d["imgI"]["edge"], "sign": d["imgI"]["sign"]}
+        chains[d["j"]]["finalVector"] = {"edge": d["imgJ"]["edge"], "sign": d["imgJ"]["sign"]}
     for c in chains:
-        base = c["baseCells"][0]
-        v0 = {"x": base[0], "y": base[1], "edge": "T", "sign": 1}
-        last = c["placements"][-1]
-        vf = Fold.project_vector(v0, last["transformChain"])
-        c["finalVector"] = {"edge": vf["edge"], "sign": vf["sign"]}
-        if ref is None:
-            ref = c["finalVector"]
-        elif vf["edge"] != ref["edge"] or vf["sign"] != ref["sign"]:
-            return False
-    return True
+        c.setdefault("finalVector", None)   # guarantee the key exists for the solution emit
+    return res["pass"]
 
 
 # --- Stage 7: twist (pairwise-loop; decided only for all-1chain / 1+1+1) ---

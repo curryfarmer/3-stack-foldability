@@ -1,0 +1,14 @@
+# Python deps for the 3-stack-foldability engine + test suite.
+# Install:  python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+
+# --- test suite (required for `pytest`) ---
+pytest==9.1.0
+jsonschema==4.26.0
+
+# --- engine analysis + rendering (py/render_*.py, py/analyze_*.py, explainer/) ---
+numpy==2.4.6
+matplotlib==3.10.9
+pillow==12.2.0
+
+# --- report screenshot driver (optional; only report/shoot.js) ---
+# playwright>=1.40
