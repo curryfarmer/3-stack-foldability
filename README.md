@@ -5,13 +5,10 @@ Browser tool for prototyping 2D origami-style folding on a square grid. Define a
 ## Run
 
 ```bash
-cd "Folding Drawer. "
-python3 -m http.server 8000
+python -m http.server 8000      # from repo root
 ```
 
 Open http://localhost:8000
-
-(The trailing space in the folder name is intentional — that's how the directory was created.)
 
 ## Python search backend (`py/`)
 
@@ -26,9 +23,10 @@ python py/generate.py --list                    # show what's cached
 python py/generate.py --m 6 --n 6 --jobs 8      # multiprocessing (orthogonal: FOLD_PY=pypy)
 ```
 
-**Full command reference** (searches, tests, analysis, rendering, triangle lattice, perf toggles):
-see [`COMMANDS.md`](COMMANDS.md). Performance toggles (`--jobs`/`FOLD_JOBS`, `FOLD_PY=pypy`) and
-their measured speedups are documented in [`tests/README.md`](tests/README.md).
+**Full command reference** (searches, tests, triangle lattice, perf toggles):
+see [`docs/guides/COMMANDS.md`](docs/guides/COMMANDS.md). Performance toggles (`--jobs`/`FOLD_JOBS`,
+`FOLD_PY=pypy`) and their measured speedups are documented in [`tests/README.md`](tests/README.md).
+Research notes and lab logs live in [`docs/research/`](docs/research/).
 
 **2-stack mode** (RSPA baseline, Yang-You-Rosen): `generate.py --stacks 2 --m 6 --n 5`
 enumerates Hamiltonian circuits on the grid graph and applies the paper's two conditions

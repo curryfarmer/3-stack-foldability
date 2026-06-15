@@ -1,27 +1,5 @@
 [
   {
-    "key": "23e3bc45",
-    "file": "6x4_23e3bc45.json",
-    "m": 6,
-    "n": 4,
-    "opts": {
-      "m": 6,
-      "n": 4,
-      "shapes": {
-        "L": true,
-        "Rect": true
-      },
-      "decomps": {
-        "1+1+1": true,
-        "2+1": true
-      },
-      "allowNonCorner": false,
-      "dedup": true
-    },
-    "count": 3,
-    "generated": "2026-05-26T15:44:14"
-  },
-  {
     "key": "bbc04a7f",
     "file": "6x4_bbc04a7f.json",
     "m": 6,
@@ -94,50 +72,6 @@
     },
     "count": 3,
     "generated": "2026-06-09T00:07:08"
-  },
-  {
-    "key": "ec7bd3c6",
-    "file": "6x5_ec7bd3c6.json",
-    "m": 6,
-    "n": 5,
-    "opts": {
-      "m": 6,
-      "n": 5,
-      "shapes": {
-        "L": true,
-        "Rect": true
-      },
-      "decomps": {
-        "1+1+1": true,
-        "2+1": true
-      },
-      "allowNonCorner": false,
-      "dedup": true
-    },
-    "count": 5,
-    "generated": "2026-05-26T15:44:21"
-  },
-  {
-    "key": "1c7ef712",
-    "file": "6x6_1c7ef712.json",
-    "m": 6,
-    "n": 6,
-    "opts": {
-      "m": 6,
-      "n": 6,
-      "shapes": {
-        "L": true,
-        "Rect": true
-      },
-      "decomps": {
-        "1+1+1": true,
-        "2+1": true
-      },
-      "allowNonCorner": false,
-      "dedup": true
-    },
-    "count": 30,
-    "generated": "2026-05-26T15:44:14"
   },
   {
     "key": "eb1a50c9",

@@ -9,7 +9,7 @@ unless it is a documented, justified improvement.
 
 | file | what it locks |
 | --- | --- |
-| `conftest.py` | puts `py/`, `py/tri/`, `explainer/`, `tests/` on `sys.path`; dir fixtures |
+| `conftest.py` | puts `py/`, `py/tri/`, `tests/` on `sys.path`; dir fixtures |
 | `enginelib.py` | thin reusable wrappers over the engine (`run_3stack`, `run_2stack`, `closing_candidates`, `find_closing_by_hash`, `norm_hash`, `solution_digest`) |
 | `gen_golden.py` | regenerates the golden baselines from the engine (`tests/golden/*.json`) |
 | `gen_baseline_report.py` | writes `BASELINE_RESULTS.md` from golden + a live decider probe |

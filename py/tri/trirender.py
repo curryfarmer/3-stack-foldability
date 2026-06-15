@@ -2,13 +2,12 @@
 
 Draws each triangle as a filled Polygon tinted by sigma (UP=blue/+1, DOWN=red/-1), with an
 optional chain overlay (A/B/C colored + numbered centroid walks) and a footprint outline.
-Palette mirrors explainer/lib.py so figures match the square track.
+Palette matches the square-track figures.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "explainer"))
 import trilattice as TL  # noqa: E402
 import matplotlib            # noqa: E402
 matplotlib.use("Agg")
