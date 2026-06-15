@@ -258,6 +258,61 @@ const App = (() => {
     state.views.get(g.id).render();
   }
 
+  // --- App mode (View results vs Edit) -----------------------------------------
+  // View = browse precomputed Python results (default, source of truth); Edit = manual folding.
+  // The sidebar swaps #viewPanel <-> #editPanel; Display + Legend stay shared. The results
+  // nav/table (in #mainCol) only belong to View mode.
+  function setMode(mode) {
+    const edit = mode === 'edit';
+    document.getElementById('editPanel').style.display = edit ? '' : 'none';
+    document.getElementById('viewPanel').style.display = edit ? 'none' : '';
+    const hasSols = state.search.solutions.length > 0;
+    document.getElementById('searchResults').style.display = (!edit && hasSols) ? '' : 'none';
+    if (edit) document.getElementById('searchNav').style.display = 'none';
+    else renderSearchNav();
+  }
+
+  // Fetch results/manifest.json, populate the grid dropdown, auto-load the latest entry.
+  // Served via `python -m http.server`; on file:// or a missing manifest this no-ops so the
+  // Advanced search + manual Load-JSON picker remain the usable paths.
+  async function initResultsManifest() {
+    const sel = document.getElementById('resultsManifestSelect');
+    let entries;
+    try {
+      const res = await fetch('results/manifest.json');
+      if (!res.ok) throw new Error(`manifest ${res.status}`);
+      entries = await res.json();
+    } catch (err) {
+      sel.innerHTML = '<option value="">(no manifest — use Advanced search or Load JSON)</option>';
+      return;
+    }
+    if (!Array.isArray(entries) || !entries.length) {
+      sel.innerHTML = '<option value="">(manifest empty)</option>';
+      return;
+    }
+    const sorted = entries.slice().sort((a, b) =>
+      (a.m - b.m) || (a.n - b.n) || String(a.key).localeCompare(String(b.key)));
+    sel.innerHTML = sorted.map(e => {
+      const stacks = (e.opts && e.opts.stacks) || 3;
+      return `<option value="${e.file}">${e.m}x${e.n} (${e.count}) — ${stacks}-stack</option>`;
+    }).join('');
+    sel.addEventListener('change', () => { if (sel.value) loadResultFile(sel.value); });
+    // Auto-load the most recently generated result.
+    const latest = entries.reduce((a, b) => ((a.generated || '') >= (b.generated || '') ? a : b));
+    sel.value = latest.file;
+    loadResultFile(latest.file);
+  }
+
+  async function loadResultFile(file) {
+    try {
+      const res = await fetch('results/' + file);
+      if (!res.ok) throw new Error(`result ${res.status}`);
+      loadResultsData(await res.json());
+    } catch (err) {
+      alert('Could not load result file: ' + err.message);
+    }
+  }
+
   function init() {
     // Tools
     document.querySelectorAll('input[name=tool]').forEach(r => {
@@ -301,8 +356,15 @@ const App = (() => {
 
     wireSearchPanel();
 
-    // Boot one grid
+    // App mode: View (browse Python results) vs Edit (manual folding). View is default.
+    document.querySelectorAll('input[name=appmode]').forEach(r => {
+      r.addEventListener('change', e => setMode(e.target.value));
+    });
+
+    // Boot one grid, default to View mode, then auto-load the latest Python results.
     addGrid();
+    setMode('view');
+    initResultsManifest();
   }
 
   // --- Search panel wiring ---
@@ -712,7 +774,7 @@ const App = (() => {
     });
   }
 
-  return { init, loadResultsData, stepToId,
+  return { init, loadResultsData, stepToId, setMode,
            solutionCount: () => state.search.solutions.length };
 })();
 

@@ -56,7 +56,7 @@ python py/generate.py --stacks 2 --m 6 --n 5      # RSPA 2-stack (Hamiltonian ci
 | `--list` | print manifest and exit | — |
 
 **Output:** `results/<m>x<n>[_2stack]_<hash>.json` + `results/manifest.json` index. A matching
-cached run is reused unless `--force`. Load the JSON in the browser tool's search panel to view.
+cached run is reused unless `--force`. The browser tool auto-loads these (see Browser tool below).
 
 ### Performance toggles (multiprocessing + PyPy)
 
@@ -109,15 +109,22 @@ python tests/gen_baseline_report.py    # rewrite tests/BASELINE_RESULTS.md
 
 ---
 
-## Browser tool (interactive folding simulator)
+## Browser tool (results viewer + folding simulator)
 
 ```bash
 python -m http.server 8000      # from repo root
 ```
 
-Open http://localhost:8000 . The JS engines (`fold.js`, `search.js`) are kept as a cross-checked
-reference (identical to Python on 6x4/6x5/6x6). Use **Load results JSON** in the search panel to
-visualise a `results/*.json` file. Full UI/workflow docs: `README.md` (repo root).
+Open http://localhost:8000 . It starts in **View results** mode: it auto-loads `results/manifest.json`,
+fills the **Results** grid dropdown, and shows the latest run. Pick another grid from the dropdown, or
+use **Load results JSON** for any `results/*.json` file. Toggle **Edit** in the topbar for the manual
+folding tools; Display options + Legend are shared across both modes. (Served via `http.server`; opening
+`index.html` as a `file://` URL skips auto-load — use Load results JSON instead.)
+
+The in-browser JS engines (`fold.js`, `search.js`) live under **Advanced: in-browser search** in the
+Results panel — kept as a cross-checked reference (identical to Python on 6x4/6x5/6x6; the single
+intended gate difference is documented in `docs/guides/ENGINE_SPEC.md`). Full UI/workflow docs:
+`README.md` (repo root).
 
 ---
 
