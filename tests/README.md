@@ -35,6 +35,53 @@ unless it is a documented, justified improvement.
 `slow` marks expensive re-runs (large K / non-corner explosion); `parity` marks node-dependent
 cross-engine checks. Markers are registered in `../pytest.ini`.
 
+## Performance toggles (multiprocessing + PyPy)
+
+Two orthogonal, independently toggleable speed switches for the 3-stack engine. **Neither changes a
+verdict** — output stays byte-identical to the serial CPython baseline (solutions incl. order + id,
+and every integer ctx counter). `test_perf_toggles.py` locks this 1:1 across both toggles and every
+combination, including a golden-under-load run of the whole suite with `FOLD_JOBS=8`.
+
+| toggle | how | default |
+| --- | --- | --- |
+| multiprocessing | `--jobs N` (generate.py) or env `FOLD_JOBS=N` | 1 (serial) |
+| PyPy | env `FOLD_PY=pypy` (`pypy`/`pypy3` on PATH, or `FOLD_PYPY_BIN=<path>`) | CPython |
+
+```bash
+python py/generate.py --m 6 --n 6 --jobs 8          # 8 worker processes
+FOLD_JOBS=8 python py/generate.py --m 6 --n 6        # same, via env (opts['jobs'] wins if both set)
+FOLD_PY=pypy python py/generate.py --m 6 --n 6       # run the engine under PyPy
+FOLD_PY=pypy FOLD_JOBS=8 python py/generate.py ...   # both — they compose
+```
+
+`--jobs` fans the per-footprint enumeration across a `ProcessPoolExecutor`, then replays the D4
+dedup + sequential-id assignment serially in the parent over the footprint-ordered candidate stream,
+so the result is identical to serial. `jobs=1` (default) routes through the untouched serial path.
+Workers are module-level (picklable under the Windows *spawn* start method); the entry point must use
+the standard `if __name__ == "__main__":` guard (generate.py and `_engine_entry.py` do). PyPy runs
+the engine in a subprocess via `runner.run_search` and marshals results back as JSON; `FOLD_JOBS`
+still applies inside it, so a PyPy child fans across processes too.
+
+**Measured speedup** (6x6 corner, 24-core box, PyPy 7.3.20; all outputs verified 1:1):
+
+| config | time | vs CPython serial |
+| --- | --- | --- |
+| CPython serial (`jobs=1`) | 21.7 s | 1.0x |
+| CPython `jobs=8` | 3.6 s | **6.0x** |
+| PyPy serial | 7.4 s | **2.9x** |
+| PyPy `jobs=8` | 1.7 s | **13.2x** |
+
+`--jobs` speedup is bounded by the footprint count: corner-only grids (`allowNonCorner=False`) have
+only **6 footprints**, so fan-out saturates near 6 workers; non-corner sweeps (148 footprints for
+6x6) scale further. The two toggles are independent and compose (≈6x × ≈3x ≈ 13x).
+
+```bash
+# perf-toggle fidelity (fast subset; full set incl. 6x6/6x7 under -m slow)
+.venv/Scripts/python -m pytest tests/test_perf_toggles.py
+# whole golden suite under multiprocessing load
+FOLD_JOBS=8 .venv/Scripts/python -m pytest -m slow
+```
+
 ## Regenerating the baselines (only when an improvement is intentional)
 
 ```bash

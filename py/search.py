@@ -6,6 +6,8 @@ with the browser tool's loader.
 """
 
 import json
+import os
+
 import fold as Fold
 
 # ---- helpers ----
@@ -404,6 +406,162 @@ def canonical_hash(footprint, chains, m, n):
     return best
 
 
+# --- Candidate evaluation / admission (shared by serial + parallel paths) ---
+#
+# The serial and parallel paths share ONE gate evaluator and ONE admit step so the
+# verdict logic exists exactly once. _evaluate_candidate is pure and returns JSON-plain
+# data, so a worker process can produce candidates and the parent can replay dedup.
+
+def _evaluate_candidate(chains, fp, decomp, m, n):
+    """Run the per-candidate gates and build the solution record (no id, no dedup).
+
+    Returns (gates_passed, sol). gates_passed in 0..3 mirrors the serial counter bumps
+    (0 = failed exit; 1 = passed exit, failed parity; 2 = passed exit+parity, failed
+    reflection; 3 = passed all). sol is None unless gates_passed == 3. Deterministic.
+    """
+    if not exit_footprint_check(chains, fp["shape"]):
+        return 0, None
+    if not parity_check(chains):
+        return 1, None
+    if not reflection_check(chains):
+        return 2, None
+    h = canonical_hash(fp, chains, m, n)
+    twist = twist_check(chains)
+    sol = {
+        "id": None,
+        "footprint": {
+            "shape": fp["shape"], "rotation": fp["rotation"],
+            "anchor": _xy(fp["anchor"]),
+            "cells": [_xy(c) for c in fp["cells"]],
+        },
+        "decomposition": decomp["decomp"],
+        "chains": [{
+            "kind": c["kind"],
+            "baseCells": [_xy(b) for b in c["baseCells"]],
+            "foldArrows": list(c["foldArrows"]),
+            "nH": c["nH"], "nV": c["nV"],
+            "finalVector": c["finalVector"],
+        } for c in chains],
+        "twistPairs": twist["pairs"],
+        "verdict": {
+            "arithmetic": True, "exitFootprint": True, "parity": True,
+            "reflection": True,
+            "twist": (twist["pass"] if twist["decided"] else None),
+        },
+        "canonicalHash": h,
+    }
+    return 3, sol
+
+
+def _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id):
+    """Dedup (first-seen) + assign sequential id + bump afterDedup/twistPass + append.
+
+    The ONLY order-dependent step; for the parallel path it runs in the parent over the
+    footprint-ordered candidate stream, so the result is byte-identical to serial.
+    """
+    h = sol["canonicalHash"]
+    if opts.get("dedup"):
+        if h in dedup:
+            return
+        dedup[h] = True
+    ctx["afterDedup"] += 1
+    if sol["verdict"]["twist"] is True:
+        ctx["twistPass"] += 1
+    sol["id"] = next_id[0]
+    next_id[0] += 1
+    solutions.append(sol)
+    if on_solution:
+        on_solution(sol)
+
+
+# --- Multiprocessing (orthogonal toggle; jobs=1 routes through the serial path) ---
+
+_CHUNKS_PER_WORKER = 4  # >1 chunk per worker balances uneven per-footprint cost
+
+# Commutative ctx counters a worker accumulates locally and the parent sums.
+_WORKER_CTX_KEYS = ("nodeCount", "candidateCount", "coveredCount",
+                    "exitPass", "parityPass", "reflPass",
+                    "footprintsTried", "decompCount")
+
+
+def _resolve_jobs(opts):
+    """Worker count: opts['jobs'] if set, else env FOLD_JOBS, else 1.
+    Empty / non-int / < 1 all clamp to 1 (serial)."""
+    j = opts.get("jobs")
+    if j is None:
+        j = os.environ.get("FOLD_JOBS", "")
+    try:
+        j = int(j)
+    except (TypeError, ValueError):
+        return 1
+    return j if j >= 1 else 1
+
+
+def _chunk_bounds(n, k):
+    """Split range(n) into k contiguous [lo, hi) chunks, sizes differing by at most 1.
+    Requires 1 <= k <= n so no chunk is empty."""
+    base, extra = divmod(n, k)
+    bounds = []
+    lo = 0
+    for i in range(k):
+        hi = lo + base + (1 if i < extra else 0)
+        bounds.append((lo, hi))
+        lo = hi
+    return bounds
+
+
+def _run_footprint_chunk(payload):
+    """Worker entry (module-level => picklable under the spawn start method).
+
+    Enumerates a contiguous slice of footprints and returns its pre-dedup candidate
+    records in serial order plus the commutative ctx counters. No dedup / id here — the
+    parent replays those over the gathered, footprint-ordered stream.
+    """
+    m, n, K, opts, ordinal, i_start, i_end = payload
+    footprints = enumerate_footprints(m, n, opts)
+    local_ctx = {k: 0 for k in _WORKER_CTX_KEYS}
+    records = []
+    for footprint in footprints[i_start:i_end]:
+        local_ctx["footprintsTried"] += 1
+        for decomp in enumerate_decompositions(footprint, opts):
+            local_ctx["decompCount"] += 1
+
+            def on_candidate(chains, _fp=footprint, _decomp=decomp):
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n)
+                if gp >= 1:
+                    local_ctx["exitPass"] += 1
+                if gp >= 2:
+                    local_ctx["parityPass"] += 1
+                if gp >= 3:
+                    local_ctx["reflPass"] += 1
+                if sol is not None:
+                    records.append(sol)
+
+            search_decomposition(m, n, K, decomp, on_candidate, local_ctx)
+    return ordinal, records, local_ctx
+
+
+def _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id):
+    """Fan the per-footprint enumeration across processes, then replay dedup + id in the
+    parent over the footprint-ordered candidate stream (byte-identical to serial)."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    n_fp = len(footprints)
+    n_chunks = min(n_fp, jobs * _CHUNKS_PER_WORKER)
+    payloads = [(m, n, K, opts, ordinal, lo, hi)
+                for ordinal, (lo, hi) in enumerate(_chunk_bounds(n_fp, n_chunks))]
+    results = [None] * len(payloads)
+    workers = min(jobs, len(payloads), os.cpu_count() or 1)  # never oversubscribe cores
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for ordinal, records, local_ctx in ex.map(_run_footprint_chunk, payloads):
+            results[ordinal] = (records, local_ctx)  # index by ordinal => order-proof
+    for records, local_ctx in results:
+        for key in _WORKER_CTX_KEYS:
+            ctx[key] += local_ctx[key]
+        for sol in records:
+            _admit(sol, solutions, dedup, ctx, opts, None, next_id)
+
+
 # --- Top-level runner ---
 
 def run(opts, on_solution=None, is_cancelled=None):
@@ -428,6 +586,17 @@ def run(opts, on_solution=None, is_cancelled=None):
     footprints = enumerate_footprints(m, n, opts)
     ctx["footprintsTotal"] = len(footprints)
 
+    # Multiprocessing toggle: jobs>1 fans the per-footprint enumeration across processes
+    # then replays dedup/id serially in the parent. Live callbacks force the serial path
+    # (cooperative cancellation / streaming can't cross the process boundary cleanly).
+    # Need >=2 footprints to split; worker count is capped at the chunk count, so having
+    # fewer footprints than jobs just uses fewer workers (corner grids have only 6).
+    jobs = _resolve_jobs(opts)
+    if (jobs > 1 and len(footprints) >= 2
+            and on_solution is None and is_cancelled is None):
+        _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id)
+        return solutions, ctx, None
+
     for footprint in footprints:
         if ctx["cancelled"]:
             break
@@ -438,51 +607,15 @@ def run(opts, on_solution=None, is_cancelled=None):
             ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                if not exit_footprint_check(chains, _fp["shape"]):
-                    return
-                ctx["exitPass"] += 1
-                if not parity_check(chains):
-                    return
-                ctx["parityPass"] += 1
-                if not reflection_check(chains):
-                    return
-                ctx["reflPass"] += 1
-                h = canonical_hash(_fp, chains, m, n)
-                if opts.get("dedup"):
-                    if h in dedup:
-                        return
-                    dedup[h] = True
-                ctx["afterDedup"] += 1
-                twist = twist_check(chains)
-                if twist["decided"] and twist["pass"]:
-                    ctx["twistPass"] += 1
-                sol = {
-                    "id": next_id[0],
-                    "footprint": {
-                        "shape": _fp["shape"], "rotation": _fp["rotation"],
-                        "anchor": _xy(_fp["anchor"]),
-                        "cells": [_xy(c) for c in _fp["cells"]],
-                    },
-                    "decomposition": _decomp["decomp"],
-                    "chains": [{
-                        "kind": c["kind"],
-                        "baseCells": [_xy(b) for b in c["baseCells"]],
-                        "foldArrows": list(c["foldArrows"]),
-                        "nH": c["nH"], "nV": c["nV"],
-                        "finalVector": c["finalVector"],
-                    } for c in chains],
-                    "twistPairs": twist["pairs"],
-                    "verdict": {
-                        "arithmetic": True, "exitFootprint": True, "parity": True,
-                        "reflection": True,
-                        "twist": (twist["pass"] if twist["decided"] else None),
-                    },
-                    "canonicalHash": h,
-                }
-                next_id[0] += 1
-                solutions.append(sol)
-                if on_solution:
-                    on_solution(sol)
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n)
+                if gp >= 1:
+                    ctx["exitPass"] += 1
+                if gp >= 2:
+                    ctx["parityPass"] += 1
+                if gp >= 3:
+                    ctx["reflPass"] += 1
+                if sol is not None:
+                    _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id)
 
             search_decomposition(m, n, K, decomp, on_candidate, ctx)
             if is_cancelled and is_cancelled():

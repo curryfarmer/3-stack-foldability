@@ -25,15 +25,18 @@ def opts_3stack(
     decomps: tuple[str, ...] = ("2+1", "1+1+1"),
     allow_non_corner: bool = False,
     dedup: bool = True,
+    jobs: int | None = None,
 ) -> Opts:
     """Build a 3-stack search opts dict.
-    I/O: (m, n, shapes, decomps, allow_non_corner, dedup) -> opts dict for Search.run."""
+    I/O: (m, n, shapes, decomps, allow_non_corner, dedup, jobs) -> opts dict for Search.run.
+    jobs=None lets Search.run fall back to env FOLD_JOBS (default serial)."""
     return {
         "m": m, "n": n, "stacks": 3,
         "shapes": {s: (s in shapes) for s in ("L", "Rect")},
         "decomps": {d: (d in decomps) for d in ("2+1", "1+1+1")},
         "allowNonCorner": allow_non_corner,
         "dedup": dedup,
+        "jobs": jobs,
     }
 
 

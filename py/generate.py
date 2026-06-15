@@ -15,7 +15,7 @@ run is reused unless --force is given.
 import argparse
 import sys
 
-import search as Search
+import runner as Runner
 import twostack as TwoStack
 import store as Store
 
@@ -29,6 +29,8 @@ def parse_args(argv):
     p.add_argument("--shapes", default="L,Rect", help="comma list: L,Rect (3-stack only)")
     p.add_argument("--decomps", default="2+1,1+1+1", help="comma list: 2+1,1+1+1")
     p.add_argument("--allow-non-corner", action="store_true")
+    p.add_argument("--jobs", type=int, default=None,
+                   help="parallel worker processes (default 1; env FOLD_JOBS as fallback)")
     p.add_argument("--no-dedup", action="store_true", help="disable D4 dedup")
     p.add_argument("--force", action="store_true", help="regenerate even if cached")
     p.add_argument("--list", action="store_true", help="print manifest and exit")
@@ -45,6 +47,7 @@ def build_opts(args):
         "shapes": shapes, "decomps": decomps,
         "allowNonCorner": args.allow_non_corner,
         "dedup": not args.no_dedup,
+        "jobs": args.jobs,
     }
 
 
@@ -77,8 +80,10 @@ def main(argv):
                   f"({cached['generated']})  [use --force to regenerate]")
             return 0
 
-    engine = TwoStack if opts["stacks"] == 2 else Search
-    solutions, ctx, err = engine.run(opts)
+    if opts["stacks"] == 2:
+        solutions, ctx, err = TwoStack.run(opts)
+    else:
+        solutions, ctx, err = Runner.run_search(opts)  # PyPy + multiprocessing toggles
     if err:
         print(f"rejected: {err}", file=sys.stderr)
         return 1
