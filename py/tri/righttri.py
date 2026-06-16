@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from lattice.base import Lattice  # noqa: E402  shared geometry layer
 
 _W = {"N": 0, "S": 0, "E": 1, "W": 1}   # sigma sublattice weight per orientation
 
@@ -37,11 +38,6 @@ def tile_vertices(tid):
     return [(2 * i, 2 * j), (2 * i, 2 * j + 2), c]    # W
 
 
-def _edges(verts):
-    a, b, c = verts
-    return [frozenset((a, b)), frozenset((b, c)), frozenset((c, a))]
-
-
 def tile_cart(tid):
     return [vcart(v) for v in tile_vertices(tid)]
 
@@ -60,60 +56,24 @@ def solid_block(M, N):
     return [(i, j, o) for j in range(N) for i in range(M) for o in ("N", "E", "S", "W")]
 
 
-class RightTriLattice:
+class RightTriLattice(Lattice):
+    """45-45-90 tetrakis tiling over the shared Lattice base; supplies only the tetrakis
+    vertex/sigma hooks (dual graph, creases, centroids, trapezoids come from the base)."""
+
     def __init__(self, M=None, N=None, cells=None):
         self.M, self.N = M, N
         if cells is None:
             cells = solid_block(M, N)
-        self.tris, self.verts, self.edges, self.cent = [], {}, {}, {}
-        for tid in cells:
-            vs = tile_vertices(tid)
-            self.tris.append(tid)
-            self.verts[tid] = vs
-            self.edges[tid] = _edges(vs)
-            self.cent[tid] = centroid(tid)
-        owners = {}
-        for tid in self.tris:
-            for e in self.edges[tid]:
-                owners.setdefault(e, []).append(tid)
-        self.adj = {tid: [] for tid in self.tris}
-        self.shared = {}
-        for e, os_ in owners.items():
-            if len(os_) == 2:
-                a, b = os_
-                self.adj[a].append(b)
-                self.adj[b].append(a)
-                self.shared[(a, b)] = e
-                self.shared[(b, a)] = e
+        super().__init__(cells)
 
-    def centroid(self, tid):
-        return self.cent[tid]
+    def _tile_vertices(self, tid):
+        return tile_vertices(tid)
 
-    def sigma(self, tid):
+    def _vkey_to_cart(self, key):
+        return vcart(key)
+
+    def _tile_sigma(self, tid):
         return sigma(tid)
-
-    def neighbors(self, tid):
-        return self.adj[tid]
-
-    def shared_edge_cart(self, a, b):
-        p, q = tuple(self.shared[(a, b)])
-        return (vcart(p), vcart(q))
-
-    def all_trapezoids(self):
-        out, seen = [], set()
-        for mid in self.tris:
-            nbs = self.adj[mid]
-            for a in range(len(nbs)):
-                for b in range(a + 1, len(nbs)):
-                    arm1, arm2 = nbs[a], nbs[b]
-                    if arm2 in self.adj[arm1]:
-                        continue
-                    fp = [arm1, mid, arm2]
-                    key = frozenset(fp)
-                    if key not in seen:
-                        seen.add(key)
-                        out.append(fp)
-        return out
 
 
 def _edge_len(lat, a, b):
@@ -206,7 +166,7 @@ def census(K):
 
 
 def _selfcheck():
-    from twostack import _reflect_point  # generic line reflection (folds)
+    from lattice.reflect import reflect_point as _reflect_point  # generic line reflection (folds)
     lat = RightTriLattice(3, 3)
     print("tiles:", len(lat.tris), "(expect", 4 * 3 * 3, ")")
     bad = [(a, b) for a in lat.tris for b in lat.adj[a] if sigma(a) == sigma(b)]

@@ -5,57 +5,21 @@ A placement is a dict:
     creaseAxis, creaseAt, parentBounds, transformChain }
 Cells are (x, y) integer tuples. Screen coords: +y is down (matches the JS tool).
 """
+from lattice.reflect import reflect_point
+from lattice.square import SquareLattice
+
+# Square cell-reflection and fold-direction geometry now live on SquareLattice (the square is one
+# lattice subclass). These module-level names are thin re-exports so callers — and tests that
+# resolve Fold.reflect_scalar / Fold.reflect_cells / Fold.fold_spec by name — keep working.
+reflect_scalar = SquareLattice.reflect_scalar
+reflect_cells = SquareLattice.reflect_cells
+fold_spec = SquareLattice.fold_spec
 
 
 def bounds(cells):
     xs = [c[0] for c in cells]
     ys = [c[1] for c in cells]
     return {"xMin": min(xs), "xMax": max(xs), "yMin": min(ys), "yMax": max(ys)}
-
-
-def reflect_scalar(v, c_boundary):
-    # Mirror integer cell coord across continuous boundary: cell center x+0.5 mirrored
-    # about c_boundary -> integer cell 2*c_boundary - 1 - v.
-    return 2 * c_boundary - 1 - v
-
-
-def reflect_cells(cells, axis, c_boundary):
-    if axis == "h":
-        return [(reflect_scalar(x, c_boundary), y) for (x, y) in cells]
-    return [(x, reflect_scalar(y, c_boundary)) for (x, y) in cells]
-
-
-# Vector model: {x, y, edge: 'T'|'B'|'L'|'R', sign: +1|-1}.
-EDGE_FLIP_H = {"T": "T", "B": "B", "L": "R", "R": "L"}
-EDGE_FLIP_V = {"T": "B", "B": "T", "L": "L", "R": "R"}
-
-
-def reflect_vector(vec, axis, c_boundary):
-    if axis == "h":
-        return {
-            "x": reflect_scalar(vec["x"], c_boundary),
-            "y": vec["y"],
-            "edge": EDGE_FLIP_H[vec["edge"]],
-            "sign": -vec["sign"] if vec["edge"] in ("T", "B") else vec["sign"],
-        }
-    return {
-        "x": vec["x"],
-        "y": reflect_scalar(vec["y"], c_boundary),
-        "edge": EDGE_FLIP_V[vec["edge"]],
-        "sign": -vec["sign"] if vec["edge"] in ("L", "R") else vec["sign"],
-    }
-
-
-def fold_spec(direction, b):
-    if direction == "R":
-        return {"axis": "h", "cBoundary": b["xMax"] + 1, "arrow": "R"}
-    if direction == "L":
-        return {"axis": "h", "cBoundary": b["xMin"], "arrow": "L"}
-    if direction == "D":
-        return {"axis": "v", "cBoundary": b["yMax"] + 1, "arrow": "D"}
-    if direction == "U":
-        return {"axis": "v", "cBoundary": b["yMin"], "arrow": "U"}
-    raise ValueError(direction)
 
 
 def in_bounds(cells, m, n):
@@ -94,42 +58,68 @@ def make_fold(active, direction, m, n):
     }
 
 
-def project_vector(base_vec, chain):
-    """Apply a chain of reflections (in order) to a base vector, returning its image."""
-    v = dict(base_vec)
-    for step in chain:
-        v = reflect_vector(v, step["axis"], step["cBoundary"])
-    return v
-
-
-# --- Orientation-aware vector reflection (faithful port of twostack.py) ---
+# --- Orientation-aware crease reflection (single reflect_point primitive) ---
 # Seed the crease SHARED by two adjacent chains as one world segment, reflect each side an
 # equal number of times to its far end, and require the two images to COINCIDE as oriented grid
 # segments (not as (edge,sign) labels — the B edge of cell (a,b) and the T edge of (a,b+1) are
 # the same grid line). PASS iff every shared crease coincides. 2+1: the 2-chain strand cell
 # adjacent to the 1-chain (one pair). 1+1+1: each footprint crease (the pairwise side-sharing).
 
-def _hub_seed(P, Q):
-    """Edge labels on cells P, Q naming their SHARED crease, as the same world segment.
-    Returns (edge_on_P, edge_on_Q); sign is +1 (tangent +x for a horizontal crease, +y vertical)."""
+def _crease_segment(P, Q):
+    """Oriented Cartesian endpoints of the crease shared by adjacent base cells P, Q.
+    Horizontal crease -> tangent +x; vertical crease -> tangent +y (the sign=+1 seed convention)."""
     (px, py), (qx, qy) = P, Q
     if px == qx:                       # vertical adjacency -> horizontal crease, tangent +x
-        return ("B", "T") if py < qy else ("T", "B")
-    return ("R", "L") if px < qx else ("L", "R")   # horizontal adjacency -> vertical crease, +y
+        yc = max(py, qy)
+        return ((px, yc), (px + 1, yc))
+    xc = max(px, qx)                   # horizontal adjacency -> vertical crease, tangent +y
+    return ((xc, py), (xc, py + 1))
 
 
-def _seg(v):
-    """Resolve a director {x,y,edge,sign} to an oriented grid segment: (endpoints, direction)."""
-    x, y, e, s = v["x"], v["y"], v["edge"], v["sign"]
-    if e == "T":
-        pts, d = ((x, y), (x + 1, y)), (s, 0)
-    elif e == "B":
-        pts, d = ((x, y + 1), (x + 1, y + 1)), (s, 0)
-    elif e == "L":
-        pts, d = ((x, y), (x, y + 1)), (0, s)
-    else:  # R
-        pts, d = ((x + 1, y), (x + 1, y + 1)), (0, s)
-    return (frozenset(pts), d)
+def _axis_line(step):
+    """Two points on the mirror line for one transformChain step (axis reflection at cBoundary)."""
+    c = step["cBoundary"]
+    if step["axis"] == "h":            # reflect x across the vertical line x = c
+        return ((c, 0), (c, 1))
+    return ((0, c), (1, c))            # reflect y across the horizontal line y = c
+
+
+def _reflect_pt_through(p, chain):
+    """Reflect point p across every step's crease line, in order (the single reflect_point)."""
+    for step in chain:
+        a, b = _axis_line(step)
+        p = reflect_point(p, a, b)
+    return p
+
+
+def _reflect_cell_through(cell, chain):
+    """Image of a base cell after the chain's folds (integer fast-path, == reflect_point on cells)."""
+    cells = [cell]
+    for step in chain:
+        cells = reflect_cells(cells, step["axis"], step["cBoundary"])
+    return cells[0]
+
+
+def _seg_director(seg, cell):
+    """Read back the {edge,sign} director an oriented crease segment makes on its reflected base
+    `cell` — the exact label the old vector model carried, recovered from geometry. A horizontal
+    segment is the cell's T edge (at y=cy) or B edge (y=cy+1); vertical is L (x=cx) or R (x=cx+1);
+    sign is the segment's tangent direction (+x for T/B, +y for L/R)."""
+    (x0, y0), (x1, y1) = seg
+    cx, cy = cell
+    if abs(y1 - y0) < abs(x1 - x0):                # horizontal segment -> T / B
+        edge = "T" if round(y0) == cy else "B"
+        sign = 1 if x1 > x0 else -1
+    else:                                          # vertical segment -> L / R
+        edge = "L" if round(x0) == cx else "R"
+        sign = 1 if y1 > y0 else -1
+    return {"edge": edge, "sign": sign}
+
+
+def _seg_key(seg):
+    """Hashable oriented-segment key (ordered endpoints), tolerant of float reflection dust."""
+    (x0, y0), (x1, y1) = seg
+    return (round(x0, 6), round(y0, 6), round(x1, 6), round(y1, 6))
 
 
 def _shared_crease_pairs(chains):
@@ -152,18 +142,26 @@ def _shared_crease_pairs(chains):
 
 
 def reflection_verdict(chains):
-    """Orientation-aware vector reflection over every shared crease.
-    Returns {'pass': bool, 'pairs': [{i,j,Pi,Pj,imgI,imgJ,pass}]}."""
+    """Orientation-aware crease reflection over every shared crease, via the single reflect_point.
+
+    Seed each shared crease as one oriented world segment; reflect it through each chain's fold
+    transform chain; the fold is valid for that crease iff the two images COINCIDE as oriented
+    segments (the B edge of cell (a,b) and the T edge of (a,b+1) are the same grid line, so the
+    comparison is geometric, not by (edge,sign) label). finalVector (edge,sign) is read back off
+    each image relative to its reflected base cell. Returns
+    {'pass': bool, 'pairs': [{i,j,Pi,Pj,imgI,imgJ,pass}]}."""
     pairs = []
     ok = True
     for (i, j, Pi, Pj) in _shared_crease_pairs(chains):
-        eI, eJ = _hub_seed(Pi, Pj)
-        a = project_vector({"x": Pi[0], "y": Pi[1], "edge": eI, "sign": 1},
-                           chains[i]["placements"][-1]["transformChain"])
-        b = project_vector({"x": Pj[0], "y": Pj[1], "edge": eJ, "sign": 1},
-                           chains[j]["placements"][-1]["transformChain"])
-        coince = (_seg(a) == _seg(b))
-        pairs.append({"i": i, "j": j, "Pi": Pi, "Pj": Pj, "imgI": a, "imgJ": b, "pass": coince})
+        seed = _crease_segment(Pi, Pj)
+        chain_i = chains[i]["placements"][-1]["transformChain"]
+        chain_j = chains[j]["placements"][-1]["transformChain"]
+        seg_i = (_reflect_pt_through(seed[0], chain_i), _reflect_pt_through(seed[1], chain_i))
+        seg_j = (_reflect_pt_through(seed[0], chain_j), _reflect_pt_through(seed[1], chain_j))
+        imgI = _seg_director(seg_i, _reflect_cell_through(Pi, chain_i))
+        imgJ = _seg_director(seg_j, _reflect_cell_through(Pj, chain_j))
+        coince = _seg_key(seg_i) == _seg_key(seg_j)
+        pairs.append({"i": i, "j": j, "Pi": Pi, "Pj": Pj, "imgI": imgI, "imgJ": imgJ, "pass": coince})
         if not coince:
             ok = False
     return {"pass": ok, "pairs": pairs}

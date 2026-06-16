@@ -13,6 +13,11 @@ unordered frozenset of two integer vertices), its sigma, and its Cartesian centr
 triangles are dual-adjacent iff they share an edge; the shared edge is the fold crease.
 """
 import math
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from lattice.base import Lattice  # noqa: E402  shared geometry layer
 
 H = math.sqrt(3.0) / 2.0   # row height
 
@@ -29,11 +34,6 @@ def tri_vertices(tid):
     if o == "U":
         return [(i, j), (i + 1, j), (i, j + 1)]
     return [(i + 1, j), (i, j + 1), (i + 1, j + 1)]
-
-
-def _edges(verts):
-    a, b, c = verts
-    return [frozenset((a, b)), frozenset((b, c)), frozenset((c, a))]
 
 
 def centroid(tid):
@@ -84,70 +84,29 @@ def hexagon_cells(n):
     return out
 
 
-class TriLattice:
-    """A triangle-lattice region with its dual (face-adjacency) graph.
+class TriLattice(Lattice):
+    """An equilateral-triangle lattice region over the shared Lattice base.
 
     region: 'parallelogram' (M x N rhombi) by default, or pass an explicit `cells` list
-    (e.g. triangle_cells / hexagon_cells) for other shapes.
+    (e.g. triangle_cells / hexagon_cells) for other shapes. The dual graph, shared-edge creases,
+    centroids, reflection, and trapezoid footprints all come from lattice.base.Lattice; this
+    subclass only supplies the equilateral vertex/sigma hooks.
     """
 
     def __init__(self, M=None, N=None, cells=None):
         self.M, self.N = M, N
         if cells is None:
             cells = parallelogram_cells(M, N)
-        self.tris = []                    # list of triangle ids
-        self.verts = {}                   # tid -> [3 int vertices]
-        self.edges = {}                   # tid -> [3 frozenset edges]
-        self.cent = {}                    # tid -> Cartesian centroid
-        for tid in cells:
-            vs = tri_vertices(tid)
-            self.tris.append(tid)
-            self.verts[tid] = vs
-            self.edges[tid] = _edges(vs)
-            self.cent[tid] = centroid(tid)
-        # dual adjacency: share an edge -> (neighbor, shared edge)
-        edge_owners = {}
-        for tid in self.tris:
-            for e in self.edges[tid]:
-                edge_owners.setdefault(e, []).append(tid)
-        self.adj = {tid: [] for tid in self.tris}
-        self.shared = {}                  # (a, b) ordered -> shared edge frozenset
-        for e, owners in edge_owners.items():
-            if len(owners) == 2:
-                a, b = owners
-                self.adj[a].append(b)
-                self.adj[b].append(a)
-                self.shared[(a, b)] = e
-                self.shared[(b, a)] = e
+        super().__init__(cells)
 
-    def neighbors(self, tid):
-        return self.adj[tid]
+    def _tile_vertices(self, tid):
+        return tri_vertices(tid)
 
-    def shared_edge_cart(self, a, b):
-        """Cartesian endpoints of the crease (shared edge) between adjacent triangles a, b."""
-        e = self.shared[(a, b)]
-        p, q = tuple(e)
-        return (vcart(p), vcart(q))
+    def _vkey_to_cart(self, key):
+        return vcart(key)
 
-    # -- footprint: trapezoid = [arm, middle, arm] where the middle is dual-adjacent to both
-    #    arms and the two arms are not adjacent to each other (same color, so never adjacent).
-    #    This is the triangle analog of the square L-footprint (corner + two arms). --
-    def all_trapezoids(self):
-        out, seen = [], set()
-        for mid in self.tris:
-            nbs = self.adj[mid]
-            for a in range(len(nbs)):
-                for b in range(a + 1, len(nbs)):
-                    arm1, arm2 = nbs[a], nbs[b]
-                    if arm2 in self.adj[arm1]:      # arms adjacent -> not a trapezoid
-                        continue
-                    fp = [arm1, mid, arm2]
-                    key = frozenset(fp)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    out.append(fp)
-        return out
+    def _tile_sigma(self, tid):
+        return sigma(tid)
 
 
 def _selfcheck():
@@ -165,9 +124,9 @@ def _selfcheck():
     print("hex-ring around vertex (1,1) all in region:",
           all(t in lat.adj for t in hexring))
     # one trapezoid footprint, mutual linkage
-    fp = lat.trapezoid(0, 0)
+    fp = lat.all_trapezoids()[0]
     mid = fp[1]
-    print("trapezoid", fp, "-> middle DOWN adjacent to both arms:",
+    print("trapezoid", fp, "-> middle adjacent to both arms:",
           fp[0] in lat.adj[mid] and fp[2] in lat.adj[mid],
           "| arms adjacent to each other:", fp[2] in lat.adj[fp[0]])
     print("num trapezoid footprints available:", len(lat.all_trapezoids()))

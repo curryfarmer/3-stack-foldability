@@ -18,6 +18,8 @@ edge_mid_lookup.
 import math
 from collections import defaultdict
 
+from lattice.reflect import reflect_point
+
 
 # ---------- grid graph ----------
 
@@ -84,24 +86,14 @@ def _build_edge_lookup(m, n):
     return lookup
 
 
-# ---------- reflection geometry (port of twostack.py) ----------
-
-def _reflect_point(p, a, b):
-    x0, y0 = p
-    x1, y1 = a
-    x2, y2 = b
-    A = y2 - y1
-    B = x1 - x2
-    C = -(A * x1 + B * y1)
-    denom = A * A + B * B
-    xr = x0 - 2 * A * (A * x0 + B * y0 + C) / denom
-    yr = y0 - 2 * B * (A * x0 + B * y0 + C) / denom
-    return (xr, yr)
+# ---------- reflection geometry ----------
+# The line-reflection primitive lives in lattice/reflect.py (one reflection of record);
+# imported as reflect_point at the top of this module.
 
 
 def _reflect_edge(edge, mirror):
-    return (_reflect_point(edge[0], mirror[0], mirror[1]),
-            _reflect_point(edge[1], mirror[0], mirror[1]))
+    return (reflect_point(edge[0], mirror[0], mirror[1]),
+            reflect_point(edge[1], mirror[0], mirror[1]))
 
 
 def _pt_close(a, b, tol=1e-4):

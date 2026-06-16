@@ -15,6 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import trilattice as TL  # noqa: E402
+from lattice.base import Lattice  # noqa: E402  shared geometry layer
 
 
 def vkey_cart(key):
@@ -52,11 +53,6 @@ def sigma(tid):
     return 1 if cross > 0 else -1
 
 
-def _edges(keys):
-    a, b, c = keys
-    return [frozenset((a, b)), frozenset((b, c)), frozenset((c, a))]
-
-
 def subdivide(faces):
     out = []
     for (i, j, o) in faces:
@@ -66,59 +62,23 @@ def subdivide(faces):
     return out
 
 
-class ScaleneLattice:
+class ScaleneLattice(Lattice):
+    """30-60-90 kisrhombille tiling over the shared Lattice base; supplies only the scalene
+    vertex/sigma hooks (dual graph, creases, centroids, trapezoids come from the base)."""
+
     def __init__(self, faces=None, cells=None):
         if cells is None:
             cells = subdivide(faces)
-        self.tris, self.verts, self.edges, self.cent = [], {}, {}, {}
-        for tid in cells:
-            ks = tile_keys(tid)
-            self.tris.append(tid)
-            self.verts[tid] = ks
-            self.edges[tid] = _edges(ks)
-            self.cent[tid] = centroid(tid)
-        owners = {}
-        for tid in self.tris:
-            for e in self.edges[tid]:
-                owners.setdefault(e, []).append(tid)
-        self.adj = {tid: [] for tid in self.tris}
-        self.shared = {}
-        for e, os_ in owners.items():
-            if len(os_) == 2:
-                a, b = os_
-                self.adj[a].append(b)
-                self.adj[b].append(a)
-                self.shared[(a, b)] = e
-                self.shared[(b, a)] = e
+        super().__init__(cells)
 
-    def centroid(self, tid):
-        return self.cent[tid]
+    def _tile_vertices(self, tid):
+        return tile_keys(tid)
 
-    def sigma(self, tid):
+    def _vkey_to_cart(self, key):
+        return vkey_cart(key)
+
+    def _tile_sigma(self, tid):
         return sigma(tid)
-
-    def neighbors(self, tid):
-        return self.adj[tid]
-
-    def shared_edge_cart(self, a, b):
-        p, q = tuple(self.shared[(a, b)])
-        return (vkey_cart(p), vkey_cart(q))
-
-    def all_trapezoids(self):
-        out, seen = [], set()
-        for mid in self.tris:
-            nbs = self.adj[mid]
-            for a in range(len(nbs)):
-                for b in range(a + 1, len(nbs)):
-                    arm1, arm2 = nbs[a], nbs[b]
-                    if arm2 in self.adj[arm1]:
-                        continue
-                    fp = [arm1, mid, arm2]
-                    key = frozenset(fp)
-                    if key not in seen:
-                        seen.add(key)
-                        out.append(fp)
-        return out
 
 
 def _shared_type(lat, a, b):
@@ -176,7 +136,7 @@ def scan_existence(Kmax=12):
 
 
 def _selfcheck():
-    from twostack import _reflect_point
+    from lattice.reflect import reflect_point as _reflect_point
     from collections import Counter
     lat = ScaleneLattice(faces=TL.triangle_cells(4))
     print("tiles:", len(lat.tris), "(expect 6 * #faces =", 6 * len(TL.triangle_cells(4)), ")")

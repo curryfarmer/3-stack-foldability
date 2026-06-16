@@ -5,10 +5,10 @@ Cells are (x, y) tuples internally; solution dicts use {"x":, "y":} for JSON par
 with the browser tool's loader.
 """
 
-import json
 import os
 
 import fold as Fold
+from lattice.square import SquareLattice
 
 # ---- helpers ----
 
@@ -18,13 +18,8 @@ def _xy(c):
 
 # --- Stage 2: footprint enumeration ---
 
-# L base cells: corner at (0,0), arms; 4 rotations of D4 about the corner.
-L_BASE = [
-    [(0, 0), (1, 0), (0, 1)],     # rot 0
-    [(0, 0), (0, 1), (-1, 0)],    # rot 1 (90 CW)
-    [(0, 0), (-1, 0), (0, -1)],   # rot 2 (180)
-    [(0, 0), (0, -1), (1, 0)],    # rot 3 (270 CW)
-]
+# L footprint templates now live on SquareLattice; re-exported for the enumerator below.
+L_BASE = SquareLattice.L_BASE
 
 
 def enumerate_footprints(m, n, opts):
@@ -214,7 +209,7 @@ def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
             return
         chain = chains[real_idx]
         active = chain["placements"][-1]
-        for d in ("L", "R", "U", "D"):
+        for d in SquareLattice.fold_directions():
             if ctx.get("cancelled"):
                 return
             np_ = Fold.make_fold(active, d, m, n)
@@ -244,34 +239,10 @@ def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
 #   vertically-adjacent bases  (dy) -> A/B crease horizontal  -> parallel folds = nV -> nV even
 # 2+1 only; 1+1+1 (two perpendicular corner creases) falls back to legacy nH-even/nV-odd.
 
-def parallel_fold_axis(chains):
-    """2+1 only: 'H' => require nH even, 'V' => require nV even. Else None (legacy)."""
-    if len(chains) != 2:
-        return None
-    A, B = chains[0]["baseCells"], chains[1]["baseCells"]
-    for a in A:
-        for b in B:
-            if abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1:
-                return "H" if a[0] != b[0] else "V"
-    return None
-
-
-def parity_check(chains):
-    axis = parallel_fold_axis(chains)
-    for c in chains:
-        nH = sum(1 for a in c["foldArrows"] if a in ("L", "R"))
-        nV = len(c["foldArrows"]) - nH
-        c["nH"], c["nV"] = nH, nV
-        if axis == "H":      # vertical A/B crease: parallel folds = nH must be even
-            if nH % 2 != 0:
-                return False
-        elif axis == "V":    # horizontal A/B crease: parallel folds = nV must be even
-            if nV % 2 != 0:
-                return False
-        else:
-            if nH % 2 != 0 or nV % 2 != 1:
-                return False
-    return True
+# nH/nV parity rule + parallel-fold axis now live on SquareLattice (square symmetry).
+# Re-exported so search internals and test_gates resolve the names with one body of record.
+parallel_fold_axis = SquareLattice.parallel_fold_axis
+parity_check = SquareLattice.parity_check
 
 
 # --- Stage 5.5: exit footprint ---
@@ -285,14 +256,8 @@ def exit_footprint_check(chains, start_shape):
         return False
     if len(set(cells)) != 3:
         return False
-    xs = [c[0] for c in cells]
-    ys = [c[1] for c in cells]
-    dx, dy = max(xs) - min(xs), max(ys) - min(ys)
-    if (dx == 2 and dy == 0) or (dx == 0 and dy == 2):
-        shape = "Rect"
-    elif dx == 1 and dy == 1:
-        shape = "L"
-    else:
+    shape = SquareLattice.exit_shape(cells)
+    if shape is None:
         return False
     return shape == start_shape
 
@@ -366,44 +331,12 @@ def twist_check(chains):
 
 # --- Stage 8: D4 canonical hash ---
 
-def apply_transform(t, x, y, m, n):
-    X, Y = x, y
-    if t["flip"]:
-        X = m - 1 - X
-    rot = t["rot"]
-    if rot == 0:
-        return (X, Y)
-    if rot == 1:
-        return (Y, m - 1 - X)
-    if rot == 2:
-        return (m - 1 - X, n - 1 - Y)
-    return (n - 1 - Y, X)
-
-
-def transform_arrow(t, d):
-    if t["flip"]:
-        d = {"L": "R", "R": "L", "U": "U", "D": "D"}[d]
-    for _ in range(t["rot"]):
-        d = {"L": "U", "U": "R", "R": "D", "D": "L"}[d]
-    return d
-
-
-def canonical_hash(footprint, chains, m, n):
-    best = None
-    for rot in range(4):
-        for flip in range(2):
-            t = {"rot": rot, "flip": flip}
-            fp = sorted([list(apply_transform(t, c[0], c[1], m, n)) for c in footprint["cells"]])
-            chain_sigs = []
-            for c in chains:
-                base = sorted([list(apply_transform(t, b[0], b[1], m, n)) for b in c["baseCells"]])
-                arrows = [transform_arrow(t, a) for a in c["foldArrows"]]
-                chain_sigs.append({"kind": c["kind"], "base": base, "arrows": arrows})
-            chain_sigs.sort(key=lambda s: (s["kind"], json.dumps(s["base"])))
-            sig = json.dumps({"fp": fp, "chains": chain_sigs}, separators=(",", ":"))
-            if best is None or sig < best:
-                best = sig
-    return best
+# D4 canonical dedup now lives on SquareLattice (the golden orbit counts ARE D4-orbit counts).
+# Re-exported so search and test_gates resolve apply_transform / transform_arrow / canonical_hash
+# by name while the bodies live in one place.
+apply_transform = SquareLattice.apply_transform
+transform_arrow = SquareLattice.transform_arrow
+canonical_hash = SquareLattice.canonical_hash
 
 
 # --- Candidate evaluation / admission (shared by serial + parallel paths) ---

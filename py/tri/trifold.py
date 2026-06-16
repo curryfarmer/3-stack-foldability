@@ -13,7 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from twostack import _reflect_point  # noqa: E402  generic reflect across line through a,b
+from lattice.reflect import reflect_point as _reflect_point  # noqa: E402  generic reflect across line through a,b
 import trilattice as TL              # noqa: E402
 
 

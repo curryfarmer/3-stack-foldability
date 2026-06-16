@@ -17,6 +17,17 @@ def test_reflect_scalar_formula():
     assert Fold.reflect_scalar(1, 2) == 2      # 4-1-1
 
 
+def test_reflect_scalar_equals_reflect_point_on_axis_crease():
+    """The integer cell-reflection fast-path is exactly the generic reflect_point on an
+    axis-aligned crease (no float rounding) — the equivalence the 'one primitive' refactor relies
+    on. Vertical crease x=c through (c,0)-(c,1); cell center (v+0.5, 0.5) -> (2c-1-v)+0.5."""
+    from lattice.reflect import reflect_point
+    for v in range(-3, 14):
+        for c in range(0, 13):
+            assert reflect_point((v + 0.5, 0.5), (c, 0), (c, 1))[0] == Fold.reflect_scalar(v, c) + 0.5
+            assert reflect_point((v, 0), (c, 0), (c, 1)) == (float(2 * c - v), 0.0)
+
+
 def test_make_fold_single_cell_four_dirs():
     p = Fold.initial_placement([(2, 2)])
     assert Fold.make_fold(p, "R", 6, 6)["cells"] == [(3, 2)]
