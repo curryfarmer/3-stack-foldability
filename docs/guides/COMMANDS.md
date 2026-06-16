@@ -112,7 +112,8 @@ python tests/gen_baseline_report.py    # rewrite tests/BASELINE_RESULTS.md
 ## Browser tool (results viewer + folding simulator)
 
 ```bash
-python -m http.server 8000      # from repo root
+python -m http.server 8000      # from repo root (static; GET only)
+python serve.py [8000]          # same static frontend + POST /api/findings (capture, see below)
 ```
 
 Open http://localhost:8000 . It starts in **View results** mode: it auto-loads `results/manifest.json`,
@@ -125,6 +126,32 @@ The in-browser JS engines (`fold.js`, `search.js`) live under **Advanced: in-bro
 Results panel — kept as a cross-checked reference (identical to Python on 6x4/6x5/6x6; the single
 intended gate difference is documented in `docs/guides/ENGINE_SPEC.md`). Full UI/workflow docs:
 `README.md` (repo root).
+
+---
+
+## Physical findings (the user⇄engine capture loop) — `py/findings.py` + `serve.py`
+
+Record a real paper-fold result for an enumerated candidate, keyed by its `canonicalHash`, into the
+findings DB (`results/foldfindings.json`) + a dated `docs/research/LAB_LOG.md` entry. Three paths,
+one pure `submit()`:
+
+```bash
+# 1. In-browser: serve.py, load a candidate, open "Record physical finding", Submit.
+python serve.py                                   # POST /api/findings -> validate -> DB + LAB_LOG
+# 2. Offline: the UI "Download JSON" button writes a finding file; submit it from the CLI.
+python py/findings.py submit results/finding-6x5-1.json
+# 3. Migrate the legacy labels into the DB (lossless; already run once):
+python py/findings.py migrate results/twoplus1_labels.json results/foldfindings.json
+```
+
+- `submit` **validates first** (JSON-schema, `jsonschema`); a malformed finding writes nothing. The
+  record is keyed by the normalized `canonicalHash`, so re-submitting overwrites (never duplicates),
+  and the engine `predicted` block (gate verdict — FOLD/JAM + failing gates, never a fold index) is
+  filled by enumerating closing candidates (slow on big grids like 6x7).
+- **Scratch capture:** set `FOLDFINDINGS_DB` / `FOLDFINDINGS_LABLOG` to redirect writes to throwaway
+  files (e.g. experiments) without touching the committed DB/log.
+- The matcher equivalence (engine verdict == recorded physics for the deciders) is locked by
+  `tests/test_physical_deciders.py` + `tests/test_findings_matcher.py`.
 
 ---
 

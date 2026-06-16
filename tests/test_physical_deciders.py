@@ -1,6 +1,6 @@
 """test_physical_deciders.py — engine prediction vs recorded paper-fold, for the deciders.
 
-For every entry in results/twoplus1_labels.json with a recorded physical result (foldable
+For every entry in results/foldfindings.json with a recorded physical result (foldable
 != null), we MATCH its canonical hash against the engine's own enumerated closing-candidate
 set (the vet golden) and assert the engine's foldable tag equals the physical outcome. These
 are the ground-truth anchors: a mismatch means the maths disagrees with reality.
@@ -20,7 +20,7 @@ import enginelib as EL  # noqa: E402  (sys.path set in conftest.py)
 
 def _labels(results_dir: str) -> list[dict]:
     """Load the physical-fold label records. I/O: (results_dir) -> list of label dicts."""
-    path = os.path.join(results_dir, "twoplus1_labels.json")
+    path = os.path.join(results_dir, "foldfindings.json")
     with open(path) as f:
         return json.load(f)
 

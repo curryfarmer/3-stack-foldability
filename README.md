@@ -5,7 +5,8 @@ Browser tool for prototyping 2D origami-style folding on a square grid. Define a
 ## Run
 
 ```bash
-python -m http.server 8000      # from repo root
+python -m http.server 8000      # from repo root (static viewer)
+python serve.py                 # same viewer + in-page finding capture (POST /api/findings)
 ```
 
 Open http://localhost:8000
@@ -27,6 +28,13 @@ python py/generate.py --m 6 --n 6 --jobs 8      # multiprocessing (orthogonal: F
 see [`docs/guides/COMMANDS.md`](docs/guides/COMMANDS.md). Performance toggles (`--jobs`/`FOLD_JOBS`,
 `FOLD_PY=pypy`) and their measured speedups are documented in [`tests/README.md`](tests/README.md).
 Research notes and lab logs live in [`docs/research/`](docs/research/).
+
+**Physical findings** (`py/findings.py` + `serve.py`): record a real paper-fold result for an
+enumerated candidate, keyed by its `canonicalHash`, into the findings DB (`results/foldfindings.json`)
+plus a dated `docs/research/LAB_LOG.md` entry. Capture in-browser with `python serve.py` (the
+"Record physical finding" panel → Submit), or offline via `python py/findings.py submit <file>`. The
+engine prediction stored alongside is a **gate verdict** (FOLD/JAM + failing gates), never a fold
+index. Full usage in [`docs/guides/COMMANDS.md`](docs/guides/COMMANDS.md#physical-findings).
 
 **2-stack mode** (RSPA baseline, Yang-You-Rosen): `generate.py --stacks 2 --m 6 --n 5`
 enumerates Hamiltonian circuits on the grid graph and applies the paper's two conditions

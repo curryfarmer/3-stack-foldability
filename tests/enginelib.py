@@ -148,6 +148,32 @@ def find_closing_by_hash(
     return None
 
 
+def predicted_trace(
+    m: int,
+    n: int,
+    target_hash: str,
+    *,
+    allow_non_corner: bool = False,
+) -> dict | None:
+    """Project the engine's gate verdict for a finding's canonical hash (for the findings matcher).
+
+    Thin read-only view over find_closing_by_hash: returns the engine FOLD/JAM bit + failing-gate
+    set (NOT a fold index — every gate is a whole-candidate verdict). Adds NO field to the candidate
+    dict that test_vet_golden compares with `==`. Returns None when no candidate has that hash.
+    I/O: (m, n, target_hash, allow_non_corner)
+         -> {'foldable':bool,'failingGates':[str],'chains':[...],'matched':True} | None.
+    """
+    cand = find_closing_by_hash(m, n, target_hash, allow_non_corner=allow_non_corner)
+    if cand is None:
+        return None
+    return {
+        "foldable": cand["foldable"],
+        "failingGates": list(cand["fails"]),
+        "chains": cand["chains"],
+        "matched": True,
+    }
+
+
 # ---------- stable digests for golden comparison ----------
 
 def solution_digest(solutions: list[dict]) -> dict:

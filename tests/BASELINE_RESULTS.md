@@ -54,9 +54,21 @@ Agreement: 3/3 matched deciders agree with physics (0 pending vet enumeration).
 
 `test_parity_js.py` runs both engines on 6x4, 6x5, 6x6 and compares normalized canonical-hash sets. **Result: identical** (counts 2/3/12; zero JS-only or Py-only hashes). Known gate drift (JS enforces mn%6, K-even, n≥4; Python relaxed to mn%3) does not surface on these grids; it is catalogued for the Session-3 engine-rules spec.
 
+## Physical-findings pipeline (Session 5)
+
+The decider DB is now the schema-validated `results/foldfindings.json` (one FoldFinding per candidate,
+keyed by normalized `canonicalHash`). `test_physical_deciders.py` reads it (was `twoplus1_labels.json`);
+verdicts unchanged (6x5#1 / 6x6#1 / 6x7#8 still JAM, engine agrees). `foldfindings.json` is a **lossless
+migration** of `twoplus1_labels.json` (`py/findings.py migrate`), which is **retained** as the migration
+source/anchor — it still has live readers (`test_findings_migration.py`, `gen_golden.py`,
+`gen_baseline_report.py`), so the Session-5 debloat deliberately kept it. New write path: validate-first
+`findings.submit()` wrapped by the CLI, the UI "Download JSON" button, and `serve.py`'s `POST /api/findings`
+(in-browser capture). The engine `predicted` block is a **gate verdict** (FOLD/JAM + failing gates), never
+a fold index. Locked by `test_findings_{schema,db,lablog,roundtrip,matcher,migration}.py`.
+
 ## Known gaps (adversarial review, Session 0)
 
-- **One-sided physical ground truth.** All labelled deciders are JAM, so the decider tests can catch the engine wrongly predicting FOLD on a real jam, but NOT wrongly predicting JAM on a real foldable. Need at least one physically-confirmed FOLD decider per grid (e.g. the 6x6 edge fold noted in LAB_LOG) added to `twoplus1_labels.json` to close this.
+- **One-sided physical ground truth.** All labelled deciders are JAM, so the decider tests can catch the engine wrongly predicting FOLD on a real jam, but NOT wrongly predicting JAM on a real foldable. Need at least one physically-confirmed FOLD decider per grid (e.g. the 6x6 edge fold noted in LAB_LOG); capture it via `serve.py` (or `findings.py submit`) into `results/foldfindings.json` to close this.
 
 - **Heavy grids not committed as golden.** 8x6 (310) and 12x4 (90) are locked only by `test_manifest_counts.py` (slow tier), not by a committed golden — run `gen_golden.py heavy` to add them.
 

@@ -355,6 +355,7 @@ const App = (() => {
     wireRange('chevronSize', 'chevronSize');
 
     wireSearchPanel();
+    wireFindingPanel();
 
     // App mode: View (browse Python results) vs Edit (manual folding). View is default.
     document.querySelectorAll('input[name=appmode]').forEach(r => {
@@ -541,6 +542,7 @@ const App = (() => {
     else api.loadSolution(sol.id);
     renderSearchNav();
     renderSearchTable();
+    updateFindingPanel();
   }
 
   // Programmatic load of a results payload ({meta,solutions} or bare array). Shared by the
@@ -710,6 +712,110 @@ const App = (() => {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
   }
 
+  // --- Physical-finding capture (record a paper-fold result against a candidate's canonicalHash) ---
+  // The page never runs the engine: it assembles a FoldFinding from the loaded solution + the form
+  // and hands it to the backend (serve.py POST) or downloads it (CLI `findings.py submit` fallback).
+  // `predicted` is filled server-side, never here.
+  function currentSolution() {
+    if (state.search.stacks !== 3) return null;            // findings target 3-stack candidates only
+    const list = filteredSolutions();
+    return list[state.search.cursor] || null;
+  }
+
+  function findingDims() {
+    const m = (state.search.dims && state.search.dims.m) || +document.getElementById('searchM').value;
+    const n = (state.search.dims && state.search.dims.n) || +document.getElementById('searchN').value;
+    return { m, n };
+  }
+
+  function buildFinding() {
+    const sol = currentSolution();
+    if (!sol) return null;
+    const { m, n } = findingDims();
+    const v = (document.querySelector('input[name=findingFoldable]:checked') || {}).value || 'untested';
+    const foldable = v === 'untested' ? null : v === 'fold';
+    const rec = {
+      grid: `${m}x${n}`,
+      id: sol.id,
+      canonicalHash: sol.canonicalHash,
+      foldable,
+      foldOrder: (sol.chains || []).flatMap(c => c.foldArrows || []),   // provenance only, never matched
+      by: (document.getElementById('findingBy').value || '').trim() || 'anon',
+      date: new Date().toISOString().slice(0, 10),
+      notes: (document.getElementById('findingNotes').value || '').trim(),
+    };
+    if (foldable === false) {                                // jam detail only when the fold jammed
+      const af = document.getElementById('findingAtFold').value;
+      const reason = document.getElementById('findingReason').value;
+      rec.jam = { atFold: af === '' ? null : parseInt(af, 10), crease: null, reason: reason || null };
+    }
+    return rec;
+  }
+
+  function setFindingStatus(msg, ok) {
+    const el = document.getElementById('findingStatus');
+    if (el) { el.textContent = msg; el.style.color = ok === false ? '#c33' : (ok ? '#161' : '#888'); }
+  }
+
+  // Reflect the loaded candidate into the capture panel (surface the exact canonicalHash the DB keys on).
+  function updateFindingPanel() {
+    const hashEl = document.getElementById('findingHash');
+    if (!hashEl) return;
+    const sol = currentSolution();
+    const identEl = document.getElementById('findingIdent');
+    const recBtn = document.getElementById('recordFindingBtn');
+    const subBtn = document.getElementById('submitFindingBtn');
+    if (!sol) {
+      hashEl.value = ''; identEl.textContent = '(load a 3-stack candidate)';
+      recBtn.disabled = true; subBtn.disabled = true;
+      return;
+    }
+    const { m, n } = findingDims();
+    hashEl.value = sol.canonicalHash || '';
+    identEl.textContent = `${m}x${n} #${sol.id}  ${(sol.footprint && sol.footprint.shape) || ''} ${sol.decomposition || ''}`;
+    recBtn.disabled = false; subBtn.disabled = false;
+  }
+
+  function exportFinding() {
+    const rec = buildFinding();
+    if (!rec) return;
+    download(`finding-${rec.grid}-${rec.id}.json`, JSON.stringify(rec, null, 2), 'application/json');
+    setFindingStatus(`downloaded finding-${rec.grid}-${rec.id}.json — submit via: python py/findings.py submit <file>`);
+  }
+
+  async function submitFinding() {
+    const rec = buildFinding();
+    if (!rec) return;
+    setFindingStatus('submitting…');
+    try {
+      const res = await fetch('/api/findings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rec),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        const p = data.record && data.record.predicted;
+        const eng = p ? (p.matched ? (p.foldable ? 'FOLD' : 'JAM') : 'no engine match') : 'n/a';
+        setFindingStatus(`saved ${rec.grid}#${rec.id} (engine predicted: ${eng})`, true);
+      } else {
+        setFindingStatus(`rejected: ${data.error || res.status} — downloading instead`, false);
+        exportFinding();
+      }
+    } catch (err) {
+      setFindingStatus(`no POST server (run serve.py) — downloading instead: ${err.message}`, false);
+      exportFinding();
+    }
+  }
+
+  function wireFindingPanel() {
+    const recBtn = document.getElementById('recordFindingBtn');
+    const subBtn = document.getElementById('submitFindingBtn');
+    if (recBtn) recBtn.addEventListener('click', exportFinding);
+    if (subBtn) subBtn.addEventListener('click', submitFinding);
+    updateFindingPanel();
+  }
+
   function wireSearchPanel() {
     document.getElementById('searchRunBtn').addEventListener('click', startSearch);
     document.getElementById('searchStopBtn').addEventListener('click', () => stopSearch());
@@ -730,6 +836,7 @@ const App = (() => {
       setProgressBar(0);
       setSearchButtons(false);
       renderSearchNav();
+      updateFindingPanel();
     });
 
     // Load precomputed results JSON (from Python generate.py, or a prior browser export)

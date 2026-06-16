@@ -54,6 +54,40 @@
             <button id="searchClearBtn">Clear</button>
           </div>
         </details>
+
+        <details id="recordFinding">
+          <summary>Record physical finding</summary>
+          <p class="hint" style="font-size:11px; margin-top:2px">Load a 3-stack candidate (file or in-browser search), fold it physically, then record the result against its <code>canonicalHash</code>. Submit needs <code>python serve.py</code>; otherwise Download and run <code>python py/findings.py submit &lt;file&gt;</code>.</p>
+          <label class="opt">canonicalHash
+            <input id="findingHash" type="text" readonly style="font-size:10px; width:100%" placeholder="(load a candidate)">
+          </label>
+          <div id="findingIdent" class="hint" style="font-size:11px">(load a 3-stack candidate)</div>
+          <div class="tools" style="margin-top:4px">
+            <label><input type="radio" name="findingFoldable" value="fold" /> FOLD</label>
+            <label><input type="radio" name="findingFoldable" value="jam" checked /> JAM</label>
+            <label><input type="radio" name="findingFoldable" value="untested" /> untested</label>
+          </div>
+          <label class="opt">Jam at fold # <input id="findingAtFold" type="number" min="0" style="width:60px"></label>
+          <label class="opt">Jam reason
+            <select id="findingReason">
+              <option value="">(none)</option>
+              <option value="parity">parity</option>
+              <option value="reflection">reflection</option>
+              <option value="twist">twist</option>
+              <option value="exit_footprint">exit_footprint</option>
+              <option value="overlap">overlap</option>
+              <option value="offgrid">offgrid</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label class="opt">By <input id="findingBy" type="text" placeholder="name" style="width:120px"></label>
+          <label class="opt">Notes <input id="findingNotes" type="text" style="width:100%"></label>
+          <div style="display:flex; gap:6px; margin-top:6px">
+            <button id="recordFindingBtn" disabled>Download JSON</button>
+            <button id="submitFindingBtn" disabled>Submit</button>
+          </div>
+          <div id="findingStatus" class="hint" style="font-size:11px; margin-top:4px"></div>
+        </details>
       </div>
 
       <!-- EDIT MODE: manual fold editing -->
