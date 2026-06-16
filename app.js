@@ -20,9 +20,13 @@ const App = (() => {
       tw0Only: false,
       decompFilter: '',
       shapeFilter: '',
+      actualFilter: '',    // ''|fold|jam|untested — physical result from the joined finding
+      predFilter: '',      // ''|yes|no — engine-predicted foldable (derived from candidate verdict)
+      tagFilters: {},      // {tagKey: ''|true|false} — custom-tag tri-state filters
       stacks: 3,           // 3 = footprint/decomp search; 2 = RSPA HC patterns (loaded JSON)
       dims: null,          // {m,n} for 2-stack rendering
     },
+    findings: { byHash: new Map(), loaded: false },   // normalizedHash -> FoldFinding (results/foldfindings.json)
     display: {
       showLabels: true,
       showVectors: true,
@@ -366,6 +370,7 @@ const App = (() => {
     addGrid();
     setMode('view');
     initResultsManifest();
+    loadFindings();   // joins onto candidates by normalized canonicalHash; silent if missing
   }
 
   // --- Search panel wiring ---
@@ -509,7 +514,30 @@ const App = (() => {
     if (state.search.decompFilter) list = list.filter(s => s.decomposition === state.search.decompFilter);
     if (state.search.shapeFilter) list = list.filter(s => s.footprint.shape === state.search.shapeFilter);
     if (state.search.tw0Only) list = list.filter(s => s.verdict.twist);
+    // Findings-join filters (no-op when their control is ''): physical result, engine-predicted, custom tags.
+    if (state.search.actualFilter) {
+      list = list.filter(s => {
+        const f = findingFor(s);
+        const a = !f || f.foldable === null || f.foldable === undefined
+          ? 'untested' : (f.foldable ? 'fold' : 'jam');
+        return a === state.search.actualFilter;
+      });
+    }
+    if (state.search.predFilter) {
+      const want = state.search.predFilter === 'yes';
+      list = list.filter(s => predictedFoldable(s) === want);
+    }
+    for (const [key, want] of Object.entries(state.search.tagFilters)) {
+      if (want === '' || want === undefined) continue;
+      const wantBool = want === true || want === 'true';
+      list = list.filter(s => { const f = findingFor(s); return f && f.tags && f.tags[key] === wantBool; });
+    }
     return list;
+  }
+
+  function anyFindingFilterActive() {
+    return !!state.search.actualFilter || !!state.search.predFilter
+      || Object.values(state.search.tagFilters).some(v => v !== '' && v !== undefined);
   }
 
   function renderSearchNav() {
@@ -526,7 +554,8 @@ const App = (() => {
       : state.search.stacks === 2
         ? `HC #${cur.id}  ${cur.verdict.foldable ? '✓ foldable' : '✗ not foldable'}  (Tw=${cur.twistValue})`
         : `Tw=0 ${cur.verdict.twist ? '✓' : '✗'}  ${cur.footprint.shape} ${cur.decomposition}`;
-    const filtered = state.search.tw0Only || state.search.decompFilter || state.search.shapeFilter;
+    const filtered = state.search.tw0Only || state.search.decompFilter || state.search.shapeFilter
+      || anyFindingFilterActive();
     document.getElementById('searchNavShowing').textContent =
       filtered ? `showing ${list.length} of ${total}` : '';
     document.getElementById('searchPrevBtn').disabled = state.search.cursor <= 0 || !list.length;
@@ -550,6 +579,7 @@ const App = (() => {
   function loadResultsData(data) {
     const sols = Array.isArray(data) ? data : data.solutions;
     if (!Array.isArray(sols)) throw new Error('no "solutions" array');
+    for (const s of sols) { if (s && s.canonicalHash) s._normHash = normHash(s.canonicalHash); }
     state.search.solutions = sols;
     state.search.lastOpts = (data.meta && data.meta.opts) || state.search.lastOpts || {};
     state.search.stacks = (data.meta && data.meta.stacks) || 3;
@@ -590,6 +620,7 @@ const App = (() => {
       state.search.tw0Only = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
+      clearFindingFilters();
       const tw = document.getElementById('searchTw0Only');
       const df = document.getElementById('searchDecompFilter');
       const sf = document.getElementById('searchShapeFilter');
@@ -630,7 +661,7 @@ const App = (() => {
     const head = `
       <thead><tr>
         <th>#</th><th>Shape</th><th>Rot</th><th>Anchor</th><th>Decomp</th>
-        <th>Chain kinds</th><th>N_H</th><th>N_V</th><th>Exit</th><th>Parity</th><th>Refl</th><th>Twist</th><th></th>
+        <th>Chain kinds</th><th>N_H</th><th>N_V</th><th>Exit</th><th>Parity</th><th>Refl</th><th>Twist</th><th>Fold</th><th></th>
       </tr></thead>
     `;
     const rows = list.map((s, i) => {
@@ -646,6 +677,7 @@ const App = (() => {
         : s.verdict.twist
           ? `<td class="verdict-pass" title="pair twist ${twTitle}">✓</td>`
           : `<td class="verdict-fail" title="pair twist ${twTitle}">✗</td>`;
+      const fold = foldCell(findingFor(s));
       return `<tr class="${i === state.search.cursor ? 'current-sol' : ''}" data-idx="${i}">
         <td>${s.id}</td>
         <td>${s.footprint.shape}</td>
@@ -657,6 +689,7 @@ const App = (() => {
         <td>${nV}</td>
         ${ext}${par}${ref}
         ${tw}
+        ${fold}
         <td><button class="load-sol" data-idx="${i}">► Load</button></td>
       </tr>`;
     }).join('');
@@ -712,6 +745,135 @@ const App = (() => {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // --- Findings join (results/foldfindings.json) -------------------------------------------------
+  // Findings live in a separate DB keyed by canonicalHash; the browser joins them onto the loaded
+  // candidates so they can be filtered/shown by recorded result + custom tags. The DB stores hashes
+  // both normalized (submit) and raw (migrated), and sol.canonicalHash is raw — so BOTH sides go
+  // through normHash (must match Python findings._norm_hash: deep key-sort + compact separators).
+  function sortKeysDeep(v) {
+    if (Array.isArray(v)) return v.map(sortKeysDeep);
+    if (v && typeof v === 'object') {
+      return Object.keys(v).sort().reduce((o, k) => { o[k] = sortKeysDeep(v[k]); return o; }, {});
+    }
+    return v;
+  }
+  function normHash(h) {
+    try { return JSON.stringify(sortKeysDeep(JSON.parse(h))); } catch { return h; }
+  }
+
+  function ingestFindings(arr) {
+    const m = new Map();
+    for (const f of (Array.isArray(arr) ? arr : [])) {
+      if (f && f.canonicalHash) { try { m.set(normHash(f.canonicalHash), f); } catch { /* skip */ } }
+    }
+    state.findings.byHash = m;
+    state.findings.loaded = true;
+    rebuildTagFilterControls();
+    renderSearchNav();
+    renderSearchTable();
+    updateFindingPanel();
+  }
+
+  async function loadFindings() {
+    try {
+      const res = await fetch('results/foldfindings.json');
+      if (!res.ok) throw new Error(`findings ${res.status}`);
+      ingestFindings(await res.json());
+    } catch (err) {
+      state.findings.loaded = false;     // missing file / file:// -> empty cache, no alert
+    }
+  }
+
+  function findingFor(sol) {
+    if (!sol) return null;
+    const key = sol._normHash || normHash(sol.canonicalHash);
+    return state.findings.byHash.get(key) || null;
+  }
+
+  // Engine "predicted foldable" derived from the candidate's own verdict (every candidate has one),
+  // so the filter works even with no recorded finding. null twist (2-chain pending) counts as not-failing.
+  function predictedFoldable(sol) {
+    const v = sol.verdict || {};
+    return !!v.parity && !!v.reflection && v.twist !== false;
+  }
+
+  // Table cell for a candidate's recorded physical result (— = no finding, untested/FOLD/JAM otherwise).
+  function foldCell(f) {
+    if (!f) return '<td class="verdict-stub" title="no recorded finding">—</td>';
+    if (f.foldable === null || f.foldable === undefined)
+      return '<td class="verdict-stub" title="recorded, result untested">untested</td>';
+    return f.foldable
+      ? '<td class="verdict-pass" title="physically folds">FOLD</td>'
+      : '<td class="verdict-fail" title="physically jams">JAM</td>';
+  }
+
+  // Re-run the filter and refresh the table/stepper. Shared by every filter control (search + findings).
+  function applyFilterChange() {
+    state.search.cursor = 0;
+    renderSearchTable();
+    if (filteredSolutions().length) stepTo(0); else renderSearchNav();
+  }
+
+  // Custom-tag filters are discovered from the loaded findings (union of every finding's tags keys).
+  function discoverTagKeys() {
+    const keys = new Set();
+    for (const f of state.findings.byHash.values()) {
+      if (f && f.tags) for (const k of Object.keys(f.tags)) keys.add(k);
+    }
+    return [...keys].sort();
+  }
+
+  // Rebuild the #findingFilters row: static actual/predicted selects stay in markup; this injects one
+  // tri-state <select> per discovered tag key (keys are user-authored → HTML-escaped) and prunes stale
+  // filter state. The whole row hides for 2-stack results or when no findings are loaded.
+  function rebuildTagFilterControls() {
+    const row = document.getElementById('findingFilters');
+    if (!row) return;
+    const show = state.search.stacks === 3 && state.findings.byHash.size > 0;
+    row.style.display = show ? '' : 'none';
+    if (!show) return;
+    const keys = discoverTagKeys();
+    // Drop filter state for keys that no longer exist.
+    for (const k of Object.keys(state.search.tagFilters)) {
+      if (!keys.includes(k)) delete state.search.tagFilters[k];
+    }
+    const box = document.getElementById('tagFilterControls');
+    if (!box) return;
+    box.innerHTML = keys.map(k => {
+      const ek = escapeHtml(k), cur = state.search.tagFilters[k] || '';
+      const opt = (v, lbl) => `<option value="${v}"${cur === v ? ' selected' : ''}>${lbl}</option>`;
+      return `<label class="opt mono">${ek}
+        <select class="tag-filter" data-key="${escapeAttr(k)}">
+          ${opt('', 'any')}${opt('true', 'true')}${opt('false', 'false')}
+        </select></label>`;
+    }).join('');
+    box.querySelectorAll('select.tag-filter').forEach(sel => {
+      sel.addEventListener('change', () => {
+        state.search.tagFilters[sel.dataset.key] = sel.value;
+        applyFilterChange();
+      });
+    });
+  }
+
+  function escapeAttr(s) { return escapeHtml(s).replace(/`/g, '&#96;'); }
+
+  // Reset all findings-join filters (state + DOM). Called by Clear and by stepToId's filter-clear.
+  function clearFindingFilters() {
+    state.search.actualFilter = '';
+    state.search.predFilter = '';
+    state.search.tagFilters = {};
+    const fa = document.getElementById('filterActual');
+    const fp = document.getElementById('filterPredicted');
+    if (fa) fa.value = '';
+    if (fp) fp.value = '';
+    rebuildTagFilterControls();
+  }
+
   // --- Physical-finding capture (record a paper-fold result against a candidate's canonicalHash) ---
   // The page never runs the engine: it assembles a FoldFinding from the loaded solution + the form
   // and hands it to the backend (serve.py POST) or downloads it (CLI `findings.py submit` fallback).
@@ -726,6 +888,49 @@ const App = (() => {
     const m = (state.search.dims && state.search.dims.m) || +document.getElementById('searchM').value;
     const n = (state.search.dims && state.search.dims.n) || +document.getElementById('searchN').value;
     return { m, n };
+  }
+
+  // Preset tag keys (persisted once) drive the per-finding toggles, so filters stay typo-consistent.
+  const TAG_KEYS_LS = 'foldfinding.tagKeys';
+  function getTagKeys() {
+    let raw = '';
+    try { raw = localStorage.getItem(TAG_KEYS_LS) || ''; } catch { /* private mode */ }
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  function saveTagKeys(csv) {
+    const keys = csv.split(',').map(s => s.trim()).filter(Boolean);
+    try { localStorage.setItem(TAG_KEYS_LS, keys.join(',')); } catch { /* private mode */ }
+    return keys;
+  }
+
+  // One label + tri-radio (true/false/untested, default untested) per configured key. `prefill` (a
+  // finding's tags) sets the initial value when re-opening a candidate that already has a finding.
+  function renderTagRows(prefill) {
+    const box = document.getElementById('findingTagRows');
+    if (!box) return;
+    const keys = getTagKeys();
+    if (!keys.length) { box.innerHTML = '<span class="hint">no tag keys set</span>'; return; }
+    box.innerHTML = keys.map((k, i) => {
+      const ek = escapeHtml(k), ak = escapeAttr(k), nm = `tag-${i}`;   // index name = safe radio grouping
+      const want = prefill && Object.prototype.hasOwnProperty.call(prefill, k) ? prefill[k] : undefined;
+      const sel = v => (v === 'true' ? want === true : v === 'false' ? want === false : want === undefined) ? ' checked' : '';
+      const r = v => `<label><input type="radio" name="${nm}" data-tagkey="${ak}" value="${v}"${sel(v)}> ${v}</label>`;
+      return `<div class="tag-row"><span class="mono">${ek}</span>${r('true')}${r('false')}${r('untested')}</div>`;
+    }).join('');
+  }
+
+  // Collect the checked per-key radios into a tags map by data-tagkey (no selector-escaping of user keys);
+  // untested keys are OMITTED (lean records; absent ⇒ untested).
+  function readTagsFromPanel() {
+    const tags = {};
+    const wanted = new Set(getTagKeys());
+    document.querySelectorAll('#findingTagRows input[type=radio]:checked').forEach(el => {
+      const k = el.dataset.tagkey;
+      if (!wanted.has(k)) return;
+      if (el.value === 'true') tags[k] = true;
+      else if (el.value === 'false') tags[k] = false;
+    });
+    return tags;
   }
 
   function buildFinding() {
@@ -749,6 +954,8 @@ const App = (() => {
       const reason = document.getElementById('findingReason').value;
       rec.jam = { atFold: af === '' ? null : parseInt(af, 10), crease: null, reason: reason || null };
     }
+    const tags = readTagsFromPanel();
+    if (Object.keys(tags).length) rec.tags = tags;
     return rec;
   }
 
@@ -768,12 +975,15 @@ const App = (() => {
     if (!sol) {
       hashEl.value = ''; identEl.textContent = '(load a 3-stack candidate)';
       recBtn.disabled = true; subBtn.disabled = true;
+      renderTagRows(null);
       return;
     }
     const { m, n } = findingDims();
     hashEl.value = sol.canonicalHash || '';
     identEl.textContent = `${m}x${n} #${sol.id}  ${(sol.footprint && sol.footprint.shape) || ''} ${sol.decomposition || ''}`;
     recBtn.disabled = false; subBtn.disabled = false;
+    const f = findingFor(sol);                       // re-submit upserts on hash → prefill so tags aren't erased
+    renderTagRows(f && f.tags ? f.tags : null);
   }
 
   function exportFinding() {
@@ -797,6 +1007,7 @@ const App = (() => {
       if (res.ok && data.ok) {
         const p = data.record && data.record.predicted;
         const eng = p ? (p.matched ? (p.foldable ? 'FOLD' : 'JAM') : 'no engine match') : 'n/a';
+        await loadFindings();    // refresh the join so the new result/tags show in table + filters
         setFindingStatus(`saved ${rec.grid}#${rec.id} (engine predicted: ${eng})`, true);
       } else {
         setFindingStatus(`rejected: ${data.error || res.status} — downloading instead`, false);
@@ -813,6 +1024,14 @@ const App = (() => {
     const subBtn = document.getElementById('submitFindingBtn');
     if (recBtn) recBtn.addEventListener('click', exportFinding);
     if (subBtn) subBtn.addEventListener('click', submitFinding);
+    const keyInput = document.getElementById('findingTagKeys');
+    const keySave = document.getElementById('findingTagKeysSave');
+    if (keyInput) keyInput.value = getTagKeys().join(', ');
+    if (keySave) keySave.addEventListener('click', () => {
+      const keys = saveTagKeys(keyInput ? keyInput.value : '');
+      if (keyInput) keyInput.value = keys.join(', ');
+      renderTagRows(null);
+    });
     updateFindingPanel();
   }
 
@@ -827,6 +1046,7 @@ const App = (() => {
       state.search.tw0Only = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
+      clearFindingFilters();
       document.getElementById('searchTw0Only').checked = false;
       document.getElementById('searchDecompFilter').value = '';
       document.getElementById('searchShapeFilter').value = '';
@@ -858,11 +1078,6 @@ const App = (() => {
     // Result browsing
     document.getElementById('searchPrevBtn').addEventListener('click', () => stepTo(state.search.cursor - 1));
     document.getElementById('searchNextBtn').addEventListener('click', () => stepTo(state.search.cursor + 1));
-    const applyFilterChange = () => {
-      state.search.cursor = 0;
-      renderSearchTable();
-      if (filteredSolutions().length) stepTo(0); else renderSearchNav();
-    };
     document.getElementById('searchTw0Only').addEventListener('change', e => {
       state.search.tw0Only = e.target.checked; applyFilterChange();
     });
@@ -872,6 +1087,10 @@ const App = (() => {
     document.getElementById('searchShapeFilter').addEventListener('change', e => {
       state.search.shapeFilter = e.target.value; applyFilterChange();
     });
+    const fa = document.getElementById('filterActual');
+    if (fa) fa.addEventListener('change', e => { state.search.actualFilter = e.target.value; applyFilterChange(); });
+    const fp = document.getElementById('filterPredicted');
+    if (fp) fp.addEventListener('change', e => { state.search.predFilter = e.target.value; applyFilterChange(); });
     document.addEventListener('keydown', e => {
       const tag = (document.activeElement?.tagName) || '';
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;

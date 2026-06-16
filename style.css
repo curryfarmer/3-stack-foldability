@@ -72,6 +72,19 @@ label.opt input[type=checkbox] { margin-right: 6px; vertical-align: middle; }
 #searchNav button:disabled { opacity: 0.5; cursor: default; }
 #searchNavSummary { font-weight: 600; }
 
+/* Findings-join filter row — mirrors #searchNav, sits just below it. */
+#findingFilters {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 4;
+  background: #fafaf7; border: 1px solid #ddd; border-radius: 6px;
+  padding: 6px 12px; margin-top: 6px; font-size: 12px;
+}
+#findingFilters .sep { width: 1px; height: 18px; background: #ddd; }
+#findingFilters .mono { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+#tagFilterControls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#findingTagRows .tag-row { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-top: 2px; }
+#findingTagRows .tag-row .mono { font-family: ui-monospace, Menlo, monospace; min-width: 64px; }
+
 #searchProgressWrap {
   height: 8px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 4px;
 }

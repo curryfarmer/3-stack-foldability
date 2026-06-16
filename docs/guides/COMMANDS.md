@@ -150,6 +150,13 @@ python py/findings.py migrate results/twoplus1_labels.json results/foldfindings.
   filled by enumerating closing candidates (slow on big grids like 6x7).
 - **Scratch capture:** set `FOLDFINDINGS_DB` / `FOLDFINDINGS_LABLOG` to redirect writes to throwaway
   files (e.g. experiments) without touching the committed DB/log.
+- **Custom tags:** a finding may carry a free-form `tags` map `{<key>: true|false}` (tri-state: omit a
+  key = untested) to record which candidate 2-chain decomposition idea holds. In the View UI, set the
+  tag keys once in "Record physical finding" (persisted in `localStorage`); each finding then shows a
+  true/false/untested toggle per key. The findings filter row (under the result nav) joins findings
+  onto the loaded candidates and filters by **Actual** (FOLD/JAM/untested), **Predicted** (engine
+  verdict: parity∧reflection∧twist≠false), and each discovered tag key; the table gains a **Fold**
+  column showing the recorded result.
 - The matcher equivalence (engine verdict == recorded physics for the deciders) is locked by
   `tests/test_physical_deciders.py` + `tests/test_findings_matcher.py`.
 

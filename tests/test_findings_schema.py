@@ -25,6 +25,7 @@ VALID_FULL = {
     "by": "john",
     "date": "2026-06-08",
     "notes": "physical JAM",
+    "tags": {"modelA": True, "modelB": False, "modelC": None},   # tri-state custom tags
 }
 
 # The minimal shape a migrated twoplus1_labels record produces (only required keys + notes).
@@ -98,6 +99,26 @@ def test_rejects_bad_predicted_gate():
     rec["predicted"]["failingGates"] = ["parity", "banana"]  # "banana" not a gate name
     with pytest.raises(ValidationError):
         F.validate_finding(rec)
+
+
+@pytest.mark.parametrize("tags", [
+    {"modelA": "yes"},      # string value, not bool/null
+    {"modelA": 1},          # int value, not bool/null
+    [],                     # array, not an object
+])
+def test_rejects_bad_tags(tags):
+    rec = copy.deepcopy(VALID_FULL)
+    rec["tags"] = tags
+    with pytest.raises(ValidationError):
+        F.validate_finding(rec)
+
+
+def test_accepts_empty_and_absent_tags():
+    rec = copy.deepcopy(VALID_FULL)
+    rec["tags"] = {}                       # empty map ok
+    F.validate_finding(rec)
+    del rec["tags"]                        # tags is optional
+    F.validate_finding(rec)
 
 
 def test_norm_finding_normalizes_hash_without_mutating_input():

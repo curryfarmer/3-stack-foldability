@@ -82,6 +82,14 @@
           </label>
           <label class="opt">By <input id="findingBy" type="text" placeholder="name" style="width:120px"></label>
           <label class="opt">Notes <input id="findingNotes" type="text" style="width:100%"></label>
+          <div class="opt" style="margin-top:6px">
+            <div class="hint" style="font-size:11px">Tag keys (candidate decomposition ideas, comma-separated) — set once, persisted locally.</div>
+            <div style="display:flex; gap:6px; margin-top:2px">
+              <input id="findingTagKeys" type="text" placeholder="modelA, modelB, modelC" style="flex:1; font-size:11px">
+              <button id="findingTagKeysSave" type="button">Save keys</button>
+            </div>
+            <div id="findingTagRows" style="margin-top:4px"></div>
+          </div>
           <div style="display:flex; gap:6px; margin-top:6px">
             <button id="recordFindingBtn" disabled>Download JSON</button>
             <button id="submitFindingBtn" disabled>Submit</button>
@@ -153,6 +161,17 @@
         </label>
         <label class="opt" style="margin:0"><input type="checkbox" id="searchTw0Only" /> Tw=0 only</label>
         <span id="searchNavShowing" class="hint"></span>
+      </section>
+      <section id="findingFilters" style="display:none">
+        <span class="mono">Findings</span>
+        <label class="opt" style="margin:0">Actual
+          <select id="filterActual"><option value="">all</option><option value="fold">FOLD</option><option value="jam">JAM</option><option value="untested">untested</option></select>
+        </label>
+        <label class="opt" style="margin:0">Predicted
+          <select id="filterPredicted"><option value="">all</option><option value="yes">foldable</option><option value="no">not</option></select>
+        </label>
+        <span class="sep"></span>
+        <span id="tagFilterControls"></span>
       </section>
       <section id="grids"></section>
       <section id="searchResults" style="display:none">

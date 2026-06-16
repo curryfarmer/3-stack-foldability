@@ -76,6 +76,12 @@ SCHEMA = {
         "by": {"type": "string"},
         "date": {"type": "string"},
         "notes": {"type": "string"},
+        # Free-form user tags: arbitrary string keys -> tri-state bool (true/false/null=untested).
+        # Used to record, per finding, which candidate decomposition idea holds (e.g. {"modelA": true}).
+        "tags": {
+            "type": "object",
+            "additionalProperties": {"type": ["boolean", "null"]},
+        },
     },
 }
 
