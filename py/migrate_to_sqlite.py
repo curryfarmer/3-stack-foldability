@@ -23,13 +23,15 @@ if HERE not in sys.path:
 import store as Store  # noqa: E402
 
 
-def migrate_results(conn):
-    """Seed runs+patterns from every committed 3-stack result file. I/O: (conn) -> (n_runs, n_pat)."""
+def migrate_results(conn, results_dir=None):
+    """Seed runs+patterns from every 3-stack result file in `results_dir` (default the live results/;
+    pass a dir to seed from a backup/fixture). I/O: (conn, results_dir?) -> (n_runs, n_pat)."""
     n_runs = n_pat = 0
-    for e in Store.load_manifest():
+    results_dir = results_dir or Store.RESULTS_DIR
+    for e in Store.load_manifest(os.path.join(results_dir, "manifest.json")):
         if e.get("opts", {}).get("stacks", 3) != 3:
             continue   # 2-stack sols have a different shape (no footprint/chains) — not a patterns row
-        path = os.path.join(Store.RESULTS_DIR, e["file"])
+        path = os.path.join(results_dir, e["file"])
         if not os.path.exists(path):
             continue
         with open(path) as f:
@@ -43,11 +45,13 @@ def migrate_results(conn):
     return n_runs, n_pat
 
 
-def migrate_findings(conn):
-    """Seed finding (physical ground truth) + tag (tri-state hypotheses) from foldfindings.json.
-    foldable not None => physically observed => is_ground_truth=1. I/O: (conn) -> n_findings."""
+def migrate_findings(conn, findings_path=None):
+    """Seed finding (physical ground truth) + tag (tri-state hypotheses) from a foldfindings.json
+    (default the live one; pass a path to restore from a backup/export — pairs with
+    store.export_findings). foldable not None => physically observed => is_ground_truth=1.
+    I/O: (conn, findings_path?) -> n_findings."""
     import findings as F
-    recs = F.load_db()
+    recs = F.load_db(findings_path or F.DB_PATH)
     for rec in recs:
         nh = F._norm_hash(rec["canonicalHash"])
         foldable = rec.get("foldable")

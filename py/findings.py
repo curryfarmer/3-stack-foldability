@@ -2,8 +2,9 @@
 
 A FoldFinding records a human paper-fold result for one enumerated 3-stack candidate, keyed by the
 engine's `canonicalHash`. This module is the ONE findings schema + writer: it validates a finding
-against a JSON schema, upserts it into the findings DB (results/foldfindings.json) keyed by the
-normalized canonical hash, and appends a dated entry to docs/research/LAB_LOG.md.
+against a JSON schema, persists it (the SQLite `finding` table is the queryable master; the
+results/foldfindings.json list is a regenerable export kept in sync — see store.export_findings),
+keyed by the normalized canonical hash, and appends a dated entry to docs/research/LAB_LOG.md.
 
 Design notes:
   * The engine predicts JAM as a whole-candidate GATE VERDICT (which of parity/reflection/twist
@@ -250,30 +251,48 @@ def predict_finding(rec: dict, *, allow_non_corner: bool = False) -> dict:
 
 # ---------- submit (validate FIRST, then persist) ----------
 
+def _mirror_to_sqlite(rec: dict, sqlite_path: str) -> None:
+    """Write a submitted finding into the SQLite finding table (the queryable master). Lazy-imports
+    store so findings has no hard runtime dependency on the DB layer. I/O: (rec, path) -> None."""
+    import store as Store
+    conn = Store.connect(sqlite_path)
+    try:
+        Store.init_schema(conn)
+        Store.upsert_finding(conn, rec)
+    finally:
+        conn.close()
+
+
 def submit_record(rec: dict, *, db_path: str = DB_PATH, lab_log_path: str = LAB_LOG_PATH,
-                  engine_predict: bool = True) -> dict:
-    """Validate an in-memory FoldFinding, then upsert it into the DB and append a LAB_LOG entry.
+                  engine_predict: bool = True, sqlite_path: str | None = None) -> dict:
+    """Validate an in-memory FoldFinding, then persist it and append a LAB_LOG entry.
     Validation runs FIRST: a malformed payload raises ValidationError and writes NOTHING. The stored
     record keys on the normalized canonicalHash (re-submit overwrites, never duplicates). With
-    engine_predict=True the engine `predicted` block is filled (lazy enginelib enumeration). This is
-    the one write path that the file/CLI submit() and the serve.py POST route both wrap.
-    I/O: (rec, ...) -> the persisted (normalized) finding dict."""
+    engine_predict=True the engine `predicted` block is filled (lazy enginelib enumeration).
+
+    SQLite is the findings master: when sqlite_path is given the finding row is written there too
+    (the CLI passes the real DB). The foldfindings.json write is a regenerable export kept in sync.
+    serve.py passes no sqlite_path here and mirrors to SQLite separately, so this stays pure for the
+    unit tests that drive it with tmp JSON paths. I/O: (rec, ...) -> the persisted (normalized) finding."""
     validate_finding(rec)                          # raise BEFORE any write
     rec = norm_finding(rec)                         # DB key = normalized canonical hash
     if engine_predict:
         rec["predicted"] = predict_finding(rec)
-    save_db(upsert(load_db(db_path), rec), db_path)
+    if sqlite_path is not None:                     # DB is the master; write it first
+        _mirror_to_sqlite(rec, sqlite_path)
+    save_db(upsert(load_db(db_path), rec), db_path)  # regenerable JSON export, kept in sync
     append_lab_log(rec, lab_log_path)
     return rec
 
 
 def submit(path: str, *, db_path: str = DB_PATH, lab_log_path: str = LAB_LOG_PATH,
-           engine_predict: bool = True) -> dict:
+           engine_predict: bool = True, sqlite_path: str | None = None) -> dict:
     """Read a FoldFinding JSON file and submit it (validate FIRST, then persist). Thin file wrapper
     over submit_record. I/O: (path, ...) -> the persisted (normalized) finding dict."""
     with open(path, encoding="utf-8") as f:
         rec = json.load(f)
-    return submit_record(rec, db_path=db_path, lab_log_path=lab_log_path, engine_predict=engine_predict)
+    return submit_record(rec, db_path=db_path, lab_log_path=lab_log_path,
+                         engine_predict=engine_predict, sqlite_path=sqlite_path)
 
 
 # ---------- migration (twoplus1_labels.json -> FoldFinding DB, lossless) ----------
@@ -316,8 +335,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cmd, rest = args[0], args[1:]
     if cmd == "submit" and len(rest) == 1:
-        rec = submit(rest[0])
-        print(f"submitted {rec['grid']}#{rec['id']} -> {DB_PATH} (predicted: {rec.get('predicted')})")
+        import store as Store
+        rec = submit(rest[0], sqlite_path=Store.SQLITE_PATH)   # SQLite is the findings master
+        print(f"submitted {rec['grid']}#{rec['id']} -> {Store.SQLITE_PATH} "
+              f"(+ JSON export {DB_PATH}; predicted: {rec.get('predicted')})")
         return 0
     if cmd == "migrate" and len(rest) == 2:
         src, dst = rest

@@ -2,15 +2,16 @@
 
 Every legacy record must survive migration with its identity (grid/id/canonicalHash), verdict
 (foldable), and notes BYTE-IDENTICAL; the legacy shape/orient/K must reappear under `observed`; and
-every migrated record must validate against the FoldFinding schema. The real results/twoplus1_labels.json
-is used read-only as the corpus so the test guards the actual migration, not a toy fixture.
+every migrated record must validate against the FoldFinding schema. A frozen copy of the real
+twoplus1_labels.json under tests/fixtures/ is the read-only corpus, so the test guards the actual
+migration (real records, not a toy fixture) and survives the live results/ wipe.
 """
 import json
 import os
 
 import findings as F  # noqa: E402  (py/ on sys.path via conftest.py)
 
-TWOPLUS1 = os.path.join(F.RESULTS_DIR, "twoplus1_labels.json")
+TWOPLUS1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "twoplus1_labels.json")
 
 
 def _legacy():

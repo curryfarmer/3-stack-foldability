@@ -111,6 +111,46 @@ def test_runs_listing(tmp_path):
     conn.close()
 
 
+def test_runs_expose_annotation_columns(tmp_path):
+    db, rid, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    conn.execute("UPDATE runs SET label='exp', notes='hand note', frozen=0 WHERE id=?", (rid,))
+    conn.commit()
+    runs = serve.list_runs(conn)
+    assert runs[0]["label"] == "exp" and runs[0]["notes"] == "hand note" and runs[0]["frozen"] == 0
+    conn.close()
+
+
+_OPTS = {"m": 3, "n": 2, "stacks": 3, "shapes": {"L": True, "Rect": True},
+         "decomps": {"2+1": True, "1+1+1": True}, "allowNonCorner": True, "dedup": True,
+         "jobs": 1, "storeAll": True}
+
+
+def test_compare_helper_and_endpoint(tmp_path, monkeypatch):
+    db, rid, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    pk = conn.execute("SELECT params_key FROM runs WHERE id=?", (rid,)).fetchone()[0]
+    Store.freeze_run(conn, pk, "old")                        # preserve run 1
+    conn.close()
+    s2, c2, _ = Search.run(dict(_OPTS))                      # run 2 beside the snapshot (same opts)
+    rid2 = Store.save_sqlite(dict(_OPTS), s2, c2, lattice="square", region="rect", path=db)
+    conn = Store.connect(db)
+    d = serve._compare(conn, _q(a=rid, b=rid2))
+    assert d["changed"] == [] and d["onlyA"] == [] and d["onlyB"] == []   # same engine -> identical
+    conn.close()
+    httpd = _server(tmp_path, monkeypatch, db)
+    try:
+        port = httpd.server_address[1]
+        st, body = _get(port, f"/api/compare?a={rid}&b={rid2}")
+        assert st == 200 and body["changed"] == []
+        st, body = _get(port, "/api/compare?a=1")            # missing b -> 400, not 500
+        assert st == 400 and body["ok"] is False
+        st, body = _get(port, "/api/compare?a=x&b=y")        # non-integer ids -> 400
+        assert st == 400 and body["ok"] is False
+    finally:
+        httpd.shutdown()
+
+
 # ---------- live HTTP smoke: route dispatch + missing-DB fallback ----------
 
 def _server(tmp_path, monkeypatch, db):

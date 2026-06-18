@@ -186,7 +186,8 @@ python py/generate.py --m 6 --n 6 --store-all  # backfill the full covered set f
 
 **Schema** (one row per distinct pattern):
 
-- `runs` — one per generated set (params key, lattice, region, grid, opts/counts).
+- `runs` — one per generated set (params key, lattice, region, grid, opts/counts) + `label`, `notes`
+  (hand-edit in any SQLite browser — survives re-runs), and `frozen` (1 = a preserved snapshot, see §7a).
 - `patterns` — every covered candidate: `pattern_uid` (stable distinct-pattern id =
   `sha1(lattice|mxn|canonical_hash)[:12]`), `lattice` / `region` / `footprint_kind` (tiletype
   genericity — square now, triangle later), the verdict columns from §6, and a `detail_json` render
@@ -205,14 +206,163 @@ cross-table join key.
 |-------|---------|
 | `GET /api/runs` | list runs + pattern counts (drives the View grid dropdown) |
 | `GET /api/patterns?run=&lattice=&sort=&dir=&filter=col:val&filter=tag:KEY:val&limit=&offset=` | paged / sorted / filtered patterns + per-row tags + `agree` |
+| `GET /api/compare?a=&b=` | engine-vs-engine diff of two runs by `pattern_uid` (verdict flips + only-in-A/B) |
 | `POST /api/tag` | live single-tag upsert `{canonicalHash,key,value,provenance}` (value `null` = clear) |
-| `POST /api/findings` | physical finding → validate → `foldfindings.json` + `LAB_LOG.md` + SQLite `finding` mirror |
+| `POST /api/findings` | physical finding → validate → SQLite `finding` (**master**) + `LAB_LOG.md` + best-effort `foldfindings.json` export |
+
+### 7a. Annotating runs + comparing engine versions
+
+Tell runs apart and regression-test engine changes:
+
+- **Annotate:** `--label "twist-fix v2"` / `--note "…"` on `generate`, or just open `folddb.sqlite3` in a
+  SQLite browser and type into the `notes` column. Annotations survive a plain re-run of the same grid.
+- **Compare old vs new engine:** generate a baseline, change the math, then re-run with
+  `--snapshot "<label>"`. It freezes the old run (kept, `frozen=1`), writes the new run beside it, and
+  prints which patterns' verdicts **flipped** (joined by the stable `pattern_uid`). Both runs stay
+  browsable; the full diff is also `GET /api/compare?a=<old>&b=<new>`.
+
+```bash
+python py/generate.py --m 6 --n 6 --store-all                 # baseline
+# … edit py/search.py / py/fold.py …
+python py/generate.py --m 6 --n 6 --store-all --snapshot v1   # re-run + diff vs frozen "v1"
+```
 
 > **Security:** `ORDER BY` / `WHERE` columns are restricted to a closed whitelist and all values are
 > parameterized — a user-registered tag key can never become a SQL-injection vector.
 
 If the DB is absent (or you opened the page on `file://`), the viewer falls back to the static
 `manifest.json` read path and write-back is disabled (use download / CLI submit instead).
+
+### 7b. Database maintenance & manipulation
+
+The SQLite DB is the **write-master** for everything (runs, patterns, tags, findings); the JSON files
+are regenerable exports. This section is the full inventory of commands to inspect, edit, back up,
+reset, and wipe it.
+
+> **Close DB Browser for SQLite first.** If you have the `.sqlite3` file open in DB Browser (or any
+> tool holding a write lock), `generate`/`serve`/`reset_db` will hit `database is locked`. Close it
+> before any write. (A `PRAGMA busy_timeout=5000` rides out transient locks, not a held one.)
+>
+> **Back up before destructive ops** by copying the file: `cp results/folddb.sqlite3 results/folddb.bak.sqlite3`.
+
+**Scratch / test DB** — rehearse destructive commands safely. Every CLI takes `--test` (→
+`results/folddb.test.sqlite3`, gitignored) or `--db PATH`; `FOLDDB_SQLITE` overrides the default.
+
+```bash
+python py/generate.py --m 3 --n 2 --store-all --test   # populate the scratch DB (real DB untouched)
+python serve.py --test                                  # serve the scratch DB
+python py/reset_db.py --test --dry-run                  # rehearse a reset on the scratch DB
+```
+
+**Inspect** (read-only `sqlite3` shell, or any browser):
+
+```bash
+sqlite3 results/folddb.sqlite3 "SELECT (SELECT COUNT(*) FROM runs) runs, \
+  (SELECT COUNT(*) FROM patterns) patterns, (SELECT COUNT(*) FROM tag) tags, \
+  (SELECT COUNT(*) FROM finding) findings, \
+  (SELECT COUNT(*) FROM finding WHERE is_ground_truth=1) ground_truth;"
+sqlite3 results/folddb.sqlite3 "SELECT id,m,n,label,frozen,generated FROM runs ORDER BY id;"
+sqlite3 results/folddb.sqlite3 "SELECT * FROM v_compare WHERE phys_foldable IS NOT NULL;"  # ground truths + agree flag
+```
+
+**Edit a run** label / note (annotations survive a plain re-run of the same grid):
+
+```sql
+UPDATE runs SET label='twist-fix v2', notes='re-derived seams' WHERE id=7;
+```
+
+**Tag CRUD** (EAV custom columns, no migration). Prefer `POST /api/tag` from the viewer for the
+join-key bookkeeping, but raw SQL works (`norm_hash` = sorted-keys compact `canonicalHash`):
+
+```sql
+INSERT INTO tag(norm_hash,key,val_bool,provenance) VALUES('<norm_hash>','suspect',1,'handmath')
+  ON CONFLICT(norm_hash,key) DO UPDATE SET val_bool=excluded.val_bool;   -- add / update
+DELETE FROM tag WHERE norm_hash='<norm_hash>' AND key='suspect';         -- remove one
+DELETE FROM tag WHERE key='suspect';                                     -- drop the whole column
+```
+
+**Delete a single run** (its patterns cascade via the FK; tags/findings are keyed by `norm_hash` and
+are **not** touched):
+
+```sql
+PRAGMA foreign_keys=ON;                 -- sqlite3 shell defaults OFF; the app always sets it ON
+DELETE FROM runs WHERE id=7;            -- patterns of run 7 vanish with it
+```
+
+**Reset to ground truth** (the physical-verification reset — clears all runs+patterns+tags and every
+non-ground-truth finding, keeps `is_ground_truth=1`, then VACUUMs):
+
+```bash
+python py/reset_db.py --dry-run                  # preview before→after counts; writes nothing
+python py/reset_db.py                            # do it (real DB) — keeps ground truths
+python py/reset_db.py --export-findings          # dump findings → foldfindings.json first, then reset
+python py/reset_db.py --all                      # also delete findings (fully empty DB)
+```
+
+| flag | effect |
+| --- | --- |
+| `--dry-run` | report the planned before→after per table; write nothing |
+| (default) | keep `finding.is_ground_truth=1`; delete runs, patterns, tags, non-GT findings |
+| `--all` | additionally delete all findings (empties the DB) |
+| `--export-findings [PATH]` | dump findings → JSON (default `results/foldfindings.json`) before resetting |
+| `--db PATH` / `--test` | target a specific / the scratch DB |
+
+The raw SQL it runs (one transaction, then `VACUUM`):
+
+```sql
+DELETE FROM runs;                                       -- CASCADE clears patterns
+DELETE FROM tag;
+DELETE FROM finding WHERE COALESCE(is_ground_truth,0)!=1;  -- omit this line for --all (deletes all)
+```
+
+**Findings export / import** (DB ⇄ JSON — nothing is ever stranded):
+
+```bash
+python py/reset_db.py --export-findings results/foldfindings.json   # DB finding → JSON (regenerable export)
+python py/migrate_to_sqlite.py                                       # JSON → DB (idempotent re-import)
+```
+
+**Export patterns as fold-pattern images** (the to-test batch — same sort/filter vocabulary as
+`GET /api/patterns`). Renders one PNG per pattern into `--out` plus an `index.csv` cross-ref sheet:
+
+```bash
+python py/export_patterns.py --out batch_a --filter parity:true --sort reflection
+python py/export_patterns.py --out batch_b --run 7 --filter twist:null --limit 50
+python py/export_patterns.py --out batch_c --filter exit_footprint:true --filter is_ground_truth:null --test
+```
+
+| flag | effect |
+| --- | --- |
+| `--out DIR` (required) | output folder (created if absent); images named `{m}x{n}_{pattern_uid}.png` |
+| `--filter COL:VAL` | repeatable; `col:true\|false\|null\|<int>` or `tag:KEY:val` (whitelist == the API) |
+| `--sort KEY` / `--dir asc\|desc` | sort key (`reflection`, `parity`, `twist`, `seq`, …) + direction |
+| `--run ID` / `--lattice NAME` | restrict to one run / lattice |
+| `--limit N` | cap images; prints how many of the total were dropped (never silent) |
+| `--dpi N` / `--format png\|pdf` | render resolution / file format |
+| `--db PATH` / `--test` | read a specific / the scratch DB |
+
+`index.csv` carries `pattern_uid`, `canonical_hash`, `norm_hash`, `run_id`, every verdict column, and
+`phys_foldable`/`is_ground_truth` — record the physical result against the `canonical_hash` row.
+
+**VACUUM / WAL checkpoint** (after big deletes; `reset_db.py` VACUUMs for you):
+
+```bash
+sqlite3 results/folddb.sqlite3 "VACUUM;"                       # reclaim freed pages
+sqlite3 results/folddb.sqlite3 "PRAGMA wal_checkpoint(TRUNCATE);"  # fold the -wal back into the main file
+```
+
+**The final JSON wipe** (one-time, on your call). Once ground truths are rebuilt in the DB, the
+legacy JSON is redundant — the DB is the sole master. This deletes the per-grid result files, the
+manifest, and the findings JSON; the DB and `tests/fixtures/` retain everything needed (tests read the
+frozen fixtures, not live `results/`):
+
+```bash
+python py/reset_db.py --export-findings        # OPTIONAL last backup of findings → JSON before the wipe
+rm results/*.json results/manifest.json results/foldfindings.json
+```
+
+After the wipe, regenerate any pattern set on demand with `generate.py --store-all`; findings live in
+the DB and round-trip to JSON via `--export-findings` / `migrate_to_sqlite.py`.
 
 ---
 

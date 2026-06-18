@@ -142,8 +142,9 @@ def test_v_compare_agree_flags_disagreement(tmp_path):
 def test_export_json_round_trip(tmp_path):
     db, rid, sols = _seed(tmp_path)
     conn = Store.connect(db)
-    path = Store.export_json(conn, rid)
+    path = Store.export_json(conn, rid, out_dir=str(tmp_path))   # tmp dir, NEVER the real results/
     conn.close()
+    assert str(tmp_path) in path                                 # isolation: not written to results/
     data = json.load(open(path))
     assert len(data["solutions"]) == len(sols)
     assert data["meta"]["m"] == 3 and data["meta"]["n"] == 2
@@ -151,19 +152,141 @@ def test_export_json_round_trip(tmp_path):
     assert {s["canonicalHash"] for s in data["solutions"]} == {s["canonicalHash"] for s in sols}
 
 
+# ---------- run annotation + snapshot/freeze + engine-vs-old diff ----------
+
+def test_freeze_run_preserves_snapshot_and_allows_new_live(tmp_path):
+    db, rid, sols = _seed(tmp_path)
+    conn = Store.connect(db)
+    frozen = Store.freeze_run(conn, Store.params_key(_opts()), "old engine")
+    assert frozen == rid
+    fr = conn.execute("SELECT params_key, frozen, label FROM runs WHERE id=?", (rid,)).fetchone()
+    assert fr["frozen"] == 1 and fr["label"] == "old engine" and fr["params_key"].endswith("#old engine")
+    assert conn.execute("SELECT COUNT(*) FROM patterns WHERE run_id=?", (rid,)).fetchone()[0] == len(sols)
+    conn.close()
+    # a re-run with the SAME opts now creates a NEW live run beside the frozen snapshot
+    sols2, ctx2, _ = Search.run(_opts())
+    rid2 = Store.save_sqlite(_opts(), sols2, ctx2, lattice="square", region="rect", path=db)
+    assert rid2 != rid
+    conn = Store.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2          # both coexist
+    assert conn.execute("SELECT frozen FROM runs WHERE id=?", (rid2,)).fetchone()["frozen"] == 0
+    conn.close()
+
+
+def test_freeze_run_none_when_no_live_run(tmp_path):
+    db = str(tmp_path / "folddb.sqlite3")
+    conn = Store.connect(db)
+    Store.init_schema(conn)
+    assert Store.freeze_run(conn, "nonexistent", "x") is None
+    conn.close()
+
+
+def test_upsert_run_carries_forward_notes_and_label(tmp_path):
+    db, rid, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    conn.execute("UPDATE runs SET notes=?, label=? WHERE id=?", ("hand-typed note", "exp1", rid))
+    conn.commit()
+    conn.close()
+    sols, ctx, _ = Search.run(_opts())                       # plain re-run, same opts
+    Store.save_sqlite(_opts(), sols, ctx, lattice="square", region="rect", path=db)
+    conn = Store.connect(db)
+    r = conn.execute("SELECT notes, label FROM runs WHERE params_key=? AND COALESCE(frozen,0)=0",
+                     (Store.params_key(_opts()),)).fetchone()
+    assert r["notes"] == "hand-typed note" and r["label"] == "exp1"    # survived the replace
+    # an explicit new label overrides the carried-forward one
+    Store.save_sqlite(_opts(), sols, ctx, lattice="square", region="rect", path=db, label="exp2")
+    r = conn.execute("SELECT notes, label FROM runs WHERE params_key=? AND COALESCE(frozen,0)=0",
+                     (Store.params_key(_opts()),)).fetchone()
+    assert r["label"] == "exp2" and r["notes"] == "hand-typed note"
+    conn.close()
+
+
+def test_diff_runs_reports_verdict_flips(tmp_path):
+    db, rid, sols = _seed(tmp_path)
+    conn = Store.connect(db)
+    Store.freeze_run(conn, Store.params_key(_opts()), "old")
+    conn.close()
+    sols2, ctx2, _ = Search.run(_opts())
+    rid2 = Store.save_sqlite(_opts(), sols2, ctx2, lattice="square", region="rect", path=db)
+    conn = Store.connect(db)
+    frozen_id = conn.execute("SELECT id FROM runs WHERE frozen=1").fetchone()[0]
+    d0 = Store.diff_runs(conn, frozen_id, rid2)               # identical engine -> no changes
+    assert d0["changed"] == [] and d0["onlyA"] == [] and d0["onlyB"] == []
+    # flip one verdict in the new run -> diff surfaces exactly that pattern_uid + column
+    row = conn.execute("SELECT pattern_uid, parity FROM patterns WHERE run_id=? LIMIT 1", (rid2,)).fetchone()
+    flipped = 0 if row["parity"] else 1
+    conn.execute("UPDATE patterns SET parity=? WHERE run_id=? AND pattern_uid=?",
+                 (flipped, rid2, row["pattern_uid"]))
+    conn.commit()
+    d1 = Store.diff_runs(conn, frozen_id, rid2)
+    assert len(d1["changed"]) == 1
+    assert d1["changed"][0]["pattern_uid"] == row["pattern_uid"]
+    assert "parity" in d1["changed"][0]["deltas"]
+    conn.close()
+
+
+def test_snapshot_and_save_diff(tmp_path):
+    db, rid, _ = _seed(tmp_path)
+    sols2, ctx2, _ = Search.run(_opts())
+    res = Store.snapshot_and_save(_opts(), sols2, ctx2, snapshot="old engine", path=db)
+    assert res["frozen_id"] == rid and res["run_id"] != rid
+    assert res["diff"]["changed"] == []                      # same engine -> identical
+    # first-ever run (no prior live) -> frozen_id/diff None, still writes the run
+    db2 = str(tmp_path / "fresh.sqlite3")
+    sols3, ctx3, _ = Search.run(_opts())
+    res2 = Store.snapshot_and_save(_opts(), sols3, ctx3, snapshot="v1", path=db2)
+    assert res2["frozen_id"] is None and res2["diff"] is None and res2["run_id"]
+
+
+def test_init_schema_backfills_old_runs_table(tmp_path):
+    """A DB whose runs table predates the annotation columns gets them via ALTER (data preserved)."""
+    db = str(tmp_path / "old.sqlite3")
+    conn = Store.connect(db)
+    conn.executescript(
+        "CREATE TABLE runs(id INTEGER PRIMARY KEY, params_key TEXT UNIQUE, lattice TEXT, region TEXT, "
+        "m INTEGER, n INTEGER, stacks INTEGER, opts_json TEXT, counts_json TEXT, generated TEXT);"
+        "INSERT INTO runs(params_key,m,n,stacks) VALUES('k',6,6,3);")
+    conn.commit()
+    Store.init_schema(conn)
+    Store.init_schema(conn)                                   # idempotent (no duplicate-column error)
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    assert {"label", "notes", "frozen"} <= have
+    assert conn.execute("SELECT m FROM runs WHERE params_key='k'").fetchone()["m"] == 6   # data kept
+    conn.close()
+
+
 # ---------- migration: idempotent seed from the committed JSON ----------
 
-def test_migration_idempotent(tmp_path, monkeypatch):
-    db = str(tmp_path / "folddb.sqlite3")
-    monkeypatch.setattr(Store, "SQLITE_PATH", db)
+def test_migration_idempotent(tmp_path):
+    """Seed from the frozen tests/fixtures/ corpus (independent of the wipe-able live results/) and
+    prove re-seeding neither duplicates nor mis-flags ground truth."""
+    import os
     import migrate_to_sqlite as M
-    M.main()
+    fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+    findings = os.path.join(fixtures, "foldfindings.json")
+    db = str(tmp_path / "folddb.sqlite3")
+
+    def seed():
+        conn = Store.connect(db)
+        try:
+            Store.init_schema(conn)
+            M.migrate_results(conn, results_dir=fixtures)
+            M.migrate_findings(conn, findings_path=findings)
+            conn.commit()
+        finally:
+            conn.close()
+
+    seed()
     conn = Store.connect(db)
-    first = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
+    first_pat = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
+    first_find = conn.execute("SELECT COUNT(*) FROM finding").fetchone()[0]
     conn.close()
-    M.main()                                   # second run must not duplicate
+    assert first_pat > 0 and first_find > 0            # fixtures actually seeded something
+
+    seed()                                             # second run must not duplicate
     conn = Store.connect(db)
-    assert conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0] == first
+    assert conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0] == first_pat
+    assert conn.execute("SELECT COUNT(*) FROM finding").fetchone()[0] == first_find
     # every migrated finding with a known physical result is flagged ground truth
     bad = conn.execute("SELECT COUNT(*) FROM finding WHERE foldable IS NOT NULL "
                        "AND is_ground_truth!=1").fetchone()[0]

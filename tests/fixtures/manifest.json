@@ -1,0 +1,76 @@
+[
+  {
+    "key": "bbc04a7f",
+    "file": "6x4_bbc04a7f.json",
+    "m": 6,
+    "n": 4,
+    "opts": {
+      "m": 6,
+      "n": 4,
+      "stacks": 3,
+      "dedup": true,
+      "shapes": {
+        "L": true,
+        "Rect": true
+      },
+      "decomps": {
+        "1+1+1": true,
+        "2+1": true
+      },
+      "allowNonCorner": false
+    },
+    "count": 2,
+    "generated": "2026-06-09T00:07:29"
+  },
+  {
+    "key": "dc0a9114",
+    "file": "6x4_2stack_dc0a9114.json",
+    "m": 6,
+    "n": 4,
+    "opts": {
+      "m": 6,
+      "n": 4,
+      "stacks": 2,
+      "dedup": true
+    },
+    "count": 15,
+    "generated": "2026-05-28T14:06:04"
+  },
+  {
+    "key": "7a4f78a7",
+    "file": "6x5_2stack_7a4f78a7.json",
+    "m": 6,
+    "n": 5,
+    "opts": {
+      "m": 6,
+      "n": 5,
+      "stacks": 2,
+      "dedup": true
+    },
+    "count": 44,
+    "generated": "2026-05-28T14:06:04"
+  },
+  {
+    "key": "c25f38f8",
+    "file": "6x5_c25f38f8.json",
+    "m": 6,
+    "n": 5,
+    "opts": {
+      "m": 6,
+      "n": 5,
+      "stacks": 3,
+      "dedup": true,
+      "shapes": {
+        "L": true,
+        "Rect": true
+      },
+      "decomps": {
+        "1+1+1": true,
+        "2+1": true
+      },
+      "allowNonCorner": false
+    },
+    "count": 3,
+    "generated": "2026-06-09T00:07:08"
+  }
+]

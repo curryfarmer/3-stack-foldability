@@ -7,7 +7,8 @@ present, an object. `_accepts()` below mirrors that guard exactly.
 py/store.py writes `{meta:{m,n,stacks,opts,generated,counts}, solutions:[...]}` (store.py:71-75). This
 test proves (a) every committed result file the viewer would fetch satisfies the loader contract AND
 carries the full store meta keys, and (b) the loader contract actually *rejects* malformed shapes — so
-the positive assertions aren't vacuous. If store.py's payload keys change, this fails.
+the positive assertions aren't vacuous. If store.py's payload keys change, this fails. The corpus is
+the frozen tests/fixtures/ set (independent of the regenerable, wipe-able live results/).
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from typing import Any
 import pytest
 
 _HERE: str = os.path.dirname(os.path.abspath(__file__))
-_RESULTS: str = os.path.join(os.path.dirname(_HERE), "results")
+_RESULTS: str = os.path.join(_HERE, "fixtures")   # frozen anchor corpus, independent of live results/
 
 # Full meta contract emitted by store.save_result (store.py:71-75).
 _META_KEYS = {"m", "n", "stacks", "opts", "generated", "counts"}

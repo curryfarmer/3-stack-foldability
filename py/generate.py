@@ -38,6 +38,16 @@ def parse_args(argv):
     p.add_argument("--no-dedup", action="store_true", help="disable D4 dedup")
     p.add_argument("--force", action="store_true", help="regenerate even if cached")
     p.add_argument("--list", action="store_true", help="print manifest and exit")
+    # SQLite run annotation + engine-vs-old-engine compare (store-all 3-stack only)
+    p.add_argument("--label", help="short name stored on the SQLite run (e.g. 'twist-fix v2')")
+    p.add_argument("--note", help="free-text note stored on the SQLite run (also editable in a DB browser)")
+    p.add_argument("--snapshot", metavar="LABEL",
+                   help="before writing, freeze the current run for these opts as a labeled snapshot, "
+                        "then diff the new engine output against it by pattern_uid (keeps both runs)")
+    p.add_argument("--db", metavar="PATH",
+                   help="SQLite DB path (default $FOLDDB_SQLITE or results/folddb.sqlite3)")
+    p.add_argument("--test", action="store_true",
+                   help="use the scratch DB results/folddb.test.sqlite3 (rehearse without touching real data)")
     return p.parse_args(argv)
 
 
@@ -54,6 +64,21 @@ def build_opts(args):
         "jobs": args.jobs,
         "storeAll": args.store_all,
     }
+
+
+def _print_diff(res, snapshot_label, limit=25):
+    """Print the engine-vs-snapshot pattern_uid diff from Store.snapshot_and_save()'s result."""
+    if res.get("frozen_id") is None:
+        print(f"  snapshot '{snapshot_label}': no prior run for these opts — nothing to diff against")
+        return
+    d = res["diff"]
+    print(f"  diff vs snapshot '{snapshot_label}' (run {res['frozen_id']} -> {res['run_id']}): "
+          f"{len(d['changed'])} verdict flips, {len(d['onlyA'])} removed, {len(d['onlyB'])} added")
+    for c in d["changed"][:limit]:
+        flips = ", ".join(f"{k} {v[0]}->{v[1]}" for k, v in c["deltas"].items())
+        print(f"    {c['pattern_uid']}: {flips}")
+    if len(d["changed"]) > limit:
+        print(f"    … +{len(d['changed']) - limit} more (full diff via GET /api/compare)")
 
 
 def main(argv):
@@ -78,7 +103,18 @@ def main(argv):
 
     opts = build_opts(args)
 
-    if not args.force:
+    # An explicit DB target only has a place to write when this is a 3-stack store-all run (the sole
+    # path that lands in SQLite). Without --store-all, --db/--test would suppress the JSON yet write no
+    # DB row — a silent no-op. Fail fast instead.
+    if (args.db or args.test) and not (opts["stacks"] == 3 and opts.get("storeAll")):
+        print("error: --db/--test requires --store-all (only the store-all covered set has a SQLite "
+              "target; gated/2-stack runs write JSON, which an explicit-DB run suppresses)",
+              file=sys.stderr)
+        return 2
+
+    # Bypass the JSON cache when the engine MUST actually run: --force, --snapshot (needs fresh output
+    # to diff), or an explicit --db/--test target (the point is to populate THAT database).
+    if not (args.force or args.snapshot or args.db or args.test):
         cached = Store.find_cached(opts)
         if cached:
             print(f"cached: {cached['count']} solutions -> results/{cached['file']} "
@@ -92,21 +128,35 @@ def main(argv):
     if err:
         print(f"rejected: {err}", file=sys.stderr)
         return 1
-    path = Store.save_result(opts, solutions, ctx)
-    fname = os.path.basename(path)              # os.sep-safe (Windows backslash paths)
+    # An explicit DB target (--db/--test) writes ONLY that database — it does NOT touch the legacy
+    # results/*.json + manifest (those are being phased out, and a scratch run must not pollute them).
+    explicit_db = bool(args.db or args.test)
+    if explicit_db:
+        fname = None
+    else:
+        path = Store.save_result(opts, solutions, ctx)
+        fname = os.path.basename(path)          # os.sep-safe (Windows backslash paths)
     # Phase-A store-all also lands in the SQLite write-master (the API + live-tag write-back read it);
     # the JSON above stays the file:// / archival fallback. Gated runs stay JSON-only (legacy path).
     if opts["stacks"] == 3 and opts.get("storeAll"):
-        Store.save_sqlite(opts, solutions, ctx, lattice="square", region="rect")
-        print(f"  + SQLite write-master updated -> {Store.SQLITE_PATH}")
+        db_path = Store.resolve_db_path(args.db, args.test)
+        if args.snapshot:
+            res = Store.snapshot_and_save(opts, solutions, ctx, lattice="square", region="rect",
+                                          snapshot=args.snapshot, label=args.label, note=args.note,
+                                          path=db_path)
+            print(f"  + SQLite write-master updated -> {db_path} (run {res['run_id']})")
+            _print_diff(res, args.snapshot)
+        else:
+            run_id = Store.save_sqlite(opts, solutions, ctx, lattice="square", region="rect",
+                                       label=args.label, note=args.note, path=db_path)
+            print(f"  + SQLite write-master updated -> {db_path} (run {run_id})")
+    dest = "the SQLite DB only" if fname is None else f"results/{fname}"
     if opts["stacks"] == 2:
         foldable = sum(1 for s in solutions if s["verdict"]["foldable"])
-        print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {foldable}) "
-              f"-> results/{fname}")
+        print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {foldable}) -> {dest}")
     else:
         twist0 = sum(1 for s in solutions if s["verdict"]["twist"] is True)
-        print(f"generated {len(solutions)} solutions (Tw=0 decided: {twist0}) "
-              f"-> results/{fname}")
+        print(f"generated {len(solutions)} solutions (Tw=0 decided: {twist0}) -> {dest}")
     return 0
 
 

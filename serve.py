@@ -34,6 +34,22 @@ import store as Store  # noqa: E402
 ENDPOINT = "/api/findings"
 ENDPOINT_TAG = "/api/tag"
 
+# Findings JSON-export + lab-log targets the POST path writes (SQLite is the master, written by
+# _mirror_finding). main() repoints these beside a scratch/custom DB so `serve.py --test` leaves the
+# real foldfindings.json / LAB_LOG.md byte-untouched — matching `generate.py --test` isolation.
+FINDINGS_JSON = F.DB_PATH
+LAB_LOG_PATH = F.LAB_LOG_PATH
+
+
+def _findings_targets(db_path: str, default_db: str) -> tuple[str, str]:
+    """Findings JSON-export + lab-log paths for the active DB: the real ones for the default DB, else
+    siblings of a scratch/custom DB so `--test`/`--db` leave the real files byte-untouched.
+    I/O: (active_db_path, default_db_path) -> (findings_json, lab_log_path)."""
+    if os.path.abspath(db_path) == os.path.abspath(default_db):
+        return F.DB_PATH, F.LAB_LOG_PATH
+    base = os.path.splitext(db_path)[0]
+    return base + ".foldfindings.json", base + ".LAB_LOG.md"
+
 # --- read-API whitelists (mandatory: sort/filter values reach SQL, so the column set is closed) ----
 # Pattern columns safe to ORDER BY / WHERE (every real column of the patterns table).
 _PAT_COLS = frozenset((
@@ -132,6 +148,15 @@ def _order_clause(sort):
     return "p.seq", "", []
 
 
+def _compare(conn, q):
+    """GET /api/compare?a=&b= -> Store.diff_runs(a,b). Both run ids required + integer (else 400)."""
+    one = lambda k: (q.get(k) or [None])[0]
+    a, b = _int(one("a"), None), _int(one("b"), None)
+    if a is None or b is None:
+        raise BadRequest("compare requires integer run ids 'a' and 'b'")
+    return Store.diff_runs(conn, a, b)
+
+
 def list_runs(conn):
     """All runs with their pattern counts, newest grids first. I/O: (conn) -> list[dict]."""
     rows = conn.execute(
@@ -208,6 +233,9 @@ class FindingHandler(SimpleHTTPRequestHandler):
         elif route == "/api/patterns":
             q = urlparse.parse_qs(parsed.query, keep_blank_values=True)
             self._api_read(lambda conn: query_patterns(conn, q))
+        elif route == "/api/compare":
+            q = urlparse.parse_qs(parsed.query, keep_blank_values=True)
+            self._api_read(lambda conn: _compare(conn, q))
         else:
             super().do_GET()                            # static frontend byte-identical to stdlib
 
@@ -242,7 +270,7 @@ class FindingHandler(SimpleHTTPRequestHandler):
             self._post_tag(payload)
             return
         try:
-            rec = F.submit_record(payload)              # validate FIRST -> upsert JSON -> LAB_LOG
+            rec = F.submit_record(payload, db_path=FINDINGS_JSON, lab_log_path=LAB_LOG_PATH)  # validate FIRST -> upsert JSON -> LAB_LOG
         except ValidationError as exc:
             self._json(400, {"ok": False, "error": f"schema: {exc.message}"})
             return
@@ -256,7 +284,9 @@ class FindingHandler(SimpleHTTPRequestHandler):
         self._json(200, {"ok": True, "record": rec})
 
     def _mirror_finding(self, rec: dict) -> None:
-        """Best-effort mirror of a submitted finding into SQLite (JSON stays canonical for findings)."""
+        """Write a submitted finding into SQLite — the findings master (the JSON the submit pipeline
+        also wrote is a regenerable export). Best-effort + logged: a mirror failure must not lose the
+        already-persisted JSON record; the row can be rebuilt with migrate_to_sqlite."""
         try:
             conn = Store.connect()
             try:
@@ -310,13 +340,23 @@ class FindingHandler(SimpleHTTPRequestHandler):
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Serve the frontend + findings POST route. I/O: (argv) -> exit code. `serve.py [port]` (8000)."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    port = int(args[0]) if args else 8000
+    """Serve the frontend + findings POST route. I/O: (argv) -> exit code.
+    `serve.py [port] [--db PATH | --test]` (port 8000, real write-master DB by default)."""
+    import argparse
+    p = argparse.ArgumentParser(description="3-stack frontend + findings/read API server")
+    p.add_argument("port", nargs="?", type=int, default=8000)
+    p.add_argument("--db", metavar="PATH", help="SQLite DB to read/write (default $FOLDDB_SQLITE)")
+    p.add_argument("--test", action="store_true", help="serve the scratch DB results/folddb.test.sqlite3")
+    ns = p.parse_args(sys.argv[1:] if argv is None else argv)
+    port = ns.port
+    global FINDINGS_JSON, LAB_LOG_PATH
+    default_db = Store.resolve_db_path()                       # capture BEFORE overwriting SQLITE_PATH
+    Store.SQLITE_PATH = Store.resolve_db_path(ns.db, ns.test)   # handler reads this module global
+    FINDINGS_JSON, LAB_LOG_PATH = _findings_targets(Store.SQLITE_PATH, default_db)
     handler = functools.partial(FindingHandler, directory=ROOT)
     httpd = HTTPServer(("127.0.0.1", port), handler)
     print(f"serving {ROOT} at http://127.0.0.1:{port}/  "
-          f"(GET /api/runs, /api/patterns -> {Store.SQLITE_PATH}; POST {ENDPOINT} -> {F.DB_PATH})")
+          f"(GET /api/runs, /api/patterns -> {Store.SQLITE_PATH}; POST {ENDPOINT} -> {FINDINGS_JSON})")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

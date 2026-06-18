@@ -82,6 +82,19 @@ def test_upsert_finding_provenance_gates_ground_truth(tmp_path):
     conn.close()
 
 
+def test_findings_targets_default_vs_scratch(tmp_path):
+    """serve._findings_targets: the default DB keeps the real findings JSON / lab log; a scratch or
+    custom DB gets siblings beside it, so `serve.py --test`/`--db` never touch the real files."""
+    default_db = Store.resolve_db_path()
+    fj, lab = serve._findings_targets(default_db, default_db)
+    assert fj == F.DB_PATH and lab == F.LAB_LOG_PATH               # unchanged for the real DB
+    scratch = str(tmp_path / "folddb.test.sqlite3")
+    fj2, lab2 = serve._findings_targets(scratch, default_db)
+    assert fj2 == str(tmp_path / "folddb.test.foldfindings.json")  # redirected beside the scratch DB
+    assert lab2 == str(tmp_path / "folddb.test.LAB_LOG.md")
+    assert fj2 != F.DB_PATH and lab2 != F.LAB_LOG_PATH
+
+
 # ---------- HTTP write routes ----------
 
 def _server(monkeypatch, db):
@@ -143,7 +156,7 @@ def test_post_findings_mirrors_to_sqlite(tmp_path, monkeypatch):
     # mock the engine: submit_record normally validates + predicts + writes JSON; we only test the mirror
     canned = {"canonicalHash": ch, "foldable": True, "by": "me", "date": "2026-01-01",
               "grid": "3x2", "id": sols[0]["id"], "predicted": {"matched": True, "foldable": False}}
-    monkeypatch.setattr(F, "submit_record", lambda payload: canned)
+    monkeypatch.setattr(F, "submit_record", lambda payload, **kw: canned)   # serve passes db_path/lab_log_path
     httpd = _server(monkeypatch, db)
     try:
         port = httpd.server_address[1]

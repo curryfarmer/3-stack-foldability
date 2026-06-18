@@ -73,6 +73,33 @@ python py/generate.py --m 6 --n 6 --store-all          # all covered 6x6 pattern
 `file://` / static viewer) AND the **SQLite write-master** `results/folddb.sqlite3` (the live read/write
 DB the served viewer uses). It's a different result set from the gated run, so it gets its own file/key.
 
+### Run annotation + engine-vs-old-engine compare
+
+Each store-all run is a `runs` row carrying `label` / `notes` columns and a `frozen` flag. Annotate a run
+so you can tell experiments apart; **hand-edit `notes` directly in any SQLite browser** (it survives a
+plain re-run — `upsert_run` carries the old label/notes forward).
+
+```bash
+python py/generate.py --m 6 --n 6 --store-all --label "twist-fix v2" --note "after 2+1 change"
+```
+
+To **re-run a changed math engine over a set and compare to the old output**, use `--snapshot`: it
+freezes the current run as a labeled snapshot (renaming its `params_key` so it is preserved, not
+replaced), writes the new engine's run beside it, and prints the per-`pattern_uid` verdict diff. It
+implies a re-run (bypasses the JSON cache).
+
+```bash
+# 1. baseline                       2. change py/search.py / py/fold.py …
+python py/generate.py --m 6 --n 6 --store-all
+# 3. re-run new engine, keep the old as snapshot "v1", diff by pattern_uid
+python py/generate.py --m 6 --n 6 --store-all --snapshot "v1"
+#   -> diff vs snapshot 'v1' (run 11 -> 12): 3 verdict flips, 0 removed, 0 added
+#        105cdc389351: parity 0->1
+#        12e58c3f13a7: twist None->1
+```
+
+Both runs stay in the DB (the snapshot `frozen=1`); the full diff is also `GET /api/compare?a=&b=`.
+
 ---
 
 ## SQLite pattern DB + read/write API (`results/folddb.sqlite3`)
@@ -99,11 +126,41 @@ render blob) + `tag` (EAV custom columns) + `finding` (physical ground truth, `i
 | --- | --- |
 | `GET /api/runs` | list runs + pattern counts (drives the View grid dropdown) |
 | `GET /api/patterns?run=&lattice=&sort=&dir=&filter=col:val&filter=tag:KEY:val&limit=&offset=` | paged/sorted/filtered patterns + per-row tags + `agree` (ORDER BY/WHERE whitelisted, values parameterized) |
+| `GET /api/compare?a=<run_id>&b=<run_id>` | engine-vs-engine diff of two runs by `pattern_uid` → `{changed:[{pattern_uid,deltas}], onlyA, onlyB}` (bad/missing id → 400) |
 | `POST /api/tag` | live single-tag upsert `{canonicalHash,key,value,provenance}` (value null = clear) |
-| `POST /api/findings` | physical finding → validate → `foldfindings.json` + LAB_LOG + SQLite `finding` mirror |
+| `POST /api/findings` | physical finding → validate → SQLite `finding` (**master**) + LAB_LOG + best-effort `foldfindings.json` export |
 
 If the DB is absent (or on `file://`), the viewer falls back to the static `manifest.json` read path
 and write-back is disabled (download/CLI submit instead).
+
+### DB maintenance — scratch DB, reset, image export, JSON wipe
+
+Every CLI takes `--test` (→ `results/folddb.test.sqlite3`, gitignored) or `--db PATH`; `FOLDDB_SQLITE`
+overrides the default. **Close DB Browser before any write** (else `database is locked`). Full
+copy-paste reference (raw `sqlite3` snippets for inspect/edit/tag-CRUD/single-run delete/VACUUM) is in
+`USER_MANUAL.md` §7b.
+
+```bash
+python py/generate.py --m 3 --n 2 --store-all --test   # populate scratch DB (real DB untouched)
+python serve.py --test                                  # serve the scratch DB
+
+python py/reset_db.py --dry-run            # preview the reset-to-ground-truth (writes nothing)
+python py/reset_db.py                       # reset real DB: keep is_ground_truth=1, drop runs/patterns/tags/non-GT findings, VACUUM
+python py/reset_db.py --export-findings      # dump findings → foldfindings.json first, then reset
+python py/reset_db.py --all                  # also delete findings (fully empty DB)
+
+# fold-pattern images for the physical to-test batch (sort/filter vocab == GET /api/patterns)
+python py/export_patterns.py --out batch_a --filter parity:true --sort reflection
+python py/export_patterns.py --out batch_b --run 7 --filter twist:null --limit 50   # --limit reports any dropped
+#   -> {m}x{n}_{pattern_uid}.png per row + index.csv (pattern_uid, hashes, verdict cols) into --out
+
+# findings export/import symmetry (DB ⇄ JSON; nothing stranded)
+python py/reset_db.py --export-findings results/foldfindings.json   # DB → JSON
+python py/migrate_to_sqlite.py                                      # JSON → DB (idempotent)
+
+# final one-time JSON wipe (DB becomes sole master; tests read tests/fixtures/, not live results/)
+rm results/*.json results/manifest.json results/foldfindings.json
+```
 
 ### Performance toggles (multiprocessing + PyPy)
 

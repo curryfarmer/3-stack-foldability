@@ -82,3 +82,31 @@ def test_resubmit_different_hash_appends(tmp_path):
     other = dict(VALID, id=2, canonicalHash='{"c":3}')
     F.submit(_write(tmp_path, other, name="finding3.json"), engine_predict=False, **paths)
     assert len(F.load_db(paths["db_path"])) == 2            # genuinely new hash -> appended
+
+
+def test_submit_with_sqlite_path_writes_db_master(tmp_path):
+    """When a sqlite_path is given (the CLI path), the finding lands in the SQLite master too — not
+    just the JSON export. This is what lets foldfindings.json be wiped while findings persist."""
+    import store as Store
+    paths = _paths(tmp_path)
+    db = str(tmp_path / "folddb.sqlite3")
+    rec = dict(VALID, canonicalHash='{"a":1,"b":2}')        # already normalized JSON
+    F.submit_record(rec, engine_predict=False, sqlite_path=db, **paths)
+    conn = Store.connect(db)
+    try:
+        nh = F._norm_hash(rec["canonicalHash"])
+        row = conn.execute("SELECT foldable, provenance FROM finding WHERE norm_hash=?", (nh,)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row["foldable"] == 0          # physical JAM persisted to the DB master
+    assert F.load_db(paths["db_path"])                       # JSON export written in sync too
+
+
+def test_submit_without_sqlite_path_skips_db(tmp_path):
+    """The pure path (no sqlite_path — how serve.py + unit tests call it) writes NO DB row; serve.py
+    mirrors separately, and tests stay isolated to their tmp JSON."""
+    import store as Store
+    paths = _paths(tmp_path)
+    monkey_db = str(tmp_path / "should_not_exist.sqlite3")
+    F.submit_record(dict(VALID), engine_predict=False, **paths)   # no sqlite_path
+    assert not os.path.exists(monkey_db)                          # nothing wrote a DB

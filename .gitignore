@@ -25,3 +25,7 @@ annotated-codebase/
 results/folddb.sqlite3
 results/folddb.sqlite3-wal
 results/folddb.sqlite3-shm
+# Scratch/test DB (the --test flag) + its sidecars: throwaway, never committed.
+results/folddb.test.sqlite3
+results/folddb.test.sqlite3-wal
+results/folddb.test.sqlite3-shm
