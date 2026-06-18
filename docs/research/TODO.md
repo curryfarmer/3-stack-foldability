@@ -83,6 +83,15 @@ research extensions. Cross-references: `context.md` (Q1–Q7), `LAB_LOG.md` (fin
 
 ## Code chores
 
+- [ ] **Findings-DB revamp** *(john, 2026-06-18)*. Restructuring the findings store. Independent
+      seed already captured: **`results/to_test_folds.json`** (schema `to_test_folds/v1`, 13 records,
+      builder `experimental/build_to_test_store.py`) — the 13-case physical to-test queue, fully
+      self-contained + re-importable (grid-fitting replayable coords + foldOrder, enginePredicted
+      [refl/parity only — twist undecided for 2+1], 4-engine twistEngines, joined physical label).
+      Verified: all 13 replay in-grid, re-canonicalize to the queue hash, re-import clean vs
+      `findings.py validate_finding`. NOTE excludes the 4 newer to_fold/ deciders (8x6#202, 6x6#19,
+      6x6#5); 6x6#19/#5 are on the 6x6 grid already in the file, so it is not the complete 6x6 set.
+
 - [ ] **Clean up the 3-stack code** *(lead)*. ⚠ 2026-06-09: the "drop redundant `reflection_check`
       (output-preserving)" item is RETRACTED — that held only for the mis-ported label gate; the
       corrected orientation-aware gate is BINDING (drops all 28 6x6 2+1 + 51/292 1+1+1) and is NOT
@@ -91,6 +100,60 @@ research extensions. Cross-references: `context.md` (Q1–Q7), `LAB_LOG.md` (fin
       `analyze_loop_seams` / `analyze_2plus1_reduction` all re-implement replay + center-path);
       port the 2+1 canonical-strand twist into `py/search.py` / `search.js` so `verdict.twist`
       is no longer `null` for 2+1 (after physical labels confirm).
+- [ ] **Test the 4 experimental 2+1 twist engines** (2026-06-16, `experimental/`). Built
+      No / Jump / Normal / Partial-decomp engines (one folder each, shared `common.py`) +
+      `run_2plus1_testing.py` which scans ALL caches → **264 2+1 across 7 grids** →
+      `results/2+1 testing/` (`all_2plus1.json` + 9 curated `<grid>_<id>.json` qualitative classes;
+      n2units is a recorded range, not a splitter + `_summary.json`). On-data findings:
+      (i) `normal == jump` **264/264** → filled == jump confirmed on data everywhere;
+      (ii) the 3 sound engines (no/jump/normal) agree and **reject EXACTLY 1 of 264 — `8x6#202`**, a
+      genuinely twisted 2+1 (Tw=−720, robust to both strand idx and the full centroid, so NOT a
+      hub/strand artifact) that PASSED reflection+parity+exit → a **reflection false-pass** the twist
+      gate would catch; (iii) on the other 263 reflection already forces Tw=0 (936° artifact absent),
+      so **partial decomp is the sole differentiator**: flat vs overhang (6×6: 24/16, every L
+      overhang, flat only Rect; split varies by grid), some overhangs *hub-removable* vs *intrinsic*;
+      partial uniquely flags `8x6#202` `mixed` (−507 = −720 twist + 212 overhang). 0/40 6×6 have
+      physical labels in `foldfindings.json` (no ground truth — gate-survivors only).
+      **ACTION (paper, ranked):** (1) **`8x6#202`** — the lone all-engine reject: does it JAM
+      (→ reflection false-passes a real jam, twist gate earns its keep) or FOLD (→ Tw=−720 is a
+      false-reject, twist theory needs work)? Highest information. (2) an overhang case — a flat
+      (`6x6_19`), a hub-removable overhang (`6x6_5`), an intrinsic overhang (`6x6_1` L / `6x6_18`
+      Rect): does overhang fold with a real protruding strip (lead's hypothesis) or jam? Decides
+      whether partial decomp earns a place beside the jump gate.
+      ⇒ **Candidate ideas ranked + vetted (2026-06-16, `docs/research/2plus1_twist_candidates.md`):**
+      53-agent research workflow + 2-skeptic adversarial vet. Headline: **Model B IS the answer**;
+      the two "new math" directions (Gauss-Bonnet holonomy, footprint-middle hub routing) are FATAL
+      (re-inject atan½ / break filled==jump). Real work = operationalize + validate. Recommended
+      sequence: **fold `8x6#202` first → if JAM, wire Model B behind `opts['twist_2plus1_model_b']`**
+      (with a seam-diagnosis guard: both-strands-DIAG ⇒ fall to `decided=False`). Fold bundle parked
+      at `results/2+1 testing/to_fold/` (8x6#202, 6x6#19 flat control, 6x6#18 intrinsic + 6x6#5
+      hub-removable overhang).
+- [x] **Annotated learning copy built (2026-06-16, `annotated-codebase/`, GITIGNORED + regenerable).**
+      Concept-grouped teaching snapshot of the engine — search / fold-geometry / twist-engines /
+      reference-validation — every core function annotated (docstring + I/O + Semantic + worked
+      example) with unit + fidelity (copy==real `py/`) + integration tests. 46 files;
+      `.venv/Scripts/python.exe -m pytest annotated-codebase/` → **280 passed, 4 skipped** (opt-in
+      slow via `ANNOTATED_SLOW=1`). Hand-spot-checked: every number in `twist-engines/WORKED_EXAMPLES.md`
+      (6x4#1 replay, strand vs centroid, `pick_canon_idx`, filled==jump 264/264, jump frac-turns 0 vs
+      centroid 564) reproduced byte-exact from the real engine. NOT source of truth — `py/` is.
+- [x] **Verify 2+1 parity + twist math vs 2-stack reference** (2026-06-16, `tests/2+1/verify_2plus1_math.py`
+      + `experimental/VERIFICATION.md`, read-only; py/ untouched, all 2+1 math in `experimental/`).
+      **A** twist formula faithful (665 int loops + 735 1+1+1 pairs, 0 mismatch vs `twostack.twist_value`
+      AND shipped `_pair_loop_twist`; partial's atan½ loops diverge only by twostack int-rounding, which
+      hides overhang). **B** nH/nV parity = checkerboard-σ necessary cond (509 sols, 0 disagree, bridge
+      `x_flip==nH%2` holds, m·n even). **C** all 3 physical JAMs predicted JAM — 6x5#1/6x6#1 by reflection
+      (Tw=0), 6x7#8 by reflection AND Tw=720 (resolves the 6x7#8 lab conflict: corrected reflection ALSO
+      rejects it → no physical case is twist-only). **D** reflection rejects many twist passes (refl-only
+      44 on 6x6, 7 on 6x7) so reflection is binding; but twist-only (passes refl+parity, Tw≠0) = **0** on
+      6x6 & 6x7 — only `8x6#202` is twist-only across all 264 (physically UNLABELLED). ⇒ "reflected≈valid"
+      is real & not a bug: it's the TWIST gate that's near-redundant on tested grids; its standalone case
+      rests entirely on folding `8x6#202` (= action #1 above). Shipped engine still doesn't twist-gate 2+1.
+- [ ] **Repo deep-dive / debloat pass** *(lead, 2026-06-16)*. ss2 debloated but bloat remains —
+      stray scripts + stale artifacts to sort; lead to audit the tree and prune. While there: fold
+      the validated analysis scripts' shared replay/loop helpers into ONE module — `experimental/
+      common.py` was lifted from `tests/analyze_twist_2plus1_compare.py`, which itself duplicates
+      `analyze_twist` / `analyze_loop_seams` / `analyze_2plus1_reduction`; consolidate so the
+      engines + harness import a single geometry/twist core.
 - [ ] git: repo has uncommitted analysis scripts + doc updates from 2026-06-07.
 
 ## Research extensions (lead)

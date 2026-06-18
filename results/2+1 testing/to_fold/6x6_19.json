@@ -1,0 +1,124 @@
+{
+  "grid": "6x6",
+  "id": 19,
+  "m": 6,
+  "n": 6,
+  "K": 12,
+  "test": {
+    "tier": "control \u2014 first positive FOLD ground truth (every existing label is JAM)",
+    "class": "flat (Rect), Tw=0 on every sound engine, partial=flat",
+    "predicted": "FOLD (flat-folds onto the 3-cell footprint stack)",
+    "FOLD_means": "gates correctly admit a real fold (closes the zero-FOLD-label gap)",
+    "JAM_means": "a reflection+parity+twist passer still jams -> a gate is MISSING (high alarm)"
+  },
+  "footprint": {
+    "shape": "Rect",
+    "rotation": 0,
+    "anchor": {
+      "x": 1,
+      "y": 0
+    },
+    "cells": [
+      {
+        "x": 1,
+        "y": 0
+      },
+      {
+        "x": 2,
+        "y": 0
+      },
+      {
+        "x": 3,
+        "y": 0
+      }
+    ]
+  },
+  "decomposition": "2+1",
+  "chains": [
+    {
+      "kind": "2chain",
+      "baseCells": [
+        {
+          "x": 2,
+          "y": 0
+        },
+        {
+          "x": 3,
+          "y": 0
+        }
+      ],
+      "foldArrows": [
+        "R",
+        "D",
+        "D",
+        "D",
+        "D",
+        "D",
+        "L",
+        "L",
+        "U",
+        "R",
+        "U"
+      ],
+      "nH": 4,
+      "nV": 7
+    },
+    {
+      "kind": "1chain",
+      "baseCells": [
+        {
+          "x": 1,
+          "y": 0
+        }
+      ],
+      "foldArrows": [
+        "L",
+        "D",
+        "R",
+        "R",
+        "R",
+        "D",
+        "L",
+        "L",
+        "L",
+        "D",
+        "R"
+      ],
+      "nH": 8,
+      "nV": 3
+    }
+  ],
+  "verdict": {
+    "arithmetic": true,
+    "exitFootprint": true,
+    "parity": true,
+    "reflection": true,
+    "twist": null
+  },
+  "twistEngines": {
+    "no decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "jump decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "normal decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "partial decomp": {
+      "pass": true,
+      "tw": 0.0,
+      "class": "flat",
+      "tw_hub1": 0.0,
+      "class_hub1": "flat",
+      "hub_removable": false,
+      "sign": 0,
+      "n2units": 4,
+      "frac": 4
+    }
+  },
+  "canonicalHash": "{\"fp\":[[0,1],[0,2],[0,3]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"D\",\"L\",\"U\",\"U\",\"U\",\"L\",\"D\",\"D\",\"D\",\"L\",\"U\"]},{\"kind\":\"2chain\",\"base\":[[0,2],[0,3]],\"arrows\":[\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\",\"D\",\"R\",\"U\",\"R\"]}]}"
+}

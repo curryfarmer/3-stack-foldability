@@ -1,0 +1,131 @@
+{
+  "id": 8,
+  "footprint": {
+    "shape": "L",
+    "rotation": 0,
+    "anchor": {
+      "x": 0,
+      "y": 0
+    },
+    "cells": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 0,
+        "y": 1
+      },
+      {
+        "x": 1,
+        "y": 0
+      }
+    ]
+  },
+  "decomposition": "2+1",
+  "chains": [
+    {
+      "kind": "2chain",
+      "baseCells": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 1,
+          "y": 0
+        }
+      ],
+      "foldArrows": [
+        "R",
+        "R",
+        "D",
+        "L",
+        "D",
+        "R",
+        "R",
+        "U",
+        "U",
+        "R",
+        "R",
+        "D",
+        "L",
+        "D",
+        "R"
+      ],
+      "nH": 9,
+      "nV": 6,
+      "finalVector": {
+        "edge": "B",
+        "sign": -1
+      }
+    },
+    {
+      "kind": "1chain",
+      "baseCells": [
+        {
+          "x": 0,
+          "y": 1
+        }
+      ],
+      "foldArrows": [
+        "R",
+        "D",
+        "L",
+        "D",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R",
+        "R"
+      ],
+      "nH": 13,
+      "nV": 2,
+      "finalVector": {
+        "edge": "T",
+        "sign": -1
+      }
+    }
+  ],
+  "twistPairs": [],
+  "verdict": {
+    "arithmetic": true,
+    "exitFootprint": true,
+    "parity": true,
+    "reflection": true,
+    "twist": null
+  },
+  "canonicalHash": "{\"fp\":[[0,0],[0,1],[1,0]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"R\",\"D\",\"L\",\"D\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,0],[1,0]],\"arrows\":[\"R\",\"R\",\"D\",\"L\",\"D\",\"R\",\"R\",\"U\",\"U\",\"R\",\"R\",\"D\",\"L\",\"D\",\"R\"]}]}",
+  "grid": "12x4",
+  "twistEngines": {
+    "no decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "jump decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "normal decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "partial decomp": {
+      "pass": true,
+      "tw": -106.260205,
+      "class": "overhang",
+      "tw_hub1": -106.260205,
+      "class_hub1": "overhang",
+      "hub_removable": false,
+      "sign": -1,
+      "n2units": 10,
+      "frac": 6
+    }
+  }
+}

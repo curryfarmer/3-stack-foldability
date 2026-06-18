@@ -1,0 +1,123 @@
+{
+  "id": 18,
+  "footprint": {
+    "shape": "Rect",
+    "rotation": 0,
+    "anchor": {
+      "x": 1,
+      "y": 0
+    },
+    "cells": [
+      {
+        "x": 1,
+        "y": 0
+      },
+      {
+        "x": 2,
+        "y": 0
+      },
+      {
+        "x": 3,
+        "y": 0
+      }
+    ]
+  },
+  "decomposition": "2+1",
+  "chains": [
+    {
+      "kind": "2chain",
+      "baseCells": [
+        {
+          "x": 2,
+          "y": 0
+        },
+        {
+          "x": 3,
+          "y": 0
+        }
+      ],
+      "foldArrows": [
+        "R",
+        "D",
+        "L",
+        "D",
+        "R",
+        "D",
+        "D",
+        "D",
+        "L",
+        "U",
+        "U"
+      ],
+      "nH": 4,
+      "nV": 7,
+      "finalVector": {
+        "edge": "L",
+        "sign": -1
+      }
+    },
+    {
+      "kind": "1chain",
+      "baseCells": [
+        {
+          "x": 1,
+          "y": 0
+        }
+      ],
+      "foldArrows": [
+        "L",
+        "D",
+        "R",
+        "D",
+        "L",
+        "D",
+        "D",
+        "D",
+        "R",
+        "U",
+        "U"
+      ],
+      "nH": 4,
+      "nV": 7,
+      "finalVector": {
+        "edge": "R",
+        "sign": -1
+      }
+    }
+  ],
+  "twistPairs": [],
+  "verdict": {
+    "arithmetic": true,
+    "exitFootprint": true,
+    "parity": true,
+    "reflection": true,
+    "twist": null
+  },
+  "canonicalHash": "{\"fp\":[[0,1],[0,2],[0,3]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"D\",\"L\",\"U\",\"L\",\"D\",\"L\",\"L\",\"L\",\"U\",\"R\",\"R\"]},{\"kind\":\"2chain\",\"base\":[[0,2],[0,3]],\"arrows\":[\"U\",\"L\",\"D\",\"L\",\"U\",\"L\",\"L\",\"L\",\"D\",\"R\",\"R\"]}]}",
+  "grid": "6x6",
+  "twistEngines": {
+    "no decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "jump decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "normal decomp": {
+      "pass": true,
+      "tw": 0.0
+    },
+    "partial decomp": {
+      "pass": true,
+      "tw": 106.260205,
+      "class": "overhang",
+      "tw_hub1": 106.260205,
+      "class_hub1": "overhang",
+      "hub_removable": false,
+      "sign": 1,
+      "n2units": 8,
+      "frac": 6
+    }
+  }
+}
