@@ -67,6 +67,14 @@
             <label><input type="radio" name="findingFoldable" value="jam" checked /> JAM</label>
             <label><input type="radio" name="findingFoldable" value="untested" /> untested</label>
           </div>
+          <label class="opt">Provenance
+            <select id="findingProvenance">
+              <option value="physical">physical (ground truth)</option>
+              <option value="handmath">hand-math</option>
+              <option value="engine">engine</option>
+            </select>
+          </label>
+          <p class="hint" style="font-size:11px; margin-top:2px">Live: toggling FOLD/JAM or a tag writes straight to the DB (needs <code>serve.py</code>); FOLD/JAM is recorded as physical ground truth.</p>
           <label class="opt">Jam at fold # <input id="findingAtFold" type="number" min="0" style="width:60px"></label>
           <label class="opt">Jam reason
             <select id="findingReason">

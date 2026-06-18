@@ -58,6 +58,53 @@ python py/generate.py --stacks 2 --m 6 --n 5      # RSPA 2-stack (Hamiltonian ci
 **Output:** `results/<m>x<n>[_2stack]_<hash>.json` + `results/manifest.json` index. A matching
 cached run is reused unless `--force`. The browser tool auto-loads these (see Browser tool below).
 
+### Phase A: store EVERY covered pattern — `--store-all`
+
+By default the engine **prunes**: gates (parity/reflection/twist) run during the DFS, so only
+gate-survivors reach the JSON (6×6 2+1 keeps ~40 of ~7960 covered candidates). `--store-all` inverts
+this: it stores **every** D4-deduped covered candidate, with the gate verdicts as **non-destructive
+columns** (nothing is pruned). This is the "view everything, then filter" data set.
+
+```bash
+python py/generate.py --m 6 --n 6 --store-all          # all covered 6x6 patterns (gates = columns)
+```
+
+`--store-all` writes BOTH the JSON (`results/<grid>_<hash>.json`, its own params hash, for the
+`file://` / static viewer) AND the **SQLite write-master** `results/folddb.sqlite3` (the live read/write
+DB the served viewer uses). It's a different result set from the gated run, so it gets its own file/key.
+
+---
+
+## SQLite pattern DB + read/write API (`results/folddb.sqlite3`)
+
+The store-all data + physical findings + custom tags live in one SQLite DB — the **write-master**;
+the JSON files are a one-way export / `file://` fallback. The DB is **gitignored + regenerable**
+(`store.export_json` writes the diffable archival JSON). Override the path with `FOLDDB_SQLITE`.
+
+```bash
+python py/migrate_to_sqlite.py                 # one-shot idempotent seed from results/*.json + foldfindings.json
+python py/generate.py --m 6 --n 6 --store-all  # backfill the full covered set for a grid (re-runnable)
+```
+
+Schema (one row per distinct pattern): `runs` (one per generated set) → `patterns` (every covered
+candidate: `pattern_uid` stable id, `lattice`/`region`/`footprint_kind` for tiletype-genericity,
+the verdict columns `arithmetic/exit_footprint/parity/vector_parity/reflection/twist`, `detail_json`
+render blob) + `tag` (EAV custom columns) + `finding` (physical ground truth, `is_ground_truth`,
+3-tier `provenance` engine|handmath|physical) + `v_compare` (engine-vs-physical `agree` flag).
+`norm_hash` (sorted-keys compact canonicalHash) is the cross-table join key.
+
+`python serve.py` exposes it (same-origin :8000, no deps):
+
+| route | purpose |
+| --- | --- |
+| `GET /api/runs` | list runs + pattern counts (drives the View grid dropdown) |
+| `GET /api/patterns?run=&lattice=&sort=&dir=&filter=col:val&filter=tag:KEY:val&limit=&offset=` | paged/sorted/filtered patterns + per-row tags + `agree` (ORDER BY/WHERE whitelisted, values parameterized) |
+| `POST /api/tag` | live single-tag upsert `{canonicalHash,key,value,provenance}` (value null = clear) |
+| `POST /api/findings` | physical finding → validate → `foldfindings.json` + LAB_LOG + SQLite `finding` mirror |
+
+If the DB is absent (or on `file://`), the viewer falls back to the static `manifest.json` read path
+and write-back is disabled (download/CLI submit instead).
+
 ### Performance toggles (multiprocessing + PyPy)
 
 Two orthogonal switches; **neither changes a verdict** (output identical to serial). Locked by
@@ -116,11 +163,19 @@ python -m http.server 8000      # from repo root (static; GET only)
 python serve.py [8000]          # same static frontend + POST /api/findings (capture, see below)
 ```
 
-Open http://localhost:8000 . It starts in **View results** mode: it auto-loads `results/manifest.json`,
-fills the **Results** grid dropdown, and shows the latest run. Pick another grid from the dropdown, or
-use **Load results JSON** for any `results/*.json` file. Toggle **Edit** in the topbar for the manual
-folding tools; Display options + Legend are shared across both modes. (Served via `http.server`; opening
-`index.html` as a `file://` URL skips auto-load — use Load results JSON instead.)
+Open http://localhost:8000 . It starts in **View results** mode. With `serve.py` + a populated
+`folddb.sqlite3` it loads the **DB** (the grid dropdown lists `/api/runs`, auto-picking the largest =
+store-all set so you see EVERYTHING); otherwise it falls back to auto-loading `results/manifest.json`.
+Pick another grid from the dropdown, or use **Load results JSON** for any `results/*.json` file. Toggle
+**Edit** in the topbar for the manual folding tools; Display options + Legend are shared across both modes.
+
+The results table is **data-driven**: click any header to sort; the **⚙ Columns** chooser shows/hides
+columns (incl. one per custom tag) and adds new tag columns (persisted in `localStorage`). The **Agree**
+column + **GT** badge surface engine-vs-physical (ground-truth) disagreements (bug suspects, red row).
+In "Record physical finding", toggling FOLD/JAM or a tag **writes live to the DB** (`/api/tag`,
+`/api/findings`) and patches the row — physical = ground truth; pick **Provenance** = hand-math/engine to
+record without flagging ground truth. (Served via `http.server` or `file://`: write-back is disabled and
+the static manifest read path is used; use **Load results JSON** there.)
 
 The in-browser JS engines (`fold.js`, `search.js`) live under **Advanced: in-browser search** in the
 Results panel — kept as a cross-checked reference (identical to Python on 6x4/6x5/6x6; the single

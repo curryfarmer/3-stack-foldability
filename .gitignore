@@ -16,3 +16,12 @@ report/node_modules/
 
 # tri scan logs
 py/tri/_*.log
+
+# Annotated learning copy (regenerable teaching snapshot; not source of truth)
+annotated-codebase/
+
+# SQLite pattern DB (write-master) + WAL/SHM sidecars. JSON export (store.export_json) is the
+# committed/diffable archival snapshot; the binary DB is regenerable via migrate_to_sqlite + generate.
+results/folddb.sqlite3
+results/folddb.sqlite3-wal
+results/folddb.sqlite3-shm

@@ -243,6 +243,8 @@ def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
 # Re-exported so search internals and test_gates resolve the names with one body of record.
 parallel_fold_axis = SquareLattice.parallel_fold_axis
 parity_check = SquareLattice.parity_check
+vector_parity_check = SquareLattice.vector_parity_check   # legacy non-orientation-aware column
+set_fold_counts = SquareLattice.set_fold_counts            # unconditional nH/nV annotator
 
 
 # --- Stage 5.5: exit footprint ---
@@ -345,21 +347,49 @@ canonical_hash = SquareLattice.canonical_hash
 # verdict logic exists exactly once. _evaluate_candidate is pure and returns JSON-plain
 # data, so a worker process can produce candidates and the parent can replay dedup.
 
-def _evaluate_candidate(chains, fp, decomp, m, n):
+def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False):
     """Run the per-candidate gates and build the solution record (no id, no dedup).
 
     Returns (gates_passed, sol). gates_passed in 0..3 mirrors the serial counter bumps
     (0 = failed exit; 1 = passed exit, failed parity; 2 = passed exit+parity, failed
-    reflection; 3 = passed all). sol is None unless gates_passed == 3. Deterministic.
+    reflection; 3 = passed all). Deterministic.
+
+    store_all=False (legacy): short-circuits on the first failing gate and emits a sol ONLY
+    when gates_passed == 3, with the historic verdict block — byte-identical to past output.
+    store_all=True (Phase A): NO pruning — every COVERED candidate yields a sol carrying the
+    REAL gate verdicts plus the new `vectorParity` column, so the foldability tests become
+    non-destructive filterable columns instead of pruners.
     """
-    if not exit_footprint_check(chains, fp["shape"]):
+    ev = exit_footprint_check(chains, fp["shape"])
+    if not store_all and not ev:
         return 0, None
-    if not parity_check(chains):
+    pa = parity_check(chains)
+    if not store_all and not pa:
         return 1, None
-    if not reflection_check(chains):
+    rf = reflection_check(chains)
+    if not store_all and not rf:
         return 2, None
+    gates_passed = 3 if (ev and pa and rf) else 2 if (ev and pa) else 1 if ev else 0
+
+    set_fold_counts(chains)          # ensure nH/nV on EVERY chain (parity_check may have bailed early)
     h = canonical_hash(fp, chains, m, n)
     twist = twist_check(chains)
+    if store_all:
+        verdict = {
+            # "equal number of folds in each subchain" — the Phase-A baseline criterion.
+            "arithmetic": len({len(c["foldArrows"]) for c in chains}) == 1,
+            "exitFootprint": ev, "parity": pa,
+            "vectorParity": vector_parity_check(chains),
+            "reflection": rf,
+            "twist": (twist["pass"] if twist["decided"] else None),
+        }
+    else:
+        # Historic verdict literal (keys + order) — preserves byte-identical legacy JSON.
+        verdict = {
+            "arithmetic": True, "exitFootprint": True, "parity": True,
+            "reflection": True,
+            "twist": (twist["pass"] if twist["decided"] else None),
+        }
     sol = {
         "id": None,
         "footprint": {
@@ -376,14 +406,10 @@ def _evaluate_candidate(chains, fp, decomp, m, n):
             "finalVector": c["finalVector"],
         } for c in chains],
         "twistPairs": twist["pairs"],
-        "verdict": {
-            "arithmetic": True, "exitFootprint": True, "parity": True,
-            "reflection": True,
-            "twist": (twist["pass"] if twist["decided"] else None),
-        },
+        "verdict": verdict,
         "canonicalHash": h,
     }
-    return 3, sol
+    return gates_passed, sol
 
 
 def _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id):
@@ -451,6 +477,7 @@ def _run_footprint_chunk(payload):
     parent replays those over the gathered, footprint-ordered stream.
     """
     m, n, K, opts, ordinal, i_start, i_end = payload
+    store_all = opts.get("storeAll", False)
     footprints = enumerate_footprints(m, n, opts)
     local_ctx = {k: 0 for k in _WORKER_CTX_KEYS}
     records = []
@@ -460,7 +487,7 @@ def _run_footprint_chunk(payload):
             local_ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n)
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all)
                 if gp >= 1:
                     local_ctx["exitPass"] += 1
                 if gp >= 2:
@@ -516,6 +543,7 @@ def run(opts, on_solution=None, is_cancelled=None):
     if K < 1:
         return solutions, ctx, "K < 1 (empty grid)"
 
+    store_all = opts.get("storeAll", False)
     footprints = enumerate_footprints(m, n, opts)
     ctx["footprintsTotal"] = len(footprints)
 
@@ -540,7 +568,7 @@ def run(opts, on_solution=None, is_cancelled=None):
             ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n)
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all)
                 if gp >= 1:
                     ctx["exitPass"] += 1
                 if gp >= 2:

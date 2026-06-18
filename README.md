@@ -2,6 +2,10 @@
 
 Browser tool for prototyping 2D origami-style folding on a square grid. Define a footprint, break it into composite groups, then drag groups across the grid to lay down their successive **mirrored copies** (folds). Direction vectors anchored on the footprint reflect through every fold automatically.
 
+> **New here? Read the [User Manual](docs/guides/USER_MANUAL.md)** — the top-to-bottom guide to the
+> whole repo (concepts, the generate → SQLite → viewer → findings pipeline, tests, repo map, FAQ).
+> This README covers the folding-simulator UI specifically.
+
 ## Run
 
 ```bash

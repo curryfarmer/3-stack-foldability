@@ -1,0 +1,171 @@
+"""test_sqlite_store.py — the SQLite source-of-truth layer (store.py) + migrate_to_sqlite.
+
+Covers Phase-A store-all persistence, the stable distinct-pattern uid, the non-destructive verdict
+columns, the EAV tag side-table (add/remove/sort custom columns with no migration), the ground-truth
+finding table, the engine-vs-physical v_compare `agree` flag, and the one-way JSON export round-trip.
+Every test uses an isolated tmp DB (never the committed results/folddb.sqlite3).
+"""
+import json
+
+import findings as F   # noqa: E402  (sys.path set in conftest.py)
+import search as Search  # noqa: E402
+import store as Store    # noqa: E402
+
+
+def _opts(store_all=True):
+    return {"m": 3, "n": 2, "stacks": 3,
+            "shapes": {"L": True, "Rect": True},
+            "decomps": {"2+1": True, "1+1+1": True},
+            "allowNonCorner": True, "dedup": True, "jobs": 1, "storeAll": store_all}
+
+
+def _seed(tmp_path, store_all=True):
+    """Run a 3x2 search and persist it to a fresh tmp SQLite DB. -> (db_path, run_id, solutions)."""
+    db = str(tmp_path / "folddb.sqlite3")
+    opts = _opts(store_all)
+    sols, ctx, err = Search.run(opts)
+    assert err is None
+    rid = Store.save_sqlite(opts, sols, ctx, lattice="square", region="rect", path=db)
+    return db, rid, sols
+
+
+# ---------- persistence + verdict columns ----------
+
+def test_save_sqlite_persists_all_with_verdict_columns(tmp_path):
+    db, rid, sols = _seed(tmp_path, store_all=True)
+    conn = Store.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0] == len(sols)
+    # every non-destructive verdict column is present and populated (0/1/None, never missing)
+    cols = ("arithmetic", "exit_footprint", "parity", "vector_parity", "reflection", "twist")
+    for r in conn.execute(f"SELECT {','.join(cols)} FROM patterns").fetchall():
+        for c in cols:
+            assert r[c] in (0, 1, None)
+    # store-all really stored gate-FAILERS too (proof gates are columns, not pruners)
+    assert conn.execute("SELECT COUNT(*) FROM patterns WHERE reflection=0").fetchone()[0] > 0
+    conn.close()
+
+
+def test_no_dedup_store_all_keeps_all_rows(tmp_path):
+    """Regression: under --no-dedup, distinct candidates can share a D4 canonical_hash; Phase-A must
+    store ALL of them (identity is (run_id,seq), not canonical_hash, so none are silently dropped)."""
+    db = str(tmp_path / "folddb.sqlite3")
+    opts = dict(_opts(store_all=True), dedup=False)
+    sols, ctx, err = Search.run(opts)
+    assert err is None
+    Store.save_sqlite(opts, sols, ctx, lattice="square", region="rect", path=db)
+    conn = Store.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0] == len(sols)   # nothing dropped
+    # the collision really exists (else this test proves nothing): fewer distinct hashes than rows
+    distinct = conn.execute("SELECT COUNT(DISTINCT canonical_hash) FROM patterns").fetchone()[0]
+    assert distinct < len(sols)
+    assert conn.execute("SELECT COUNT(*) FROM patterns WHERE seq IS NULL").fetchone()[0] == 0
+    conn.close()
+
+
+def test_run_row_carries_lattice_and_region(tmp_path):
+    db, rid, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    run = conn.execute("SELECT lattice, region, m, n FROM runs WHERE id=?", (rid,)).fetchone()
+    assert (run["lattice"], run["region"], run["m"], run["n"]) == ("square", "rect", 3, 2)
+    conn.close()
+
+
+# ---------- distinct-pattern uid ----------
+
+def test_pattern_uid_distinct_and_stable(tmp_path):
+    db, _, sols = _seed(tmp_path)
+    conn = Store.connect(db)
+    uids = [r[0] for r in conn.execute("SELECT pattern_uid FROM patterns").fetchall()]
+    assert len(uids) == len(set(uids)) == len(sols)          # each distinct pattern -> unique id
+    # stable: recomputing from (lattice, grid, canonical_hash) reproduces the stored uid
+    for r in conn.execute("SELECT pattern_uid, canonical_hash FROM patterns").fetchall():
+        assert Store.pattern_uid("square", 3, 2, r["canonical_hash"]) == r["pattern_uid"]
+    conn.close()
+
+
+def test_norm_hash_matches_findings(tmp_path):
+    db, _, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    r = conn.execute("SELECT canonical_hash, norm_hash FROM patterns LIMIT 1").fetchone()
+    assert Store._norm_hash(r["canonical_hash"]) == F._norm_hash(r["canonical_hash"]) == r["norm_hash"]
+    conn.close()
+
+
+# ---------- EAV tags: add / remove / sort custom columns with no migration ----------
+
+def test_tag_eav_add_remove_sort(tmp_path):
+    db, _, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    rows = conn.execute("SELECT norm_hash FROM patterns ORDER BY seq").fetchall()
+    # add an arbitrary custom column "myHypothesis" on two patterns (no schema change)
+    for i, r in enumerate(rows[:2]):
+        conn.execute("INSERT INTO tag(norm_hash,key,val_bool,provenance) VALUES(?,?,?,?)",
+                     (r["norm_hash"], "myHypothesis", i % 2, "handmath"))
+    conn.commit()
+    assert [k[0] for k in conn.execute("SELECT DISTINCT key FROM tag").fetchall()] == ["myHypothesis"]
+    # sort patterns by the custom tag value (LEFT JOIN the EAV row)
+    sortable = conn.execute(
+        "SELECT p.seq, t.val_bool FROM patterns p "
+        "LEFT JOIN tag t ON t.norm_hash=p.norm_hash AND t.key='myHypothesis' "
+        "ORDER BY t.val_bool DESC NULLS LAST, p.seq").fetchall()
+    assert sortable[0]["val_bool"] == 1
+    # remove the column (delete its rows) -> key disappears, no migration
+    conn.execute("DELETE FROM tag WHERE key='myHypothesis'")
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM tag WHERE key='myHypothesis'").fetchone()[0] == 0
+    conn.close()
+
+
+# ---------- engine-vs-physical comparison (v_compare) ----------
+
+def test_v_compare_agree_flags_disagreement(tmp_path):
+    db, _, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    nh = conn.execute("SELECT norm_hash FROM patterns LIMIT 1").fetchone()[0]
+
+    def put(foldable, predicted):
+        rec = {"foldable": foldable, "predicted": {"foldable": predicted}}
+        conn.execute("INSERT OR REPLACE INTO finding(norm_hash,rec_json,foldable,provenance,"
+                     "is_ground_truth) VALUES(?,?,?,?,1)", (nh, json.dumps(rec), Store._b(foldable),
+                     "physical"))
+        conn.commit()
+        return conn.execute("SELECT agree FROM v_compare WHERE norm_hash=?", (nh,)).fetchone()["agree"]
+
+    assert put(True, False) == 0     # physical FOLD vs engine not-foldable -> disagreement (bug suspect)
+    assert put(True, True) == 1      # agreement
+    assert put(None, True) is None   # untested -> no verdict
+    conn.close()
+
+
+# ---------- one-way JSON export round-trip ----------
+
+def test_export_json_round_trip(tmp_path):
+    db, rid, sols = _seed(tmp_path)
+    conn = Store.connect(db)
+    path = Store.export_json(conn, rid)
+    conn.close()
+    data = json.load(open(path))
+    assert len(data["solutions"]) == len(sols)
+    assert data["meta"]["m"] == 3 and data["meta"]["n"] == 2
+    # the exported sol blobs are the exact stored detail (canonicalHash preserved -> findings stay joined)
+    assert {s["canonicalHash"] for s in data["solutions"]} == {s["canonicalHash"] for s in sols}
+
+
+# ---------- migration: idempotent seed from the committed JSON ----------
+
+def test_migration_idempotent(tmp_path, monkeypatch):
+    db = str(tmp_path / "folddb.sqlite3")
+    monkeypatch.setattr(Store, "SQLITE_PATH", db)
+    import migrate_to_sqlite as M
+    M.main()
+    conn = Store.connect(db)
+    first = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
+    conn.close()
+    M.main()                                   # second run must not duplicate
+    conn = Store.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0] == first
+    # every migrated finding with a known physical result is flagged ground truth
+    bad = conn.execute("SELECT COUNT(*) FROM finding WHERE foldable IS NOT NULL "
+                       "AND is_ground_truth!=1").fetchone()[0]
+    assert bad == 0
+    conn.close()

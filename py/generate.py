@@ -13,6 +13,7 @@ run is reused unless --force is given.
 """
 
 import argparse
+import os
 import sys
 
 import runner as Runner
@@ -29,6 +30,9 @@ def parse_args(argv):
     p.add_argument("--shapes", default="L,Rect", help="comma list: L,Rect (3-stack only)")
     p.add_argument("--decomps", default="2+1,1+1+1", help="comma list: 2+1,1+1+1")
     p.add_argument("--allow-non-corner", action="store_true")
+    p.add_argument("--store-all", action="store_true",
+                   help="Phase A: store EVERY covered candidate (D4-deduped) with non-destructive "
+                        "gate verdicts as columns, instead of pruning to gate-survivors")
     p.add_argument("--jobs", type=int, default=None,
                    help="parallel worker processes (default 1; env FOLD_JOBS as fallback)")
     p.add_argument("--no-dedup", action="store_true", help="disable D4 dedup")
@@ -48,6 +52,7 @@ def build_opts(args):
         "allowNonCorner": args.allow_non_corner,
         "dedup": not args.no_dedup,
         "jobs": args.jobs,
+        "storeAll": args.store_all,
     }
 
 
@@ -88,7 +93,12 @@ def main(argv):
         print(f"rejected: {err}", file=sys.stderr)
         return 1
     path = Store.save_result(opts, solutions, ctx)
-    fname = path.split('/')[-1]
+    fname = os.path.basename(path)              # os.sep-safe (Windows backslash paths)
+    # Phase-A store-all also lands in the SQLite write-master (the API + live-tag write-back read it);
+    # the JSON above stays the file:// / archival fallback. Gated runs stay JSON-only (legacy path).
+    if opts["stacks"] == 3 and opts.get("storeAll"):
+        Store.save_sqlite(opts, solutions, ctx, lattice="square", region="rect")
+        print(f"  + SQLite write-master updated -> {Store.SQLITE_PATH}")
     if opts["stacks"] == 2:
         foldable = sum(1 for s in solutions if s["verdict"]["foldable"])
         print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {foldable}) "

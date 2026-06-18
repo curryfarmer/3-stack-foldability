@@ -44,6 +44,9 @@ def _params(stacks: int) -> list[Any]:
             continue
         if stacks == 3 and opts.get("allowNonCorner"):
             continue  # manifest baseline is corner-only
+        if opts.get("storeAll"):
+            continue  # store-all entries hold the COVERED set (gates annotate, never prune) — its count
+            # is not the gated-engine baseline this test anchors on (e.g. 3x2 store-all=4 vs gated=2)
         marks = [pytest.mark.slow] if (e["m"], e["n"]) in SLOW_GRIDS else []
         out.append(pytest.param(e, id=f"{e['m']}x{e['n']}:{e['key']}", marks=marks))
     return out or [pytest.param(None, id=f"no-manifest-stacks{stacks}")]

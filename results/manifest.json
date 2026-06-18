@@ -1,5 +1,29 @@
 [
   {
+    "key": "700fb96e",
+    "file": "3x2_700fb96e.json",
+    "m": 3,
+    "n": 2,
+    "opts": {
+      "m": 3,
+      "n": 2,
+      "stacks": 3,
+      "dedup": true,
+      "shapes": {
+        "L": true,
+        "Rect": true
+      },
+      "decomps": {
+        "1+1+1": true,
+        "2+1": true
+      },
+      "allowNonCorner": false,
+      "storeAll": true
+    },
+    "count": 4,
+    "generated": "2026-06-18T13:14:29"
+  },
+  {
     "key": "bbc04a7f",
     "file": "6x4_bbc04a7f.json",
     "m": 6,
@@ -72,6 +96,29 @@
     },
     "count": 3,
     "generated": "2026-06-09T00:07:08"
+  },
+  {
+    "key": "51cc18cf",
+    "file": "6x6_51cc18cf.json",
+    "m": 6,
+    "n": 6,
+    "opts": {
+      "m": 6,
+      "n": 6,
+      "stacks": 3,
+      "dedup": true,
+      "shapes": {
+        "L": true,
+        "Rect": true
+      },
+      "decomps": {
+        "1+1+1": false,
+        "2+1": true
+      },
+      "allowNonCorner": true
+    },
+    "count": 40,
+    "generated": "2026-06-16T16:21:58"
   },
   {
     "key": "eb1a50c9",

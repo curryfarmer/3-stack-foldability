@@ -87,6 +87,15 @@ class SquareLattice(Lattice):
         return None
 
     @staticmethod
+    def set_fold_counts(chains):
+        """Annotate every chain with nH (L/R folds) and nV (U/D folds). Unconditional: unlike
+        parity_check this never returns early, so all chains carry nH/nV even when a gate fails —
+        required by the store-all path, which emits a solution for every covered candidate."""
+        for c in chains:
+            nH = sum(1 for a in c["foldArrows"] if a in ("L", "R"))
+            c["nH"], c["nV"] = nH, len(c["foldArrows"]) - nH
+
+    @staticmethod
     def parity_check(chains):
         axis = SquareLattice.parallel_fold_axis(chains)
         for c in chains:
@@ -102,6 +111,22 @@ class SquareLattice(Lattice):
             else:
                 if nH % 2 != 0 or nV % 2 != 1:
                     return False
+        return True
+
+    @staticmethod
+    def vector_parity_check(chains):
+        """Legacy (orientation-UNaware) vector parity: every chain needs nH even AND nV odd.
+
+        This is the fixed rule parity_check falls back to when there is no 2+1 A/B adjacency
+        (the 1+1+1 case, square.py parity_check `else` branch). Exposed as its own verdict
+        column so the orientation-aware `parity` and this legacy `vectorParity` can be compared
+        side-by-side. Self-contained (recomputes counts) so it is valid before set_fold_counts."""
+        for c in chains:
+            arrows = c["foldArrows"]
+            nH = sum(1 for a in arrows if a in ("L", "R"))
+            nV = len(arrows) - nH
+            if nH % 2 != 0 or nV % 2 != 1:
+                return False
         return True
 
     # Exit-footprint congruence classifier (Rect / L by the 3 end cells' bounding box).

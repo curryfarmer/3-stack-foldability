@@ -112,6 +112,19 @@ table.search-results button.load-sol { padding: 1px 8px; font-size: 11px; cursor
 table.search-results td.verdict-pass { color: #2a8; }
 table.search-results td.verdict-fail { color: #c33; }
 table.search-results td.verdict-stub { color: #888; }
+table.search-results th.sortable { cursor: pointer; user-select: none; }
+table.search-results th.sortable:hover { background: #eef2f6; }
+/* engine-vs-physical: ground-truth badge + bug-suspect disagreement (the whole point of v_compare) */
+table.search-results td.gt-badge { color: #fff; background: #2a8; font-weight: 600; text-align: center; }
+table.search-results td.agree-bug { color: #fff; background: #c33; font-weight: 600; }
+table.search-results tbody tr.agree-bug-row { background: #fff0f0; }
+table.search-results tbody tr.agree-bug-row.current-sol { background: #fde3e3; }
+
+/* ⚙ column chooser above the results table */
+.col-chooser { font-size: 11px; padding: 4px 8px; border-bottom: 1px solid #eee; background: #fafaf7; }
+.col-chooser summary { cursor: pointer; user-select: none; color: #456; }
+.col-chooser-body { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 6px 2px 2px; }
+.col-chooser .col-opt { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 
 .grid-card {
   background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px;

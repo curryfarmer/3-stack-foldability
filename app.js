@@ -25,6 +25,10 @@ const App = (() => {
       tagFilters: {},      // {tagKey: ''|true|false} — custom-tag tri-state filters
       stacks: 3,           // 3 = footprint/decomp search; 2 = RSPA HC patterns (loaded JSON)
       dims: null,          // {m,n} for 2-stack rendering
+      sort: { key: 'id', dir: 'asc' },   // header-click client sort over the loaded list
+      colPrefs: null,      // {colKey: bool} column-visibility prefs (lazy-loaded from localStorage)
+      colChooserOpen: false,             // keep the ⚙ Columns panel open across table re-renders
+      dbTagKeys: [],       // tag keys served by the DB API (union'd into the tag columns)
     },
     findings: { byHash: new Map(), loaded: false },   // normalizedHash -> FoldFinding (results/foldfindings.json)
     display: {
@@ -317,6 +321,82 @@ const App = (() => {
     }
   }
 
+  // --- DB-backed View read path (serve.py /api). Prefer SQLite (store-all patterns + live tags +
+  // ground-truth join) so writes are reflected; on a missing DB / file:// / no server, fall back to
+  // the static manifest path (which still serves store-all JSON exports). View mode source of truth.
+  async function initResults() {
+    let runs = null;
+    try {
+      const res = await fetch('/api/runs');
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.dbMissing && Array.isArray(data.runs) && data.runs.length) runs = data.runs;
+      }
+    } catch { /* no server / file:// -> static fallback */ }
+    if (runs) wireRunDropdown(runs);
+    else initResultsManifest();
+  }
+
+  function wireRunDropdown(runs) {
+    const sel = document.getElementById('resultsManifestSelect');
+    const sorted = runs.slice().sort((a, b) => (a.m - b.m) || (a.n - b.n) || (a.id - b.id));
+    state.search.dbRuns = sorted;
+    sel.innerHTML = sorted.map(r =>
+      `<option value="${r.id}">${r.m}x${r.n} (${r.n_patterns}) — ${escapeHtml(r.lattice || 'square')} [DB]</option>`
+    ).join('');
+    sel.onchange = () => { if (sel.value) loadRunFromApi(+sel.value); };
+    // Auto-load the largest run for a grid = the store-all set if present ("view EVERYTHING").
+    const pick = sorted.reduce((a, b) => (b.n_patterns > a.n_patterns ? b : a), sorted[0]);
+    sel.value = String(pick.id);
+    loadRunFromApi(pick.id);
+  }
+
+  async function loadRunFromApi(runId) {
+    const run = (state.search.dbRuns || []).find(r => r.id === runId);
+    try {
+      const rows = [];
+      let tagKeys = [];
+      const limit = 2000;                              // page through (server caps a single page at 2000)
+      for (let offset = 0; ; offset += limit) {
+        const res = await fetch(`/api/patterns?run=${runId}&limit=${limit}&offset=${offset}`);
+        if (!res.ok) throw new Error(`patterns ${res.status}`);
+        const data = await res.json();
+        tagKeys = data.tagKeys || tagKeys;
+        rows.push(...(data.rows || []));
+        if (!data.rows || data.rows.length < limit || rows.length >= (data.total || 0)) break;
+      }
+      ingestPatternRows(rows, run, tagKeys);
+    } catch (err) {
+      alert('Could not load run from DB: ' + err.message);
+    }
+  }
+
+  // Map DB pattern rows into the same in-memory shape the static path produces: each sol is the stored
+  // detail blob with _row attached (carries pattern_uid + phys_foldable + agree + tags + GT for findingFor).
+  function ingestPatternRows(rows, run, tagKeys) {
+    const sols = rows.map(r => {
+      const sol = r.detail;
+      sol._row = r;
+      sol._normHash = normHash(sol.canonicalHash);
+      return sol;
+    });
+    state.search.solutions = sols;
+    state.search.stacks = 3;
+    state.search.dbTagKeys = tagKeys || [];
+    state.search.lastOpts = (run && run.opts) || state.search.lastOpts || {};
+    state.search.cursor = 0;
+    if (run && run.m && run.n) {
+      state.search.dims = { m: run.m, n: run.n };
+      document.getElementById('searchM').value = run.m;
+      document.getElementById('searchN').value = run.n;
+    }
+    document.getElementById('searchResults').style.display = '';
+    setSearchButtons(false);
+    rebuildTagFilterControls();
+    renderSearchTable();
+    if (filteredSolutions().length) stepTo(0); else renderSearchNav();
+  }
+
   function init() {
     // Tools
     document.querySelectorAll('input[name=tool]').forEach(r => {
@@ -366,11 +446,11 @@ const App = (() => {
       r.addEventListener('change', e => setMode(e.target.value));
     });
 
-    // Boot one grid, default to View mode, then auto-load the latest Python results.
+    // Boot one grid, default to View mode, then auto-load results (DB API preferred, static fallback).
     addGrid();
     setMode('view');
-    initResultsManifest();
-    loadFindings();   // joins onto candidates by normalized canonicalHash; silent if missing
+    initResults();
+    loadFindings();   // static foldfindings.json fallback join; DB mode prefers each row's _row data
   }
 
   // --- Search panel wiring ---
@@ -532,7 +612,7 @@ const App = (() => {
       const wantBool = want === true || want === 'true';
       list = list.filter(s => { const f = findingFor(s); return f && f.tags && f.tags[key] === wantBool; });
     }
-    return list;
+    return sortSolutions(list);     // header-click sort order; shared by table, stepper, and nav
   }
 
   function anyFindingFilterActive() {
@@ -635,6 +715,228 @@ const App = (() => {
     return true;
   }
 
+  // --- Data-driven results table (3-stack): columns, agree/ground-truth, header-click sort ----------
+  // One descriptor per column so the table is add/remove/sortable without touching markup. get(sol)
+  // returns the full <td>; sortVal(sol) is the comparable used by header-click client sort; def is the
+  // default visibility. Tag columns (one per discovered key) are appended dynamically. Every column —
+  // including the engine-vs-physical Agree flag and the ground-truth badge — is derived from the loaded
+  // candidate + its joined finding, so it works identically for static-JSON, worker, and API sources.
+
+  function vcell(ok, cls, title) {
+    const t = title ? ` title="${escapeAttr(title)}"` : '';
+    if (ok === null || ok === undefined) return `<td class="verdict-stub"${t}>—</td>`;
+    return `<td class="${cls || (ok ? 'verdict-pass' : 'verdict-fail')}"${t}>${ok ? '✓' : '✗'}</td>`;
+  }
+
+  // engine-vs-physical agreement (1/0/null) — the engine-bug detector. Must mirror the DB v_compare
+  // EXACTLY: null unless BOTH a physical result and a real server prediction exist (no client-heuristic
+  // fallback — that would invent false 'bug?' flags on the migrated findings that carry no prediction).
+  function agreeFor(sol) {
+    const r = sol._row;
+    if (r) {                                            // DB mode: same CASE as v_compare, kept live by
+      const phys = r.phys_foldable, pred = r.pred_foldable;   // patchRowFromRecord updating both fields
+      if (phys === null || phys === undefined || pred === null || pred === undefined) return null;
+      return (!!phys) === (!!pred) ? 1 : 0;
+    }
+    const f = findingFor(sol);                          // static mode: only when a server prediction exists
+    if (!f || f.foldable === null || f.foldable === undefined) return null;
+    if (!(f.predicted && f.predicted.matched)) return null;
+    return f.foldable === !!f.predicted.foldable ? 1 : 0;
+  }
+
+  function sumNums(xs) { return xs.reduce((a, b) => a + (Number(b) || 0), 0); }
+
+  const BASE_COLUMNS = [
+    { key: 'id',      label: '#',      def: true,  always: true,
+      get: s => `<td>${s.id}</td>`, sortVal: s => s.id },
+    { key: 'uid',     label: 'UID',    def: false,
+      get: s => `<td class="mono" title="distinct-pattern id">${(s._row && s._row.pattern_uid) || '—'}</td>`,
+      sortVal: s => (s._row && s._row.pattern_uid) || '' },
+    { key: 'shape',   label: 'Shape',  def: true,
+      get: s => `<td>${escapeHtml(s.footprint.shape)}</td>`, sortVal: s => s.footprint.shape },
+    { key: 'rot',     label: 'Rot',    def: true,
+      get: s => `<td>${s.footprint.rotation}</td>`, sortVal: s => s.footprint.rotation },
+    { key: 'anchor',  label: 'Anchor', def: true,
+      get: s => `<td>(${s.footprint.anchor.x},${s.footprint.anchor.y})</td>`,
+      sortVal: s => s.footprint.anchor.x * 1000 + s.footprint.anchor.y },
+    { key: 'decomp',  label: 'Decomp', def: true,
+      get: s => `<td>${escapeHtml(s.decomposition)}</td>`, sortVal: s => s.decomposition },
+    { key: 'kinds',   label: 'Chain kinds', def: true,
+      get: s => `<td>${s.chains.map(c => c.kind === '2chain' ? '2c' : '1c').join(',')}</td>`,
+      sortVal: s => s.chains.length },
+    { key: 'nH',      label: 'N_H',    def: true,
+      get: s => `<td>${s.chains.map(c => c.nH).join(';')}</td>`, sortVal: s => sumNums(s.chains.map(c => c.nH)) },
+    { key: 'nV',      label: 'N_V',    def: true,
+      get: s => `<td>${s.chains.map(c => c.nV).join(';')}</td>`, sortVal: s => sumNums(s.chains.map(c => c.nV)) },
+    { key: 'arith',   label: 'Arith',  def: false,
+      get: s => vcell(s.verdict.arithmetic), sortVal: s => bool01(s.verdict.arithmetic) },
+    { key: 'exit',    label: 'Exit',   def: true,
+      get: s => vcell(s.verdict.exitFootprint), sortVal: s => bool01(s.verdict.exitFootprint) },
+    { key: 'parity',  label: 'Parity', def: true,
+      get: s => vcell(s.verdict.parity), sortVal: s => bool01(s.verdict.parity) },
+    { key: 'vparity', label: 'VParity', def: false,
+      get: s => vcell(vectorParityOf(s), null, 'legacy nH-even / nV-odd vector parity'),
+      sortVal: s => bool01(vectorParityOf(s)) },
+    { key: 'refl',    label: 'Refl',   def: true,
+      get: s => vcell(s.verdict.reflection), sortVal: s => bool01(s.verdict.reflection) },
+    { key: 'twist',   label: 'Twist',  def: true,
+      get: s => twistCell(s), sortVal: s => s.verdict.twist === null ? -1 : bool01(s.verdict.twist) },
+    { key: 'fold',    label: 'Fold',   def: true,
+      get: s => foldCell(findingFor(s)), sortVal: s => foldSortVal(s) },
+    { key: 'agree',   label: 'Agree',  def: true,
+      get: s => agreeCell(s), sortVal: s => { const a = agreeFor(s); return a === null ? -1 : a; } },
+    { key: 'gt',      label: 'GT',     def: true,
+      get: s => gtCell(s), sortVal: s => gtVal(s) },
+  ];
+
+  function bool01(v) { return v === null || v === undefined ? -1 : (v ? 1 : 0); }
+
+  // legacy vector parity (nH even, nV odd per chain) — read the stored column if present, else derive.
+  function vectorParityOf(sol) {
+    if (sol.verdict && 'vectorParity' in sol.verdict) return sol.verdict.vectorParity;
+    for (const c of sol.chains) {
+      const arrows = c.foldArrows || [];
+      const nH = arrows.filter(a => a === 'L' || a === 'R').length;
+      if (nH % 2 !== 0 || (arrows.length - nH) % 2 !== 1) return false;
+    }
+    return true;
+  }
+
+  function twistCell(s) {
+    const twTitle = (s.twistPairs || []).map(p => `${p.i}-${p.j}:${p.tw}`).join(' ');
+    if (s.verdict.twist === null)
+      return '<td class="verdict-stub" title="2-chain twist not yet supported">—</td>';
+    return s.verdict.twist
+      ? `<td class="verdict-pass" title="pair twist ${escapeAttr(twTitle)}">✓</td>`
+      : `<td class="verdict-fail" title="pair twist ${escapeAttr(twTitle)}">✗</td>`;
+  }
+
+  function foldSortVal(sol) {
+    const f = findingFor(sol);
+    if (!f) return -1;
+    if (f.foldable === null || f.foldable === undefined) return 0;   // recorded-but-untested
+    return f.foldable ? 2 : 1;                                       // JAM=1 < FOLD=2
+  }
+
+  // Agree cell: blank when undecided; ✓ on agreement; a loud ✗ "engine-bug suspect" on disagreement.
+  function agreeCell(sol) {
+    const a = agreeFor(sol);
+    if (a === null) return '<td class="verdict-stub" title="no physical result to compare">—</td>';
+    return a
+      ? '<td class="verdict-pass" title="engine matches physical">✓</td>'
+      : '<td class="agree-bug" title="ENGINE DISAGREES with physical fold — bug suspect">✗ bug?</td>';
+  }
+
+  // Ground truth = physically folded only. DB mode uses the provenance-gated is_ground_truth flag;
+  // static mode (legacy foldfindings.json, all physical) treats any known result as ground truth.
+  function gtVal(sol) {
+    if (sol._row) return sol._row.is_ground_truth ? 1 : 0;
+    const f = findingFor(sol);
+    return f && (f.foldable === true || f.foldable === false) ? 1 : 0;
+  }
+  function gtCell(sol) {
+    return gtVal(sol)
+      ? '<td class="gt-badge" title="physically folded — ground truth, outranks engine">GT</td>'
+      : '<td></td>';
+  }
+
+  // Tag columns: one per known key (preset keys ∪ keys present in findings ∪ keys served by the DB API).
+  function allTagKeys() {
+    const keys = new Set([...getTagKeys(), ...discoverTagKeys(), ...(state.search.dbTagKeys || [])]);
+    return [...keys].sort();
+  }
+  function tagColumn(key) {
+    return {
+      key: 'tag:' + key, label: key, def: true, isTag: true,
+      get: s => {
+        const f = findingFor(s);
+        const v = f && f.tags ? f.tags[key] : undefined;
+        return vcell(v === undefined ? null : v, null, `tag ${key}`);
+      },
+      sortVal: s => { const f = findingFor(s); const v = f && f.tags ? f.tags[key] : undefined;
+        return v === undefined ? -1 : (v ? 1 : 0); },
+    };
+  }
+  function allColumns() { return [...BASE_COLUMNS, ...allTagKeys().map(tagColumn)]; }
+
+  // --- column visibility (localStorage) ---
+  const COL_PREFS_LS = 'foldview.columns';
+  function colPrefs() {
+    if (state.search.colPrefs) return state.search.colPrefs;
+    let p = {};
+    try { p = JSON.parse(localStorage.getItem(COL_PREFS_LS) || '{}') || {}; } catch { /* private */ }
+    return (state.search.colPrefs = p);
+  }
+  function colVisible(col) {
+    const p = colPrefs();
+    return Object.prototype.hasOwnProperty.call(p, col.key) ? !!p[col.key] : col.def;
+  }
+  function setColVisible(key, on) {
+    const p = colPrefs(); p[key] = on;
+    try { localStorage.setItem(COL_PREFS_LS, JSON.stringify(p)); } catch { /* private */ }
+  }
+  function visibleColumns() { return allColumns().filter(colVisible); }
+
+  function sortSolutions(list) {
+    const { key, dir } = state.search.sort;
+    const col = allColumns().find(c => c.key === key);
+    if (!col || !col.sortVal) return list;
+    const sgn = dir === 'desc' ? -1 : 1;
+    return list.slice().sort((a, b) => {
+      const va = col.sortVal(a), vb = col.sortVal(b);
+      if (va < vb) return -sgn; if (va > vb) return sgn;
+      return (a.id - b.id);                              // stable tiebreak by id
+    });
+  }
+
+  // Re-render the table+nav while keeping the candidate `curId` highlighted and under the cursor across
+  // any re-sort. filteredSolutions() sorts by columns that write-back mutates (Fold/Agree/GT/tags), so
+  // header-sort AND live writes must re-anchor the cursor by id, not leave it pointing at a stale index.
+  function rerenderKeepingCursor(curId) {
+    renderSearchTable();
+    const idx = filteredSolutions().findIndex(x => x.id === curId);
+    if (idx >= 0) state.search.cursor = idx;
+    renderSearchNav();
+  }
+
+  function onHeaderSort(key) {
+    const curId = (filteredSolutions()[state.search.cursor] || {}).id;
+    const s = state.search.sort;
+    if (s.key === key) s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+    else { s.key = key; s.dir = 'asc'; }
+    rerenderKeepingCursor(curId);
+  }
+
+  // Column chooser (⚙): toggle any column on/off + add a hypothesis tag column. Persists in localStorage.
+  function renderColChooser() {
+    const cols = allColumns();
+    const boxes = cols.map(c => {
+      const lbl = c.isTag ? `tag: ${escapeHtml(c.label)}` : escapeHtml(c.label);
+      const dis = c.always ? ' disabled checked' : (colVisible(c) ? ' checked' : '');
+      return `<label class="col-opt"><input type="checkbox" data-col="${escapeAttr(c.key)}"${dis}> ${lbl}</label>`;
+    }).join('');
+    return `<details class="col-chooser"${state.search.colChooserOpen ? ' open' : ''}><summary>⚙ Columns</summary>
+      <div class="col-chooser-body">${boxes}
+        <label class="col-opt">+ tag column
+          <input class="add-tag-col" type="text" placeholder="hypothesisX" style="width:90px">
+        </label>
+      </div></details>`;
+  }
+
+  function wireColChooser(wrap) {
+    const det = wrap.querySelector('details.col-chooser');
+    if (det) det.addEventListener('toggle', () => { state.search.colChooserOpen = det.open; });
+    wrap.querySelectorAll('.col-chooser input[type=checkbox][data-col]').forEach(cb => {
+      cb.addEventListener('change', () => { setColVisible(cb.dataset.col, cb.checked); renderSearchTable(); });
+    });
+    const add = wrap.querySelector('.add-tag-col');
+    if (add) add.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const k = add.value.trim();
+      if (k) { saveTagKeys([...getTagKeys(), k].join(',')); renderSearchTable(); updateFindingPanel(); }
+    });
+  }
+
   function renderSearchTable() {
     const wrap = document.getElementById('searchResultsTableWrap');
     const cnt = document.getElementById('searchResultsCount');
@@ -658,45 +960,31 @@ const App = (() => {
         btn.addEventListener('click', () => stepTo(+btn.dataset.idx)));
       return;
     }
-    const head = `
-      <thead><tr>
-        <th>#</th><th>Shape</th><th>Rot</th><th>Anchor</th><th>Decomp</th>
-        <th>Chain kinds</th><th>N_H</th><th>N_V</th><th>Exit</th><th>Parity</th><th>Refl</th><th>Twist</th><th>Fold</th><th></th>
-      </tr></thead>
-    `;
-    const rows = list.map((s, i) => {
-      const kinds = s.chains.map(c => c.kind === '2chain' ? '2c' : '1c').join(',');
-      const nH = s.chains.map(c => c.nH).join(';');
-      const nV = s.chains.map(c => c.nV).join(';');
-      const par = s.verdict.parity ? '<td class="verdict-pass">✓</td>' : '<td class="verdict-fail">✗</td>';
-      const ref = s.verdict.reflection ? '<td class="verdict-pass">✓</td>' : '<td class="verdict-fail">✗</td>';
-      const ext = s.verdict.exitFootprint ? '<td class="verdict-pass">✓</td>' : '<td class="verdict-fail">✗</td>';
-      const twTitle = (s.twistPairs || []).map(p => `${p.i}-${p.j}:${p.tw}`).join(' ');
-      const tw = s.verdict.twist === null
-        ? `<td class="verdict-stub" title="2-chain twist not yet supported">—</td>`
-        : s.verdict.twist
-          ? `<td class="verdict-pass" title="pair twist ${twTitle}">✓</td>`
-          : `<td class="verdict-fail" title="pair twist ${twTitle}">✗</td>`;
-      const fold = foldCell(findingFor(s));
-      return `<tr class="${i === state.search.cursor ? 'current-sol' : ''}" data-idx="${i}">
-        <td>${s.id}</td>
-        <td>${s.footprint.shape}</td>
-        <td>${s.footprint.rotation}</td>
-        <td>(${s.footprint.anchor.x},${s.footprint.anchor.y})</td>
-        <td>${s.decomposition}</td>
-        <td>${kinds}</td>
-        <td>${nH}</td>
-        <td>${nV}</td>
-        ${ext}${par}${ref}
-        ${tw}
-        ${fold}
-        <td><button class="load-sol" data-idx="${i}">► Load</button></td>
-      </tr>`;
+    // Data-driven 3-stack table: visible columns -> sortable headers + cells. `list` is already in the
+    // displayed (sorted) order from filteredSolutions(), so data-idx stays aligned with the stepper.
+    const cols = visibleColumns();
+    const { key: sortKey, dir } = state.search.sort;
+    const ths = cols.map(c => {
+      const arrow = c.key === sortKey ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
+      const sortable = c.sortVal ? ' sortable' : '';
+      return `<th class="col-${escapeAttr(c.key)}${sortable}" data-sort="${escapeAttr(c.key)}"`
+        + ` title="${escapeAttr(c.isTag ? 'tag: ' + c.label : c.label)}">${escapeHtml(c.label)}${arrow}</th>`;
     }).join('');
-    wrap.innerHTML = `<table class="search-results">${head}<tbody>${rows}</tbody></table>`;
-    wrap.querySelectorAll('button.load-sol').forEach(btn => {
-      btn.addEventListener('click', () => stepTo(+btn.dataset.idx));
-    });
+    const head = `<thead><tr>${ths}<th></th></tr></thead>`;
+    const rows = list.map((s, i) => {
+      const cur = i === state.search.cursor ? 'current-sol' : '';
+      const bug = agreeFor(s) === 0 ? ' agree-bug-row' : '';   // highlight engine-vs-physical conflicts
+      const cells = cols.map(c => c.get(s)).join('');
+      return `<tr class="${cur}${bug}" data-idx="${i}">${cells}`
+        + `<td><button class="load-sol" data-idx="${i}">► Load</button></td></tr>`;
+    }).join('');
+    wrap.innerHTML = renderColChooser()
+      + `<table class="search-results">${head}<tbody>${rows}</tbody></table>`;
+    wireColChooser(wrap);
+    wrap.querySelectorAll('th.sortable').forEach(th =>
+      th.addEventListener('click', () => onHeaderSort(th.dataset.sort)));
+    wrap.querySelectorAll('button.load-sol').forEach(btn =>
+      btn.addEventListener('click', () => stepTo(+btn.dataset.idx)));
   }
 
   function escapeCsv(v) {
@@ -789,8 +1077,25 @@ const App = (() => {
     }
   }
 
+  // The candidate's joined finding. In DB mode (sol._row from /api/patterns) the SQLite join IS the
+  // source of truth, so synthesize a finding-shaped object from the row; else fall back to the static
+  // foldfindings.json byHash cache. Either way every table column reads one uniform shape.
   function findingFor(sol) {
     if (!sol) return null;
+    const r = sol._row;
+    if (r) {
+      const hasTags = r.tags && Object.keys(r.tags).length > 0;
+      if ((r.phys_foldable === null || r.phys_foldable === undefined) && !hasTags && !r.is_ground_truth)
+        return null;
+      return {
+        canonicalHash: sol.canonicalHash,
+        foldable: (r.phys_foldable === null || r.phys_foldable === undefined) ? null : !!r.phys_foldable,
+        tags: r.tags ? Object.fromEntries(Object.entries(r.tags).map(([k, v]) => [k, !!v])) : {},
+        predicted: (r.pred_foldable === null || r.pred_foldable === undefined)
+          ? undefined : { matched: true, foldable: !!r.pred_foldable },
+        is_ground_truth: r.is_ground_truth,
+      };
+    }
     const key = sol._normHash || normHash(sol.canonicalHash);
     return state.findings.byHash.get(key) || null;
   }
@@ -819,9 +1124,9 @@ const App = (() => {
     if (filteredSolutions().length) stepTo(0); else renderSearchNav();
   }
 
-  // Custom-tag filters are discovered from the loaded findings (union of every finding's tags keys).
+  // Custom-tag filter keys: union of static-findings tag keys and any keys served by the DB API.
   function discoverTagKeys() {
-    const keys = new Set();
+    const keys = new Set(state.search.dbTagKeys || []);
     for (const f of state.findings.byHash.values()) {
       if (f && f.tags) for (const k of Object.keys(f.tags)) keys.add(k);
     }
@@ -834,7 +1139,9 @@ const App = (() => {
   function rebuildTagFilterControls() {
     const row = document.getElementById('findingFilters');
     if (!row) return;
-    const show = state.search.stacks === 3 && state.findings.byHash.size > 0;
+    // Show for any 3-stack results so Actual/Predicted filters are always available; tag selects are
+    // injected per discovered key (static findings ∪ DB-served keys), so DB mode gets them too.
+    const show = state.search.stacks === 3 && state.search.solutions.length > 0;
     row.style.display = show ? '' : 'none';
     if (!show) return;
     const keys = discoverTagKeys();
@@ -917,6 +1224,11 @@ const App = (() => {
       const r = v => `<label><input type="radio" name="${nm}" data-tagkey="${ak}" value="${v}"${sel(v)}> ${v}</label>`;
       return `<div class="tag-row"><span class="mono">${ek}</span>${r('true')}${r('false')}${r('untested')}</div>`;
     }).join('');
+    // Live write-back: selecting a per-tag radio upserts that one tag immediately (untested = clear).
+    box.querySelectorAll('input[type=radio]').forEach(el => el.addEventListener('change', () => {
+      const v = el.value === 'true' ? true : el.value === 'false' ? false : null;
+      liveTag(el.dataset.tagkey, v);
+    }));
   }
 
   // Collect the checked per-key radios into a tags map by data-tagkey (no selector-escaping of user keys);
@@ -948,6 +1260,8 @@ const App = (() => {
       by: (document.getElementById('findingBy').value || '').trim() || 'anon',
       date: new Date().toISOString().slice(0, 10),
       notes: (document.getElementById('findingNotes').value || '').trim(),
+      // physical (default) = ground truth; handmath/engine recorded but NOT ground truth (gated server-side).
+      provenance: (document.getElementById('findingProvenance') || {}).value || 'physical',
     };
     if (foldable === false) {                                // jam detail only when the fold jammed
       const af = document.getElementById('findingAtFold').value;
@@ -993,10 +1307,27 @@ const App = (() => {
     setFindingStatus(`downloaded finding-${rec.grid}-${rec.id}.json — submit via: python py/findings.py submit <file>`);
   }
 
-  async function submitFinding() {
+  // Patch the loaded candidate's DB row in place (DB mode) from a submitted finding record, so the
+  // Fold/Agree/GT cells reflect the write without a full reload. No-op for the static path.
+  function patchRowFromRecord(record) {
+    const sol = currentSolution();
+    if (!sol || !sol._row || !record) return;
+    const r = sol._row;
+    const fb = record.foldable;
+    const known = fb !== null && fb !== undefined;
+    const physical = (record.provenance || 'physical') === 'physical';   // only physical = ground truth
+    r.phys_foldable = known ? (fb ? 1 : 0) : null;
+    r.is_ground_truth = (physical && known) ? 1 : 0;
+    if (record.predicted && record.predicted.matched) r.pred_foldable = record.predicted.foldable ? 1 : 0;
+    rerenderKeepingCursor(sol.id);
+  }
+
+  // Submit the current finding. opts.live = fired by an in-viewer toggle: never auto-download on failure
+  // (that path is for explicit Submit), just report. Physical FOLD/JAM is always ground truth.
+  async function submitFinding(opts = {}) {
     const rec = buildFinding();
     if (!rec) return;
-    setFindingStatus('submitting…');
+    if (!opts.live) setFindingStatus('submitting…');
     try {
       const res = await fetch('/api/findings', {
         method: 'POST',
@@ -1005,17 +1336,57 @@ const App = (() => {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
+        patchRowFromRecord(data.record);
         const p = data.record && data.record.predicted;
         const eng = p ? (p.matched ? (p.foldable ? 'FOLD' : 'JAM') : 'no engine match') : 'n/a';
-        await loadFindings();    // refresh the join so the new result/tags show in table + filters
+        await loadFindings();    // refresh the static join too (table prefers _row in DB mode)
         setFindingStatus(`saved ${rec.grid}#${rec.id} (engine predicted: ${eng})`, true);
+      } else if (opts.live) {
+        setFindingStatus(`save failed: ${data.error || res.status}`, false);
       } else {
         setFindingStatus(`rejected: ${data.error || res.status} — downloading instead`, false);
         exportFinding();
       }
     } catch (err) {
-      setFindingStatus(`no POST server (run serve.py) — downloading instead: ${err.message}`, false);
-      exportFinding();
+      if (opts.live) setFindingStatus('no POST server (run serve.py) — toggle not saved', false);
+      else {
+        setFindingStatus(`no POST server (run serve.py) — downloading instead: ${err.message}`, false);
+        exportFinding();
+      }
+    }
+  }
+
+  // Live single-tag write-back: POST /api/tag (value null = un-toggle/delete), then patch the row.
+  async function liveTag(key, value) {
+    const sol = currentSolution();
+    if (!sol) return;
+    const prov = (document.getElementById('findingProvenance') || {}).value || 'handmath';
+    try {
+      const res = await fetch('/api/tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          canonicalHash: sol.canonicalHash, key, value, provenance: prov,
+          by: (document.getElementById('findingBy').value || '').trim() || 'anon',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        if (sol._row) {
+          sol._row.tags = sol._row.tags || {};
+          if (value === null) delete sol._row.tags[key];
+          else sol._row.tags[key] = value ? 1 : 0;
+        }
+        const isNewKey = !(state.search.dbTagKeys || []).includes(key);
+        if (isNewKey) (state.search.dbTagKeys ||= []).push(key);
+        if (isNewKey) rebuildTagFilterControls();        // new key -> add its filter <select> too (not just the column)
+        rerenderKeepingCursor(sol.id);
+        setFindingStatus(`tag ${key}=${value === null ? 'cleared' : value} saved`, true);
+      } else {
+        setFindingStatus(`tag save failed: ${data.error || res.status}`, false);
+      }
+    } catch (err) {
+      setFindingStatus('no POST server (run serve.py) — tag not saved', false);
     }
   }
 
@@ -1023,7 +1394,15 @@ const App = (() => {
     const recBtn = document.getElementById('recordFindingBtn');
     const subBtn = document.getElementById('submitFindingBtn');
     if (recBtn) recBtn.addEventListener('click', exportFinding);
-    if (subBtn) subBtn.addEventListener('click', submitFinding);
+    if (subBtn) subBtn.addEventListener('click', () => submitFinding());
+    // Live write-back: toggling FOLD/JAM/untested auto-saves a physical (ground-truth) finding,
+    // debounced so a quick FOLD->JAM correction fires once. Silent if no serve.py (use Submit/Download).
+    let foldTimer = null;
+    document.querySelectorAll('input[name=findingFoldable]').forEach(el =>
+      el.addEventListener('change', () => {
+        clearTimeout(foldTimer);
+        foldTimer = setTimeout(() => submitFinding({ live: true }), 300);
+      }));
     const keyInput = document.getElementById('findingTagKeys');
     const keySave = document.getElementById('findingTagKeysSave');
     if (keyInput) keyInput.value = getTagKeys().join(', ');

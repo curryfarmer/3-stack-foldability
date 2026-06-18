@@ -76,6 +76,10 @@ SCHEMA = {
         "by": {"type": "string"},
         "date": {"type": "string"},
         "notes": {"type": "string"},
+        # How the verdict was obtained. Only 'physical' (actually paper-folded) is ground truth and
+        # outranks the engine in v_compare; 'handmath'/'engine' are recorded but NOT ground truth.
+        # Optional + default-physical so legacy/migrated records (no key) stay physical ground truth.
+        "provenance": {"enum": ["physical", "handmath", "engine"]},
         # Free-form user tags: arbitrary string keys -> tri-state bool (true/false/null=untested).
         # Used to record, per finding, which candidate decomposition idea holds (e.g. {"modelA": true}).
         "tags": {
