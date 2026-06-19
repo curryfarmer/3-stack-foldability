@@ -184,6 +184,13 @@ CREATE VIEW IF NOT EXISTS v_compare AS
               ELSE 0 END AS agree
   FROM patterns p
   LEFT JOIN finding f ON f.norm_hash = p.norm_hash;
+
+-- patterns_grid denormalizes the run's grid (m, n) + label onto each pattern row so a DB-browser
+-- Browse-Data filter can pin a grid size directly (patterns itself only carries run_id). Read-only.
+CREATE VIEW IF NOT EXISTS patterns_grid AS
+  SELECT r.m, r.n, r.label AS run_label, p.*
+  FROM patterns p
+  JOIN runs r ON r.id = p.run_id;
 """
 
 # Column order for the patterns INSERT (kept beside SCHEMA_SQL so they cannot drift).
