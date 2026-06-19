@@ -138,7 +138,8 @@ and write-back is disabled (download/CLI submit instead).
 Every CLI takes `--test` (→ `results/folddb.test.sqlite3`, gitignored) or `--db PATH`; `FOLDDB_SQLITE`
 overrides the default. **Close DB Browser before any write** (else `database is locked`). Full
 copy-paste reference (raw `sqlite3` snippets for inspect/edit/tag-CRUD/single-run delete/VACUUM) is in
-`USER_MANUAL.md` §7b.
+`USER_MANUAL.md` §7b; the **reset cycle** (the generate → export → fold → reset *loop* these commands
+form, plus the safety-rail order) is the workflow walkthrough in `USER_MANUAL.md` §7c.
 
 ```bash
 python py/generate.py --m 3 --n 2 --store-all --test   # populate scratch DB (real DB untouched)

@@ -364,6 +364,68 @@ rm results/*.json results/manifest.json results/foldfindings.json
 After the wipe, regenerate any pattern set on demand with `generate.py --store-all`; findings live in
 the DB and round-trip to JSON via `--export-findings` / `migrate_to_sqlite.py`.
 
+### 7c. The reset cycle — the physical-verification start-over loop
+
+§7b is the *inventory* of maintenance commands; this is the *workflow* that strings them together — the
+loop you run to verify the engine against paper and to start clean between engine versions.
+
+**The one principle:** in this DB exactly one thing is irreplaceable — **ground-truth findings** (a real
+paper fold you performed, `finding.is_ground_truth=1`). *Everything else is regenerable:* runs and
+patterns come back from `generate.py --store-all`; tags and engine/hand-math findings are derived. So the
+reset cycle can throw away all the regenerable cruft and rebuild from a clean slate without ever losing a
+folded result.
+
+```
+  generate.py --store-all ──► export_patterns.py ──► fold the paper, record findings
+   (rebuild covered set)       (PNG to-test batch)     (provenance=physical → is_ground_truth=1)
+            ▲                                                          │
+            │                                                          ▼
+            └──────────── reset_db.py  ◄───────────────────────────────┘
+                 (keep ground truths; drop runs/patterns/tags/non-GT findings; VACUUM)
+```
+
+**Run the loop:**
+
+```bash
+# 1. Rebuild the covered set for a grid into the DB
+python py/generate.py --m 6 --n 6 --store-all
+
+# 2. Export the physical to-test batch (any sort/filter from the API vocabulary)
+python py/export_patterns.py --out batch_a --filter twist:null --sort reflection
+#    -> batch_a/{m}x{n}_{pattern_uid}.png + batch_a/index.csv  (the cross-ref sheet)
+
+# 3. Fold the paper. Record each result against its candidate's canonicalHash
+#    (serve.py "Record physical finding", or py/findings.py submit) with provenance=physical.
+#    Only physical findings set is_ground_truth=1 and can outrank the engine.
+
+# 4. Start over — wipe everything regenerable back to bare ground truth
+python py/reset_db.py --dry-run          # ALWAYS preview first: before->after counts, writes nothing
+python py/reset_db.py --export-findings   # back up findings -> JSON, then reset (keeps ground truths)
+
+# 5. Go to 1 with a fresh engine / clean DB; the ground truths persist across the whole loop.
+```
+
+**When you reset:** a new engine version (regenerate patterns, re-check them against the same physical
+ground truth — disagreements are bug suspects); the DB got cluttered with throwaway experiments; or you
+want the empty-but-for-ground-truth baseline.
+
+**The safety rails — use them in this order:**
+
+| rail | command | what it buys you |
+| --- | --- | --- |
+| rehearse | `--test` (scratch DB at `results/folddb.test.sqlite3`) | run the whole destructive loop on a throwaway DB; the real one is untouched |
+| preview | `reset_db.py --dry-run` | see the exact before→after per-table counts before anything is deleted |
+| back up findings | `reset_db.py --export-findings [PATH]` | dump `finding` → JSON before the wipe (skipped under `--dry-run`) |
+| back up the DB | `cp results/folddb.sqlite3 results/folddb.bak.sqlite3` | a full file copy — the surest undo |
+
+> **`--all` empties the DB** — it deletes ground-truth findings too. That is *not* part of the normal
+> cycle (which exists to preserve them); reach for it only to start from a genuinely empty DB.
+
+**The terminal step (one-time, operator-only — do not run unprompted).** Once ground truths are rebuilt
+in the DB and you no longer need the legacy JSON, the DB becomes the sole master and the per-grid result
+files / manifest / findings JSON are redundant. That final wipe is documented at the end of §7b; tests
+keep passing because they read the frozen `tests/fixtures/`, not live `results/`.
+
 ---
 
 ## 8. Performance toggles
