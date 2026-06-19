@@ -166,6 +166,26 @@ python py/migrate_to_sqlite.py                                      # JSON → D
 rm results/*.json results/manifest.json results/foldfindings.json
 ```
 
+### 2+1 twist-model predictions — `py/compute_twist_models.py`
+
+Recompute every registered twist hypothesis (`py/twist_models.py` — `modelA`/`B`/`C`) on each stored
+2+1 fold and write a `<model>_pred` engine tag beside your `<model>_actual` observation. Registry-driven
+(add/change a hypothesis, re-run) + idempotent. Full walkthrough in `USER_MANUAL.md` §7d.
+
+```bash
+python py/compute_twist_models.py            # gate-valid 2+1 across every run (default scope)
+python py/compute_twist_models.py --verbose  # also print each pattern's per-model tw/class
+python py/compute_twist_models.py --all-2plus1   # every 2+1, not just the gate-valid subset
+python py/compute_twist_models.py --run 7     # restrict to one run id
+python py/compute_twist_models.py --prune     # drop <model>_pred rows for hypotheses you removed
+python py/compute_twist_models.py --dry-run   # compute + report; write nothing
+
+# compare engine vs reality (the model_compare view; agree=0 -> hypothesis suspect)
+sqlite3 results/folddb.sqlite3 "SELECT * FROM model_compare WHERE agree=0;"
+# filter patterns by grid size in a DB browser (the patterns_grid view)
+sqlite3 results/folddb.sqlite3 "SELECT pattern_uid,decomposition,parity,reflection FROM patterns_grid WHERE m=6 AND n=6;"
+```
+
 ### Performance toggles (multiprocessing + PyPy)
 
 Two orthogonal switches; **neither changes a verdict** (output identical to serial). Locked by

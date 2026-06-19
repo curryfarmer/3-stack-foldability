@@ -864,7 +864,37 @@ const App = (() => {
         return v === undefined ? -1 : (v ? 1 : 0); },
     };
   }
-  function allColumns() { return [...BASE_COLUMNS, ...allTagKeys().map(tagColumn)]; }
+  // Twist-model agree columns: one per hypothesis with an engine prediction in the DB. Discovered from
+  // the '<model>_pred' tag keys (so a new hypothesis grows a column with zero code), each compares the
+  // engine '<model>_pred' to the user's '<model>_actual' — the per-model twin of the gate-level Agree.
+  function modelKeys() {
+    const out = [];
+    for (const k of allTagKeys()) if (k.endsWith('_pred')) out.push(k.slice(0, -5));
+    return out;                                            // already sorted (allTagKeys sorts)
+  }
+  function modelAgreeCell(s, model) {
+    const f = findingFor(s);
+    const t = (f && f.tags) || {};
+    const pred = t[model + '_pred'], actual = t[model + '_actual'];
+    if (pred === undefined || actual === undefined)
+      return '<td class="verdict-stub" title="need both engine pred + your actual to compare">—</td>';
+    return pred === actual
+      ? '<td class="verdict-pass" title="engine model matches your fold">✓</td>'
+      : '<td class="agree-bug" title="engine MODEL disagrees with your fold — hypothesis suspect">✗</td>';
+  }
+  function modelAgreeColumn(model) {
+    const short = model.replace(/^model/, '');             // modelA -> A; falls back to the full key
+    return {
+      key: 'magree:' + model, label: (short || model) + '?', def: true, isModelAgree: true,
+      get: s => modelAgreeCell(s, model),
+      sortVal: s => { const f = findingFor(s); const t = (f && f.tags) || {};
+        const p = t[model + '_pred'], a = t[model + '_actual'];
+        return (p === undefined || a === undefined) ? -1 : (p === a ? 1 : 0); },
+    };
+  }
+  function allColumns() {
+    return [...BASE_COLUMNS, ...modelKeys().map(modelAgreeColumn), ...allTagKeys().map(tagColumn)];
+  }
 
   // --- column visibility (localStorage) ---
   const COL_PREFS_LS = 'foldview.columns';
@@ -1206,10 +1236,15 @@ const App = (() => {
 
   // Preset tag keys (persisted once) drive the per-finding toggles, so filters stay typo-consistent.
   const TAG_KEYS_LS = 'foldfinding.tagKeys';
+  // The twist-model observation keys, seeded as the capture toggles when the user has set none — so the
+  // panel offers the right '<model>_actual' radios out of the box (the '<model>_pred' twins are engine-
+  // owned, discovered from the DB, never user-togglable). Edit/persist via the keys box to override.
+  const DEFAULT_TAG_KEYS = ['modelA_actual', 'modelB_actual', 'modelC_actual'];
   function getTagKeys() {
     let raw = '';
     try { raw = localStorage.getItem(TAG_KEYS_LS) || ''; } catch { /* private mode */ }
-    return raw.split(',').map(s => s.trim()).filter(Boolean);
+    const keys = raw.split(',').map(s => s.trim()).filter(Boolean);
+    return keys.length ? keys : DEFAULT_TAG_KEYS.slice();
   }
   function saveTagKeys(csv) {
     const keys = csv.split(',').map(s => s.trim()).filter(Boolean);

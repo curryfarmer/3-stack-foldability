@@ -191,6 +191,23 @@ CREATE VIEW IF NOT EXISTS patterns_grid AS
   SELECT r.m, r.n, r.label AS run_label, p.*
   FROM patterns p
   JOIN runs r ON r.id = p.run_id;
+
+-- model_compare puts each 2+1 fold's ENGINE prediction next to the user's PHYSICAL observation, per
+-- twist hypothesis, with an agree flag. Long format (one row per pattern×model) so it stays dynamic
+-- as hypotheses are added: each '<model>_pred' tag (engine) is matched to its '<model>_actual' tag
+-- (you). Filter by model_key / agree=0 in a DB browser to find engine-vs-reality mismatches.
+CREATE VIEW IF NOT EXISTS model_compare AS
+  SELECT r.m, r.n, p.pattern_uid, p.norm_hash, p.decomposition,
+         substr(tp.key, 1, length(tp.key) - 5) AS model_key,
+         tp.val_bool AS eng_pass, tp.val_int AS eng_tw, tp.val_text AS eng_class,
+         ta.val_bool AS phys_pass,
+         (tp.val_bool = ta.val_bool) AS agree
+  FROM patterns p
+  JOIN runs r ON r.id = p.run_id
+  JOIN tag tp ON tp.norm_hash = p.norm_hash AND substr(tp.key, -5) = '_pred'
+  LEFT JOIN tag ta ON ta.norm_hash = p.norm_hash
+       AND ta.key = substr(tp.key, 1, length(tp.key) - 5) || '_actual'
+  WHERE p.decomposition = '2+1';
 """
 
 # Column order for the patterns INSERT (kept beside SCHEMA_SQL so they cannot drift).
@@ -403,6 +420,28 @@ def upsert_tag(conn, canonical_hash, key, value, *, provenance="handmath", by_wh
             (nh, key, _b(value), provenance, by_who, date, notes))
     conn.commit()
     return nh
+
+
+def upsert_engine_pred(conn, norm_hash, key, passval, tw=None, cls=None, version=None, *, commit=True):
+    """Write one ENGINE model prediction as a tag row (provenance='engine'), keyed (norm_hash, key) —
+    by convention key is '<model>_pred', the twin of the user's '<model>_actual' tag. Carries pass in
+    val_bool (the viewer ✓/✗ + the model_compare agree flag), the rounded twist in val_int and the
+    partial-decomp class in val_text (both SQL / DB-browser visible), and a 'tw=<raw>; v=<version>'
+    stamp in notes so a re-run after a hypothesis changes is detectable. Idempotent upsert on the PK;
+    pass commit=False to batch many writes under one transaction. I/O: (...) -> norm_hash."""
+    date = datetime.datetime.now().isoformat(timespec="seconds")
+    notes = f"tw={tw}; v={version}" if version is not None else f"tw={tw}"
+    conn.execute(
+        "INSERT INTO tag(norm_hash,key,val_bool,val_int,val_text,provenance,by_who,date,notes) "
+        "VALUES(?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(norm_hash,key) DO UPDATE SET val_bool=excluded.val_bool,val_int=excluded.val_int,"
+        "val_text=excluded.val_text,provenance=excluded.provenance,by_who=excluded.by_who,"
+        "date=excluded.date,notes=excluded.notes",
+        (norm_hash, key, _b(passval), None if tw is None else round(tw),
+         cls, "engine", "engine", date, notes))
+    if commit:
+        conn.commit()
+    return norm_hash
 
 
 def upsert_finding(conn, rec, *, provenance=None):

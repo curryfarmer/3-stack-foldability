@@ -196,6 +196,10 @@ python py/generate.py --m 6 --n 6 --store-all  # backfill the full covered set f
 - `finding` — physical ground truth: `foldable`, `is_ground_truth`, and 3-tier `provenance`
   (`engine` | `handmath` | `physical`).
 - `v_compare` — a VIEW joining engine prediction to physical result, exposing the `agree` flag.
+- `patterns_grid` — a VIEW denormalizing the run's `m`/`n`/`label` onto each pattern row, so a
+  DB-browser can filter by grid size directly (`patterns` itself only carries `run_id`).
+- `model_compare` — a VIEW (long format, one row per pattern × twist hypothesis) putting each 2+1
+  fold's engine prediction beside your physical observation with an `agree` flag (see §7d).
 
 `norm_hash` (the sorted-keys, compact-separator canonicalization of `canonicalHash`) is the
 cross-table join key.
@@ -432,6 +436,49 @@ want the empty-but-for-ground-truth baseline.
 in the DB and you no longer need the legacy JSON, the DB becomes the sole master and the per-grid result
 files / manifest / findings JSON are redundant. That final wipe is documented at the end of §7b; tests
 keep passing because they read the frozen `tests/fixtures/`, not live `results/`.
+
+### 7d. 2+1 twist-model validation (preds vs actual)
+
+The engine deliberately ships `twist = NULL` for `2+1` (§6) — several competing reductions *predict*
+whether a 2+1 fold closes flat, and which is right is an open physical question. This layer lets you
+**fold the paper and check each hypothesis against reality**, per pattern, without touching the
+production engine.
+
+- **The registry** — `py/twist_models.py` holds every hypothesis as one entry in `MODELS`
+  (`modelA` partial-decomp, `modelB` jump-decomp, `modelC` no-decomp today). **Add a hypothesis** =
+  add an entry; **change one** = edit its function. Each carries a source-hash version so a re-run
+  after a change is detectable.
+- **Two tag keys per model.** For each hypothesis the DB holds `<model>_pred` (what the engine
+  computes, `provenance='engine'`) and `<model>_actual` (what *you* observed folding it). Distinct
+  keys ⇒ no collision; both auto-render as viewer columns; adding a model needs zero schema/UI work.
+  The `_pred` row also carries the raw twist in `val_int` and Model-A's class in `val_text`.
+- **Backfill the predictions** — `py/compute_twist_models.py` recomputes every registered model on
+  each stored 2+1 solution and upserts the `<model>_pred` tags. Idempotent + re-runnable.
+
+```bash
+python py/compute_twist_models.py            # gate-valid 2+1 across every run (the default scope)
+python py/compute_twist_models.py --verbose  # also print each pattern's per-model tw/class
+python py/compute_twist_models.py --all-2plus1   # every 2+1, not just the gate-valid subset
+python py/compute_twist_models.py --prune    # drop <model>_pred rows for hypotheses you removed
+python py/compute_twist_models.py --dry-run  # compute + report; write nothing
+```
+
+"Gate-valid" = a 2+1 fold whose every *decided* gate passes (arithmetic, exit-footprint, parity,
+vector-parity, reflection) — so the twist is the only open question. That is the set worth folding.
+
+- **Record your observation** in the browser: the capture panel seeds `modelA_actual` /
+  `modelB_actual` / `modelC_actual` toggles by default — fold the paper, set each true/false.
+- **Spot mismatches.** The viewer grows one **`A?`/`B?`/`C?`** agree column per hypothesis (✓ = engine
+  model matches your fold, ✗ = it disagrees → that hypothesis is suspect, `—` = need both). Or in a
+  SQL browser:
+
+```sql
+SELECT * FROM model_compare WHERE agree = 0;            -- engine-vs-reality mismatches, per model
+SELECT model_key, eng_pass, eng_tw, eng_class, phys_pass FROM model_compare WHERE pattern_uid='…';
+```
+
+Once enough folds are recorded, the model whose `_pred` agrees with `_actual` most often is the
+keeper — then prune the losers and fold the registry winner into the engine.
 
 ---
 

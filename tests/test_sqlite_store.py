@@ -137,6 +137,46 @@ def test_v_compare_agree_flags_disagreement(tmp_path):
     conn.close()
 
 
+# ---------- engine twist-model predictions (upsert_engine_pred + model_compare view) ----------
+
+def test_upsert_engine_pred_roundtrip(tmp_path):
+    db, _, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    nh = conn.execute("SELECT norm_hash FROM patterns LIMIT 1").fetchone()[0]
+    # pass=True with a fractional tw rounds into val_int; class lands in val_text; engine-owned + stamped
+    Store.upsert_engine_pred(conn, nh, "modelA_pred", True, tw=2.6, cls="overhang", version="abc123")
+    r = conn.execute("SELECT * FROM tag WHERE norm_hash=? AND key='modelA_pred'", (nh,)).fetchone()
+    assert r["val_bool"] == 1 and r["val_int"] == 3 and r["val_text"] == "overhang"
+    assert r["provenance"] == "engine" and r["by_who"] == "engine" and "v=abc123" in r["notes"]
+    # re-upsert overwrites in place (idempotent on the PK), not a second row; None tw -> NULL val_int
+    Store.upsert_engine_pred(conn, nh, "modelA_pred", False, tw=None, cls=None, version="def456")
+    assert conn.execute("SELECT COUNT(*) FROM tag WHERE norm_hash=? AND key='modelA_pred'",
+                        (nh,)).fetchone()[0] == 1
+    r = conn.execute("SELECT * FROM tag WHERE norm_hash=? AND key='modelA_pred'", (nh,)).fetchone()
+    assert r["val_bool"] == 0 and r["val_int"] is None and r["val_text"] is None and "v=def456" in r["notes"]
+    conn.close()
+
+
+def test_model_compare_joins_pred_and_actual(tmp_path):
+    db, _, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    nh = conn.execute("SELECT norm_hash FROM patterns WHERE decomposition='2+1' LIMIT 1").fetchone()[0]
+    Store.upsert_engine_pred(conn, nh, "modelB_pred", True, tw=0, version="v1")     # engine says pass
+    # no actual yet -> LEFT JOIN keeps the row, phys_pass NULL, agree NULL
+    row = conn.execute("SELECT * FROM model_compare WHERE norm_hash=? AND model_key='modelB'",
+                       (nh,)).fetchone()
+    assert row["model_key"] == "modelB" and row["eng_pass"] == 1
+    assert row["phys_pass"] is None and row["agree"] is None
+    # user records a DISAGREEING actual -> agree=0 (engine-vs-reality mismatch surfaces)
+    conn.execute("INSERT INTO tag(norm_hash,key,val_bool,provenance) VALUES(?,?,?,?)",
+                 (nh, "modelB_actual", 0, "physical"))
+    conn.commit()
+    row = conn.execute("SELECT * FROM model_compare WHERE norm_hash=? AND model_key='modelB'",
+                       (nh,)).fetchone()
+    assert row["phys_pass"] == 0 and row["agree"] == 0
+    conn.close()
+
+
 # ---------- one-way JSON export round-trip ----------
 
 def test_export_json_round_trip(tmp_path):
