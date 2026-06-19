@@ -594,6 +594,10 @@ const App = (() => {
     if (state.search.decompFilter) list = list.filter(s => s.decomposition === state.search.decompFilter);
     if (state.search.shapeFilter) list = list.filter(s => s.footprint.shape === state.search.shapeFilter);
     if (state.search.tw0Only) list = list.filter(s => s.verdict.twist);
+    // UID filter (DB mode only — pattern_uid rides on _row): paste a batch, show just those patterns.
+    if (state.search.uidSet && state.search.uidSet.size) {
+      list = list.filter(s => s._row && state.search.uidSet.has(s._row.pattern_uid));
+    }
     // Findings-join filters (no-op when their control is ''): physical result, engine-predicted, custom tags.
     if (state.search.actualFilter) {
       list = list.filter(s => {
@@ -635,7 +639,7 @@ const App = (() => {
         ? `HC #${cur.id}  ${cur.verdict.foldable ? '✓ foldable' : '✗ not foldable'}  (Tw=${cur.twistValue})`
         : `Tw=0 ${cur.verdict.twist ? '✓' : '✗'}  ${cur.footprint.shape} ${cur.decomposition}`;
     const filtered = state.search.tw0Only || state.search.decompFilter || state.search.shapeFilter
-      || anyFindingFilterActive();
+      || (state.search.uidSet && state.search.uidSet.size) || anyFindingFilterActive();
     document.getElementById('searchNavShowing').textContent =
       filtered ? `showing ${list.length} of ${total}` : '';
     document.getElementById('searchPrevBtn').disabled = state.search.cursor <= 0 || !list.length;
@@ -700,13 +704,16 @@ const App = (() => {
       state.search.tw0Only = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
+      state.search.uidSet = null;
       clearFindingFilters();
       const tw = document.getElementById('searchTw0Only');
       const df = document.getElementById('searchDecompFilter');
       const sf = document.getElementById('searchShapeFilter');
+      const uf = document.getElementById('searchUidFilter');
       if (tw) tw.checked = false;
       if (df) df.value = '';
       if (sf) sf.value = '';
+      if (uf) uf.value = '';
       renderSearchTable();
       idx = filteredSolutions().findIndex(s => s.id === id);
     }
@@ -1425,10 +1432,13 @@ const App = (() => {
       state.search.tw0Only = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
+      state.search.uidSet = null;
       clearFindingFilters();
       document.getElementById('searchTw0Only').checked = false;
       document.getElementById('searchDecompFilter').value = '';
       document.getElementById('searchShapeFilter').value = '';
+      const ufClear = document.getElementById('searchUidFilter');
+      if (ufClear) ufClear.value = '';
       document.getElementById('searchResults').style.display = 'none';
       document.getElementById('searchResultsTableWrap').innerHTML = '';
       document.getElementById('searchCounters').innerHTML = '';
@@ -1465,6 +1475,12 @@ const App = (() => {
     });
     document.getElementById('searchShapeFilter').addEventListener('change', e => {
       state.search.shapeFilter = e.target.value; applyFilterChange();
+    });
+    const uf = document.getElementById('searchUidFilter');
+    if (uf) uf.addEventListener('input', e => {
+      const ids = e.target.value.split(/[\s,]+/).filter(Boolean);   // paste a batch: split on space/comma/newline
+      state.search.uidSet = ids.length ? new Set(ids) : null;
+      applyFilterChange();
     });
     const fa = document.getElementById('filterActual');
     if (fa) fa.addEventListener('change', e => { state.search.actualFilter = e.target.value; applyFilterChange(); });

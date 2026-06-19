@@ -78,5 +78,43 @@ def test_export_limit_caps_and_reports(tmp_path, capsys):
     assert "not exported" in capsys.readouterr().out             # truncation announced, never silent
 
 
+def test_export_by_uid_pulls_only_those(tmp_path):
+    db, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    uids = [r["pattern_uid"] for r in conn.execute(
+        "SELECT DISTINCT pattern_uid FROM patterns ORDER BY pattern_uid LIMIT 3")]
+    conn.close()
+    out = str(tmp_path / "byuid")
+    # paste-style: a single --uid carrying a newline-separated batch (mirrors copy-paste from DB browser)
+    assert EP.main(["--out", out, "--db", db, "--uid", "\n".join(uids)]) == 0
+    pngs = [f for f in os.listdir(out) if f.endswith(".png")]
+    assert len(pngs) == len(uids)
+    assert all(any(u in p for p in pngs) for u in uids)
+
+
+def test_export_uids_file_stdin(tmp_path, monkeypatch):
+    import io
+    db, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    uids = [r["pattern_uid"] for r in conn.execute(
+        "SELECT DISTINCT pattern_uid FROM patterns ORDER BY pattern_uid LIMIT 2")]
+    conn.close()
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n".join(uids) + "\n"))
+    out = str(tmp_path / "fromstdin")
+    assert EP.main(["--out", out, "--db", db, "--uids-file", "-"]) == 0
+    assert len([f for f in os.listdir(out) if f.endswith(".png")]) == len(uids)
+
+
+def test_export_uid_reports_unmatched(tmp_path, capsys):
+    db, _ = _seed(tmp_path)
+    conn = Store.connect(db)
+    good = conn.execute("SELECT pattern_uid FROM patterns LIMIT 1").fetchone()["pattern_uid"]
+    conn.close()
+    out = str(tmp_path / "miss")
+    EP.main(["--out", out, "--db", db, "--uid", good, "--uid", "deadbeefdead"])
+    txt = capsys.readouterr().out
+    assert "matched no pattern" in txt and "deadbeefdead" in txt   # never silently swallow a bad uid
+
+
 def test_export_missing_db_errors(tmp_path):
     assert EP.main(["--out", str(tmp_path / "x"), "--db", str(tmp_path / "nope.sqlite3")]) == 1

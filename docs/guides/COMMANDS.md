@@ -153,7 +153,10 @@ python py/reset_db.py --all                  # also delete findings (fully empty
 # fold-pattern images for the physical to-test batch (sort/filter vocab == GET /api/patterns)
 python py/export_patterns.py --out batch_a --filter parity:true --sort reflection
 python py/export_patterns.py --out batch_b --run 7 --filter twist:null --limit 50   # --limit reports any dropped
+python py/export_patterns.py --out batch_u --uid 2c8aa1a11ccd --uid 5c205cb37ab0    # by pattern_uid (repeatable)
+python py/export_patterns.py --out batch_u --uids-file uids.txt                      # ... or one uid per line ('-' = stdin)
 #   -> {m}x{n}_{pattern_uid}.png per row + index.csv (pattern_uid, hashes, verdict cols) into --out
+#   (--uid also accepts a pasted batch in one value, split on space/comma/newline; unmatched uids reported)
 
 # findings export/import symmetry (DB ⇄ JSON; nothing stranded)
 python py/reset_db.py --export-findings results/foldfindings.json   # DB → JSON

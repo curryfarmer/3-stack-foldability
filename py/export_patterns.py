@@ -9,6 +9,9 @@ verdict columns, image file) so a folded result can be cross-referenced back to 
   python py/export_patterns.py --out batch_a --filter parity:true --sort reflection
   python py/export_patterns.py --out batch_b --run 7 --filter twist:null --limit 50
   python py/export_patterns.py --out batch_c --filter exit_footprint:true --filter is_ground_truth:null --test
+  python py/export_patterns.py --out batch_d --uid a1b2c3d4e5f6 --uid 0f1e2d3c4b5a   # pull by pattern_uid directly
+  python py/export_patterns.py --out batch_e --uid "a1b2c3d4e5f6 0f1e2d3c4b5a ..."   # or paste a whole batch into one --uid
+  python py/export_patterns.py --out batch_f --uids-file uids.txt                     # ... or one uid per line ('-' = stdin)
 
 Sort/filter keys == the API whitelist (serve._PAT_COLS + finding joins): parity, reflection, twist,
 vector_parity, exit_footprint, arithmetic, phys_foldable, is_ground_truth, decomposition, shape, …
@@ -17,6 +20,7 @@ Filter forms: `col:true|false|null|<int>` and `tag:KEY:true|false|null`.
 import argparse
 import csv
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +39,23 @@ _PAGE = 2000                                 # query_patterns hard-caps a page a
 _CSV_COLS = ["image", "pattern_uid", "canonical_hash", "norm_hash", "run_id", "decomposition",
              "arithmetic", "exit_footprint", "parity", "vector_parity", "reflection", "twist",
              "phys_foldable", "is_ground_truth"]
+
+
+def _collect_uids(uid_args, uids_file):
+    """Flatten --uid values (each may be a newline/space/comma-separated batch) + a --uids-file (or
+    stdin when '-') into an order-preserving, de-duplicated pattern_uid list. I/O: (list, path|None)
+    -> list[str]."""
+    raw = []
+    for chunk in uid_args:
+        raw.extend(re.split(r"[\s,]+", chunk.strip()))
+    if uids_file:
+        text = sys.stdin.read() if uids_file == "-" else open(uids_file, encoding="utf-8").read()
+        raw.extend(re.split(r"[\s,]+", text.strip()))
+    seen, out = set(), []
+    for u in raw:
+        if u and u not in seen:
+            seen.add(u); out.append(u)
+    return out
 
 
 def _fetch(conn, q, hard_limit):
@@ -65,6 +86,11 @@ def main(argv=None):
                    help="repeatable; col:true|false|null|<int> or tag:KEY:val")
     p.add_argument("--run", type=int, help="restrict to one run id")
     p.add_argument("--lattice", help="restrict to one lattice (e.g. square)")
+    p.add_argument("--uid", action="append", default=[], metavar="UID",
+                   help="repeatable; export these pattern_uid(s). One value may be a whole batch "
+                        "(split on newlines/spaces/commas) so you can paste many at once.")
+    p.add_argument("--uids-file", metavar="PATH",
+                   help="read pattern_uids from a file, one per line ('-' = stdin)")
     p.add_argument("--limit", type=int, help="cap the number of images (default: all matching)")
     p.add_argument("--dpi", type=int, default=150)
     p.add_argument("--format", default="png", choices=("png", "pdf"))
@@ -77,11 +103,15 @@ def main(argv=None):
         print(f"no DB at {path} — generate one first (generate.py --store-all)", file=sys.stderr)
         return 1
 
+    uids = _collect_uids(ns.uid, ns.uids_file)
+
     q = {"sort": [ns.sort], "dir": [ns.dir], "filter": ns.filter}
     if ns.run is not None:
         q["run"] = [str(ns.run)]
     if ns.lattice:
         q["lattice"] = [ns.lattice]
+    if uids:
+        q["uid"] = uids
 
     conn = Store.connect(path)
     try:
@@ -96,14 +126,18 @@ def main(argv=None):
         return 0
 
     os.makedirs(ns.out, exist_ok=True)
-    written, failed = [], 0
+    written, failed, used = [], 0, set()
     for r in rows:
         m, n = run_mn.get(r["run_id"], (None, None))
         if m is None:                                    # run row vanished mid-export — skip, don't crash
             print(f"  ! run {r['run_id']} missing m/n; skipping {r['pattern_uid']}", file=sys.stderr)
             failed += 1
             continue
-        fname = f"{m}x{n}_{r['pattern_uid']}.{ns.format}"
+        base = f"{m}x{n}_{r['pattern_uid']}"
+        fname = f"{base}.{ns.format}"
+        if fname in used:                                # same uid across runs / --no-dedup dup: keep both
+            fname = f"{base}_r{r['run_id']}s{r['seq']}.{ns.format}"
+        used.add(fname)
         img = os.path.join(ns.out, fname)
         try:                                             # one malformed detail blob must not abort the batch
             render_square.render(r["detail"], m, n, img,
@@ -125,6 +159,11 @@ def main(argv=None):
                         r["phys_foldable"], r["is_ground_truth"]])
 
     print(f"exported {len(written)} image(s) -> {ns.out}  (index: {index})")
+    if uids:                                             # never silently swallow a requested uid that hit nothing
+        got = {r["pattern_uid"] for r in rows}
+        missing = [u for u in uids if u not in got]
+        if missing:
+            print(f"  note: {len(missing)} requested uid(s) matched no pattern: {', '.join(missing)}")
     if failed:                                           # never silently drop rows
         print(f"  note: {failed} pattern(s) skipped (missing run m/n or render error; see stderr above)")
     if ns.limit and total > ns.limit:                    # never silently truncate

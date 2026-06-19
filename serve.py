@@ -181,6 +181,10 @@ def query_patterns(conn, q):
         where.append("p.run_id=?"); args.append(_int(one("run"), None))
     if one("lattice"):
         where.append("p.lattice=?"); args.append(one("lattice"))
+    uids = [u for u in (q.get("uid") or []) if u]      # repeatable ?uid= -> pattern_uid IN (...)
+    if uids:
+        where.append("p.pattern_uid IN (%s)" % ",".join("?" * len(uids)))
+        args.extend(uids)
     for spec in q.get("filter", []):
         _add_filter(where, args, spec)
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""

@@ -329,6 +329,8 @@ python py/migrate_to_sqlite.py                                       # JSON → 
 python py/export_patterns.py --out batch_a --filter parity:true --sort reflection
 python py/export_patterns.py --out batch_b --run 7 --filter twist:null --limit 50
 python py/export_patterns.py --out batch_c --filter exit_footprint:true --filter is_ground_truth:null --test
+python py/export_patterns.py --out batch_uid --uid 2c8aa1a11ccd --uid 5c205cb37ab0    # pull specific patterns
+python py/export_patterns.py --out batch_uid --uids-file uids.txt                     # ... or one uid per line ('-' = stdin)
 ```
 
 | flag | effect |
@@ -337,9 +339,14 @@ python py/export_patterns.py --out batch_c --filter exit_footprint:true --filter
 | `--filter COL:VAL` | repeatable; `col:true\|false\|null\|<int>` or `tag:KEY:val` (whitelist == the API) |
 | `--sort KEY` / `--dir asc\|desc` | sort key (`reflection`, `parity`, `twist`, `seq`, …) + direction |
 | `--run ID` / `--lattice NAME` | restrict to one run / lattice |
+| `--uid UID` / `--uids-file PATH` | export specific `pattern_uid`(s). `--uid` is repeatable and one value may be a pasted batch (split on space / comma / newline); `--uids-file` reads one uid per line (`-` = stdin). Unmatched uids are reported, never silently dropped. |
 | `--limit N` | cap images; prints how many of the total were dropped (never silent) |
 | `--dpi N` / `--format png\|pdf` | render resolution / file format |
 | `--db PATH` / `--test` | read a specific / the scratch DB |
+
+> Same uid can appear in more than one run (a baseline + a `--snapshot`), and under `--no-dedup` even
+> twice in one run. When two rows would share a filename the later one gets an `_r{run}s{seq}` suffix
+> so no image is silently overwritten.
 
 `index.csv` carries `pattern_uid`, `canonical_hash`, `norm_hash`, `run_id`, every verdict column, and
 `phys_foldable`/`is_ground_truth` — record the physical result against the `canonical_hash` row.
@@ -463,6 +470,9 @@ grid from the dropdown, or use **Load results JSON** for any `results/*.json` fi
 
 - **Data-driven table:** click any header to **sort**; the **⚙ Columns** chooser shows/hides columns
   (including one per custom tag) and adds new tag columns (persisted in `localStorage`).
+- **UID filter:** the **UID** box in the results bar narrows the table to one or more `pattern_uid`s —
+  paste a batch (space / comma / newline separated) to pull exactly the candidates you care about. (DB
+  mode only; `pattern_uid` rides on the served row.) Mirrors `export_patterns.py --uid`.
 - **Agree column + GT badge:** surface engine-vs-physical (ground-truth) disagreements — bug suspects,
   highlighted red.
 - **Live tagging:** in "Record physical finding", toggling **FOLD/JAM** or a tag **writes straight to
