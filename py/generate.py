@@ -16,9 +16,12 @@ import argparse
 import os
 import sys
 
-import runner as Runner
-import twostack as TwoStack
-import store as Store
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # py/ on path
+import _bootstrap  # noqa: E402,F401  (runner -> engine/, store -> storage/, + every py/ subfolder)
+
+import runner as Runner       # noqa: E402
+import twostack as TwoStack   # noqa: E402
+import store as Store         # noqa: E402
 
 
 def parse_args(argv):

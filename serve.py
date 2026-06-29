@@ -20,9 +20,10 @@ import sys
 import urllib.parse as urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-# findings lives in py/; enginelib (lazy-imported by predict) in tests/. Put both on the path.
+# findings (py/findings/), store (py/storage/) + enginelib (tests/, lazy predict). py/_bootstrap is
+# the single source of truth: it puts py/, every py/ subfolder, the repo root and tests/ on the path.
 sys.path.insert(0, os.path.join(ROOT, "py"))
-sys.path.insert(0, os.path.join(ROOT, "tests"))
+import _bootstrap  # noqa: E402,F401
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler  # noqa: E402
 
@@ -211,8 +212,10 @@ def query_patterns(conn, q):
     if hashes:
         ph = ",".join("?" * len(hashes))
         for t in conn.execute(
-                f"SELECT norm_hash,key,val_bool FROM tag WHERE norm_hash IN ({ph})", hashes):
-            tag_map.setdefault(t["norm_hash"], {})[t["key"]] = t["val_bool"]
+                f"SELECT norm_hash,key,val_bool,val_text FROM tag WHERE norm_hash IN ({ph})", hashes):
+            # boolean tags carry val_bool; string-valued tags (e.g. fold_class) carry val_text instead.
+            val = t["val_bool"] if t["val_bool"] is not None else t["val_text"]
+            tag_map.setdefault(t["norm_hash"], {})[t["key"]] = val
 
     rows = []
     for r in raw:

@@ -28,9 +28,8 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
+import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
 
 import store as Store        # noqa: E402
 import twist_models          # noqa: E402

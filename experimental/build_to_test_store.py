@@ -22,9 +22,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))            # .../experimental
 ROOT = os.path.dirname(HERE)
-for _p in (HERE, os.path.join(ROOT, "py"), os.path.join(ROOT, "py", "tri"), os.path.join(ROOT, "tests")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+sys.path.insert(0, HERE)                          # experimental/
+sys.path.insert(0, os.path.join(ROOT, "py"))      # py/ for _bootstrap
+import _bootstrap  # noqa: E402,F401  (search -> engine/, findings -> findings/, + repo + tests)
 
 import search as Search          # noqa: E402
 import findings                  # noqa: E402  (py/findings._norm_hash — the dedup key)

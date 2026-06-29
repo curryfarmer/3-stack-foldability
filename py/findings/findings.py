@@ -20,12 +20,13 @@ import os
 
 import jsonschema
 
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/findings/ -> repo
+RESULTS_DIR = os.path.join(_REPO, "results")
 # Default write targets; override via env (FOLDFINDINGS_DB / FOLDFINDINGS_LABLOG) to capture into a
 # scratch DB/log — e.g. a serve.py smoke run or an experiment — without touching the committed files.
 DB_PATH = os.environ.get("FOLDFINDINGS_DB") or os.path.join(RESULTS_DIR, "foldfindings.json")
 LAB_LOG_PATH = os.environ.get("FOLDFINDINGS_LABLOG") or os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "research", "LAB_LOG.md")
+    _REPO, "docs", "research", "LAB_LOG.md")
 
 # Physical jam vocabulary the user may report (superset of the engine's gate names).
 REASON_ENUM = ["parity", "reflection", "twist", "exit_footprint", "overlap", "offgrid", "other"]
@@ -229,10 +230,9 @@ def _predicted_trace_for(rec: dict, *, allow_non_corner: bool = False):
     bare `python py/findings.py submit` works without conftest's sys.path setup.
     I/O: (rec) -> {'foldable','failingGates','chains','matched'} | None (no candidate has that hash)."""
     import sys
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for d in (os.path.join(repo, "tests"), os.path.join(repo, "py")):   # enginelib, then search/twostack
-        if d not in sys.path:
-            sys.path.insert(0, d)
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.join(repo, "py"))
+    import _bootstrap  # noqa: F401  (tests/ + every py/ subfolder on path: enginelib, search, twostack)
     from enginelib import predicted_trace  # lazy, test-helper
     m, n = _parse_grid(rec["grid"])
     return predicted_trace(m, n, rec["canonicalHash"], allow_non_corner=allow_non_corner)

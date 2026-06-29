@@ -23,11 +23,8 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-for d in (HERE, ROOT):                       # py/ for store/render, ROOT for serve
-    if d not in sys.path:
-        sys.path.insert(0, d)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
+import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
 
 import store as Store          # noqa: E402
 import serve                   # noqa: E402  (reuse query_patterns + its whitelist)

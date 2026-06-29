@@ -36,7 +36,7 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "py"))
-sys.path.insert(0, os.path.join(ROOT, "py", "tri"))
+import _bootstrap  # noqa: E402,F401  (py/ subfolders + repo + tests on sys.path)
 import fold  # noqa: E402
 
 

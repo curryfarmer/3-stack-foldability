@@ -11,11 +11,11 @@ HERE: str = os.path.dirname(os.path.abspath(__file__))
 ROOT: str = os.path.dirname(HERE)
 PY: str = os.path.join(ROOT, "py")
 
-# Engine modules import each other by bare name (e.g. `import fold`), so the py/
-# dirs must be on sys.path before any test imports them.
-for _p in (HERE, PY, os.path.join(PY, "tri")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Engine modules import each other by bare name (e.g. `import fold`), so py/ and all its
+# subfolders (engine/twist/storage/findings/render/export/tri) plus tests/ must be on sys.path
+# before any test imports them. py/_bootstrap is the single source of truth for that dir set.
+sys.path.insert(0, PY)
+import _bootstrap  # noqa: E402,F401
 
 import pytest  # noqa: E402
 

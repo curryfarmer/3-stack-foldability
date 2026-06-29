@@ -22,9 +22,9 @@ from math import atan2, degrees, hypot, isclose
 # ---- bootstrap: make `import common` work from engine subfolders, and `import fold` work ----
 _HERE = os.path.dirname(os.path.abspath(__file__))           # .../experimental
 _ROOT = os.path.dirname(_HERE)
-for _p in (_HERE, os.path.join(_ROOT, "py"), os.path.join(_ROOT, "py", "tri")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+sys.path.insert(0, _HERE)                          # experimental/ so `import common` resolves here too
+sys.path.insert(0, os.path.join(_ROOT, "py"))      # py/ for _bootstrap
+import _bootstrap  # noqa: E402,F401  (fold -> engine/, + every py/ subfolder + repo + tests)
 import fold  # noqa: E402
 
 

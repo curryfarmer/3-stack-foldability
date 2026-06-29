@@ -14,7 +14,8 @@ import hashlib
 import datetime
 import sqlite3
 
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
+RESULTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "results")
 MANIFEST = os.path.join(RESULTS_DIR, "manifest.json")
 # SQLite source-of-truth (Phase-A store-all + non-destructive verdict/tag/finding columns). The JSON
 # writer above becomes a one-way export. Override via env FOLDDB_SQLITE for tests / scratch DBs.

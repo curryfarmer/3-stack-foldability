@@ -20,7 +20,7 @@ import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
+_ROOT = os.path.dirname(os.path.dirname(_HERE))   # py/twist/ -> py/ -> repo root
 _EXP = os.path.join(_ROOT, "experimental")
 if _EXP not in sys.path:                         # experimental/ holds common + the per-model engines
     sys.path.insert(0, _EXP)

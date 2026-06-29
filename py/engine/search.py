@@ -8,6 +8,7 @@ with the browser tool's loader.
 import os
 
 import fold as Fold
+import twist_jump
 from lattice.square import SquareLattice
 
 # ---- helpers ----
@@ -317,18 +318,24 @@ def _pair_loop_twist(path_a, path_b):
 
 
 def twist_check(chains):
-    if not all(len(c["baseCells"]) == 1 for c in chains):
-        return {"decided": False, "pass": None, "pairs": []}
-    paths = [_chain_center_path(c) for c in chains]
-    pairs = []
-    ok = True
-    for i in range(len(chains)):
-        for j in range(i + 1, len(chains)):
-            tw = _pair_loop_twist(paths[i], paths[j])
-            pairs.append({"i": i, "j": j, "tw": tw})
-            if tw != 0:
-                ok = False
-    return {"decided": True, "pass": ok, "pairs": pairs}
+    # 1+1+1 (all single cells): pairwise centroid-loop twist (the historic path, unchanged).
+    if all(len(c["baseCells"]) == 1 for c in chains):
+        paths = [_chain_center_path(c) for c in chains]
+        pairs = []
+        ok = True
+        for i in range(len(chains)):
+            for j in range(i + 1, len(chains)):
+                tw = _pair_loop_twist(paths[i], paths[j])
+                pairs.append({"i": i, "j": j, "tw": tw})
+                if tw != 0:
+                    ok = False
+        return {"decided": True, "pass": ok, "pairs": pairs}
+    # 2+1 (one domino + one monomino): jump-strand twist (Model B). Foldable <=> Tw == 0.
+    res = twist_jump.twist_2plus1_from_chains(chains)
+    if res["decided"]:
+        return {"decided": True, "pass": res["pass"], "pairs": res["pairs"]}
+    # anything else stays undecided (non-filtering) -- same shape as before.
+    return {"decided": False, "pass": None, "pairs": []}
 
 
 # --- Stage 8: D4 canonical hash ---
