@@ -29,3 +29,12 @@ results/folddb.sqlite3-shm
 results/folddb.test.sqlite3
 results/folddb.test.sqlite3-wal
 results/folddb.test.sqlite3-shm
+
+# Local-only working dirs: kept on disk, untracked (git rm --cached'd). Notes, archived
+# research, the write-up, generated results (SQLite DB lives here), and the test suite all
+# live locally and are not part of the shared tree. (annotated-codebase/ above is the same idea.)
+deprecated/
+docs/
+report/
+results/
+tests/
