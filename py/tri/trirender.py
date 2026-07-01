@@ -13,6 +13,7 @@ import matplotlib            # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt          # noqa: E402
 from matplotlib.patches import Polygon   # noqa: E402
+from foldsheet_tri import draw_footprints  # noqa: E402  shared start+end footprint highlighter
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "report", "tri")
 
@@ -53,20 +54,20 @@ def fill_chain(ax, walk, color, alpha=0.30):
                              alpha=alpha, zorder=2))
 
 
-def outline_footprint(ax, fp):
-    for t in fp:
-        ax.add_patch(Polygon(_poly(t), closed=True, facecolor="none", edgecolor="#6f4fb0",
-                             lw=2.4, zorder=5))
+def outline_footprint(ax, fp, end_fp=None):
+    # START hub (teal, filled) + unfolded chain-END tiles (purple, dashed), A/B/C in chain order
+    draw_footprints(ax, _poly, fp, end_fp, z0=3.6, labelsize=10)
 
 
-def render_tiling(lat, chains, title, out_name, twist_note="", footprint=None, closed_loops=None):
+def render_tiling(lat, chains, title, out_name, twist_note="", footprint=None, closed_loops=None,
+                  end_footprint=None):
     fig, ax = plt.subplots(figsize=(7.6, 6.4))
     draw_lattice(ax, lat, sigma_fill=True)
     for ci, w in enumerate(chains):
         fill_chain(ax, w, CHAIN[ci % 3])
         overlay_walk(ax, w, CHAIN[ci % 3])
     if footprint:
-        outline_footprint(ax, footprint)
+        outline_footprint(ax, footprint, end_footprint)
     xs = [p[0] for t in lat.tris for p in _poly(t)]
     ys = [p[1] for t in lat.tris for p in _poly(t)]
     ax.set_xlim(min(xs) - 0.5, max(xs) + 2.8)

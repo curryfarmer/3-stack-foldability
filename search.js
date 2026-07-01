@@ -432,22 +432,97 @@ const Search = (() => {
     return odd - even;
   }
 
-  function twistCheck(chains) {
-    // Undecided unless every chain is a single-cell chain (1+1+1).
-    if (!chains.every(c => (c.baseCells ? c.baseCells.length : 1) === 1)) {
-      return { decided: false, pass: null, pairs: [] };
-    }
-    const paths = chains.map(chainCenterPath);
-    const pairs = [];
-    let pass = true;
-    for (let i = 0; i < chains.length; i++) {
-      for (let j = i + 1; j < chains.length; j++) {
-        const tw = pairLoopTwist(paths[i], paths[j]);
-        pairs.push({ i, j, tw });
-        if (tw !== 0) pass = false;
+  // --- 2+1 jump-strand twist (Model B) — byte-for-byte mirror of py/twist_jump.py. ---
+  // Keep the two in lockstep: doubled atan2 turn (NO per-term rounding), sigma = (-1)^i along the
+  // loop, round the SUM only. Foldable <=> Tw == 0; Tw = +-720 is a self-twist jam. NOT pairLoopTwist
+  // (that rounds each angle; the jump-strand must not).
+  function ccCell(c) { return [c.x + 0.5, c.y + 0.5]; }
+
+  function strandPath(placements, idx) {
+    return placements.map(p => ccCell(p.cells[idx]));
+  }
+
+  function loopTerms(pts) {
+    const n = pts.length, terms = [];
+    for (let i = 0; i < n; i++) {
+      const p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+      const v1x = p2[0] - p1[0], v1y = p2[1] - p1[1];
+      const v2x = p3[0] - p2[0], v2y = p3[1] - p2[1];
+      let ang = 0;
+      if (Math.hypot(v1x, v1y) > 1e-9 && Math.hypot(v2x, v2y) > 1e-9) {
+        const dot = v1x * v2x + v1y * v2y;
+        const cross = v1x * v2y - v1y * v2x;
+        ang = Math.atan2(cross, dot) * 180 / Math.PI;   // doubled below; NO per-term rounding
       }
+      terms.push(2 * ang);
     }
-    return { decided: true, pass, pairs };
+    return terms;
+  }
+
+  function twOf(terms) {
+    let t = 0;
+    for (let i = 0; i < terms.length; i++) t += (i % 2 ? 1 : -1) * terms[i];
+    return Math.round(t * 1e6) / 1e6;                   // round the SUM only (== Python round(t, 6))
+  }
+
+  function loopTw(body, path1) {
+    return twOf(loopTerms(body.concat(path1.slice().reverse())));
+  }
+
+  function classifyStep(p, q) {
+    const dx = Math.abs(q[0] - p[0]), dy = Math.abs(q[1] - p[1]);
+    if (dx + dy === 1) return 'unit';
+    if (dx === 1 && dy === 1) return 'DIAG';
+    if ((dx === 0 && dy === 2) || (dx === 2 && dy === 0)) return '2JMP';
+    return 'far';
+  }
+
+  // Canonical strand = the domino cell whose two hub seams are non-diagonal (cosmetic — Tw is
+  // idx-independent — but pinned so JS and Python label the same strand).
+  function pickCanonIdx(placements2, path1) {
+    for (const idx of [0, 1]) {
+      const sp = strandPath(placements2, idx);
+      const k = sp.length;
+      const loop = sp.concat(path1.slice().reverse());
+      const s1 = classifyStep(loop[k - 1], loop[k]);
+      const s2 = classifyStep(loop[2 * k - 1], loop[0]);
+      if (s1 !== 'DIAG' && s2 !== 'DIAG') return idx;
+    }
+    return 0;
+  }
+
+  // 2+1 (one domino + one monomino) jump-strand twist; returns twistCheck shape or null if not 2+1.
+  function twist2plus1(chains) {
+    if (chains.length !== 2) return null;
+    const lens = chains.map(c => (c.baseCells ? c.baseCells.length : 1));
+    if (!((lens[0] === 2 && lens[1] === 1) || (lens[0] === 1 && lens[1] === 2))) return null;
+    const i2 = lens[0] === 2 ? 0 : 1, i1 = 1 - i2;
+    const path1 = strandPath(chains[i1].placements, 0);
+    const idx = pickCanonIdx(chains[i2].placements, path1);
+    const tw = loopTw(strandPath(chains[i2].placements, idx), path1);
+    return { decided: true, pass: Math.abs(tw) < 1e-6, pairs: [{ i: i2, j: i1, tw }] };
+  }
+
+  function twistCheck(chains) {
+    // 1+1+1 (all single-cell chains): pairwise centroid-loop twist (the historic path, unchanged).
+    if (chains.every(c => (c.baseCells ? c.baseCells.length : 1) === 1)) {
+      const paths = chains.map(chainCenterPath);
+      const pairs = [];
+      let pass = true;
+      for (let i = 0; i < chains.length; i++) {
+        for (let j = i + 1; j < chains.length; j++) {
+          const tw = pairLoopTwist(paths[i], paths[j]);
+          pairs.push({ i, j, tw });
+          if (tw !== 0) pass = false;
+        }
+      }
+      return { decided: true, pass, pairs };
+    }
+    // 2+1 (one domino + one monomino): jump-strand twist (Model B). Foldable <=> Tw == 0.
+    const res = twist2plus1(chains);
+    if (res) return res;
+    // anything else stays undecided (non-filtering).
+    return { decided: false, pass: null, pairs: [] };
   }
 
   // --- Stage 8: D4 canonical hash ---

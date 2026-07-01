@@ -18,6 +18,8 @@ const App = (() => {
       lastOpts: null,
       cursor: 0,
       tw0Only: false,
+      hideJams: false,     // drop confirmed jams (twist verdict === false); null/undecided twist stays
+      collapseSym: false,  // show one representative row per fold_class tag (DB View only)
       decompFilter: '',
       shapeFilter: '',
       actualFilter: '',    // ''|fold|jam|untested — physical result from the joined finding
@@ -588,12 +590,15 @@ const App = (() => {
   function filteredSolutions() {
     let list = state.search.solutions;
     if (state.search.stacks === 2) {
-      // 2-stack: 3-stack filters don't apply; reuse the "Tw=0 only" checkbox as "foldable only".
-      return state.search.tw0Only ? list.filter(s => s.verdict.foldable) : list;
+      // 2-stack: 3-stack filters don't apply; "Tw=0 only" and "Hide jams" both mean foldable-only here.
+      return (state.search.tw0Only || state.search.hideJams) ? list.filter(s => s.verdict.foldable) : list;
     }
     if (state.search.decompFilter) list = list.filter(s => s.decomposition === state.search.decompFilter);
     if (state.search.shapeFilter) list = list.filter(s => s.footprint.shape === state.search.shapeFilter);
     if (state.search.tw0Only) list = list.filter(s => s.verdict.twist);
+    // Hide jams: drop confirmed Tw≠0 (verdict.twist === false). Null/undecided twist is NOT a jam — kept
+    // (mirrors predictedFoldable's `v.twist !== false`).
+    if (state.search.hideJams) list = list.filter(s => s.verdict.twist !== false);
     // UID filter (DB mode only — pattern_uid rides on _row): paste a batch, show just those patterns.
     if (state.search.uidSet && state.search.uidSet.size) {
       list = list.filter(s => s._row && state.search.uidSet.has(s._row.pattern_uid));
@@ -615,6 +620,18 @@ const App = (() => {
       if (want === '' || want === undefined) continue;
       const wantBool = want === true || want === 'true';
       list = list.filter(s => { const f = findingFor(s); return f && f.tags && f.tags[key] === wantBool; });
+    }
+    // Collapse symmetry twins: keep one representative per fold_class (the raw val_text tag, read off
+    // _row directly — findingFor coerces tags to bool and would flatten the hash). Rows with no
+    // fold_class label (no _row, or untagged) can't be grouped, so each survives as its own rep.
+    if (state.search.collapseSym) {
+      const seen = new Set();
+      list = list.filter(s => {
+        const fc = s._row && s._row.tags ? s._row.tags.fold_class : null;
+        if (!fc) return true;
+        if (seen.has(fc)) return false;
+        seen.add(fc); return true;
+      });
     }
     return sortSolutions(list);     // header-click sort order; shared by table, stepper, and nav
   }
@@ -638,7 +655,8 @@ const App = (() => {
       : state.search.stacks === 2
         ? `HC #${cur.id}  ${cur.verdict.foldable ? '✓ foldable' : '✗ not foldable'}  (Tw=${cur.twistValue})`
         : `Tw=0 ${cur.verdict.twist ? '✓' : '✗'}  ${cur.footprint.shape} ${cur.decomposition}`;
-    const filtered = state.search.tw0Only || state.search.decompFilter || state.search.shapeFilter
+    const filtered = state.search.tw0Only || state.search.hideJams || state.search.collapseSym
+      || state.search.decompFilter || state.search.shapeFilter
       || (state.search.uidSet && state.search.uidSet.size) || anyFindingFilterActive();
     document.getElementById('searchNavShowing').textContent =
       filtered ? `showing ${list.length} of ${total}` : '';
@@ -702,15 +720,21 @@ const App = (() => {
     let idx = filteredSolutions().findIndex(s => s.id === id);
     if (idx < 0) {
       state.search.tw0Only = false;
+      state.search.hideJams = false;
+      state.search.collapseSym = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
       state.search.uidSet = null;
       clearFindingFilters();
       const tw = document.getElementById('searchTw0Only');
+      const hj = document.getElementById('searchHideJams');
+      const cs = document.getElementById('searchCollapseSym');
       const df = document.getElementById('searchDecompFilter');
       const sf = document.getElementById('searchShapeFilter');
       const uf = document.getElementById('searchUidFilter');
       if (tw) tw.checked = false;
+      if (hj) hj.checked = false;
+      if (cs) cs.checked = false;
       if (df) df.value = '';
       if (sf) sf.value = '';
       if (uf) uf.value = '';
@@ -978,7 +1002,7 @@ const App = (() => {
     const wrap = document.getElementById('searchResultsTableWrap');
     const cnt = document.getElementById('searchResultsCount');
     const list = filteredSolutions();
-    cnt.textContent = state.search.tw0Only
+    cnt.textContent = list.length < state.search.solutions.length
       ? `(${list.length} of ${state.search.solutions.length})`
       : `(${state.search.solutions.length})`;
     if (!list.length) { wrap.innerHTML = '<p class="hint" style="padding:8px">No solutions yet.</p>'; return; }
@@ -1465,11 +1489,15 @@ const App = (() => {
       state.search.solutions = [];
       state.search.cursor = 0;
       state.search.tw0Only = false;
+      state.search.hideJams = false;
+      state.search.collapseSym = false;
       state.search.decompFilter = '';
       state.search.shapeFilter = '';
       state.search.uidSet = null;
       clearFindingFilters();
       document.getElementById('searchTw0Only').checked = false;
+      document.getElementById('searchHideJams').checked = false;
+      document.getElementById('searchCollapseSym').checked = false;
       document.getElementById('searchDecompFilter').value = '';
       document.getElementById('searchShapeFilter').value = '';
       const ufClear = document.getElementById('searchUidFilter');
@@ -1504,6 +1532,12 @@ const App = (() => {
     document.getElementById('searchNextBtn').addEventListener('click', () => stepTo(state.search.cursor + 1));
     document.getElementById('searchTw0Only').addEventListener('change', e => {
       state.search.tw0Only = e.target.checked; applyFilterChange();
+    });
+    document.getElementById('searchHideJams').addEventListener('change', e => {
+      state.search.hideJams = e.target.checked; applyFilterChange();
+    });
+    document.getElementById('searchCollapseSym').addEventListener('change', e => {
+      state.search.collapseSym = e.target.checked; applyFilterChange();
     });
     document.getElementById('searchDecompFilter').addEventListener('change', e => {
       state.search.decompFilter = e.target.value; applyFilterChange();

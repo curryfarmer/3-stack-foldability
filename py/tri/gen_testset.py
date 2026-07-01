@@ -1,0 +1,324 @@
+"""gen_testset.py — batch physical fold-check test set for all non-square 3-stack families.
+
+For each of the 8 families (equilateral / righttri / scalene / hex) x (1+1+1 / 2+1), march K up
+from the known first-closing K, enumerate CLOSING folds (every gen_* path already applies the
+physical closure gate), dedup by tiling symmetry, and keep up to CAP_FOLD predicted-FOLDABLE +
+CAP_JAM predicted-JAM distinct cases. Each kept case is rendered to a chain-overlay PNG + a printable
+foldsheet PNG (reusing find_example.render_case), and logged with its engine PREDICTION so the user
+can fold each sheet and confirm FOLD/JAM.
+
+Dedup key (tile ids are canonical within the fixed ambient hub, so equal id-sets == same fold):
+  1+1+1: (mid-chain ids, frozenset{armA ids, armC ids})  -> collapses the arm-swap twin enum emits
+  2+1:   frozenset(region tile ids)
+
+Output: report/tri/<outdir>/  (overlay_*/foldsheet_* PNGs + TEST_PLAN.md + testset.json).
+
+  python py/tri/gen_testset.py [--outdir testset] [--cap-fold 6] [--cap-jam 6] [--budget 60]
+"""
+import argparse
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import find_example as FE    # noqa: E402  gen_111 / gen_21 / gen_eq / render_case / KPLAN
+import hunt_foldable as HF   # noqa: E402  holes()
+import seam_filter as SFILT  # noqa: E402  STRICT START<->END seam gate (demote mirror/off-cell FOLD->JAM)
+
+TILINGS = ("equilateral", "righttri", "scalene", "hex")
+DECOMPS = ("1plus1plus1", "2plus1")
+
+
+def _trust(tiling, decomp):
+    """How trustworthy the FOLD/JAM label is (drives 'fold to verify' emphasis). The physical
+    CLOSURE gate is reliable everywhere; only the twist FOLD/JAM label varies. ALL 2+1 (incl.
+    equilateral) is MODEL-tier — same strand-twist, and its end-domino seating is the open
+    question the physical folds resolve. Only equilateral 1+1+1 has a validated solver."""
+    if decomp == "2plus1":
+        return "MODEL (2+1 strand-twist + seating - fold to verify)"
+    if tiling == "equilateral":
+        return "PROVEN (validated solver + physical closure)"
+    if tiling == "hex":
+        return "MODEL (hex path-sigma twist - fold to verify)"
+    return "CLOSURE-PROVEN, twist label (fold to verify)"
+
+
+def _chains(cand):
+    """The 3 chains as tuple-tile lists, from a general cand ('chains') or an equilateral rec."""
+    src = cand["chains"] if "chains" in cand else cand["rec"]["chains"]
+    return [[tuple(t) for t in c] for c in src]
+
+
+def _dedup_key(cand):
+    if cand["decomp"] == "1plus1plus1":
+        ch = _chains(cand)                                    # [armA, mid, armC]
+        canon = lambda c: tuple(tuple(t) for t in c)         # noqa: E731
+        return ("111", canon(ch[1]), frozenset({canon(ch[0]), canon(ch[2])}))
+    return ("21", frozenset(tuple(t) for t in cand["region"]))
+
+
+def _gen_for(tiling, decomp, K):
+    if decomp == "2plus1":
+        # a single central hub yields only ~1 distinct foldable 2+1 REGION, so sweep several hubs to
+        # surface a 2nd example (equilateral 2+1 also routes here, unified onto the domino model).
+        return FE.gen_21(tiling, K, hubs=8)
+    if tiling == "equilateral":
+        return FE.gen_eq(decomp, K)
+    return FE.gen_111(tiling, K, hub=None)
+
+
+def collect_family(tiling, decomp, cap_fold, cap_jam, budget):
+    """March K; return (folds, jams) each a list of (lat, K, cand), deduped, capped."""
+    K0, step, kcap = FE.KPLAN[(tiling, decomp)]
+    interior_deg = 6 if tiling == "hex" else 3
+    seen, folds, jams = set(), [], []
+    t0 = time.time()
+    for K in range(K0, kcap + 1, step):
+        lat, gen = _gen_for(tiling, decomp, K)
+        for cand in gen:
+            key = _dedup_key(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            SFILT.apply(lat, cand)          # STRICT seam gate: a mirror/off-cell FOLD becomes a JAM here
+            cand["holes"] = len(HF.holes(lat, cand["region"], interior_deg))
+            bucket, cap = (folds, cap_fold) if cand["foldable"] else (jams, cap_jam)
+            if len(bucket) < cap:
+                bucket.append((lat, K, cand))
+            if (len(folds) >= cap_fold and len(jams) >= cap_jam) or time.time() - t0 > budget:
+                break
+        if (len(folds) >= cap_fold and len(jams) >= cap_jam) or time.time() - t0 > budget:
+            break
+    return folds, jams
+
+
+def collect_family_compare(tiling, decomp, cap_pass, cap_fail, budget):
+    """Seam-flag COMPARISON collector. March K; among candidates the TWIST already calls FOLD
+    (Tw=0, i.e. cand['foldable'] BEFORE the seam filter), split by the new flag:
+        pass <- Tw=0 AND seam_ok        (predicted FOLD, expect flat)
+        fail <- Tw=0 AND NOT seam_ok    (seam-demoted, predicted JAM; SAME twist label)
+    Tw!=0 candidates are dropped -- both columns share Tw=0 so only the flag differs. The `fail`
+    bucket is non-empty only on unequal-sided tiles (righttri/scalene); everywhere else it stays
+    empty, which is exactly the flag's fingerprint. Returns (passes, fails)."""
+    K0, step, kcap = FE.KPLAN[(tiling, decomp)]
+    interior_deg = 6 if tiling == "hex" else 3
+    seen, passes, fails = set(), [], []
+    t0 = time.time()
+    for K in range(K0, kcap + 1, step):
+        lat, gen = _gen_for(tiling, decomp, K)
+        for cand in gen:
+            key = _dedup_key(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            tw_fold = bool(cand["foldable"])            # the twist label, BEFORE the seam filter
+            SFILT.apply(lat, cand)                      # stamps seam_ok/seam_detail, may demote foldable
+            if not tw_fold:                             # Tw!=0 is not part of this comparison
+                if time.time() - t0 > budget:
+                    break
+                continue
+            cand["holes"] = len(HF.holes(lat, cand["region"], interior_deg))
+            bucket, cap = (passes, cap_pass) if cand.get("seam_ok") else (fails, cap_fail)
+            if len(bucket) < cap:
+                bucket.append((lat, K, cand))
+            if (len(passes) >= cap_pass and len(fails) >= cap_fail) or time.time() - t0 > budget:
+                break
+        if (len(passes) >= cap_pass and len(fails) >= cap_fail) or time.time() - t0 > budget:
+            break
+    return passes, fails
+
+
+def main():
+    ap = argparse.ArgumentParser(description="batch fold-check test set for all non-square families")
+    ap.add_argument("--outdir", default="testset", help="under report/tri/ and results/ (default: testset)")
+    ap.add_argument("--cap-fold", type=int, default=2, help="max distinct FOLDABLE cases per family")
+    ap.add_argument("--cap-jam", type=int, default=2, help="max distinct JAM cases per family")
+    ap.add_argument("--budget", type=float, default=60.0, help="per-family wall-clock budget (s)")
+    ap.add_argument("--families", nargs="+", default=None,
+                    help="subset like 'scalene:1plus1plus1' (default: all 8)")
+    ap.add_argument("--compare", action="store_true",
+                    help="seam-flag comparison matrix: per family emit Tw=0 seam-PASS vs Tw=0 seam-FAIL "
+                         "sheets (same twist label, opposite flag) across all grids x both decomps")
+    args = ap.parse_args()
+
+    FE.set_outdir(args.outdir)                               # park all renders in report/tri/<outdir>
+    out_report = FE.REPORT
+
+    families = ([tuple(f.split(":")) for f in args.families] if args.families
+                else [(t, d) for t in TILINGS for d in DECOMPS])
+
+    if args.compare:
+        return _run_compare(families, args, out_report)
+
+    rows = []
+    for tiling, decomp in families:
+        print("=== %s / %s ===" % (tiling, decomp), flush=True)
+        folds, jams = collect_family(tiling, decomp, args.cap_fold, args.cap_jam, args.budget)
+        print("   kept %d foldable, %d jam" % (len(folds), len(jams)), flush=True)
+        for verdict_class, cases in (("fold", folds), ("jam", jams)):
+            for idx, (lat, K, cand) in enumerate(cases, 1):
+                suffix = "_%s%d" % (verdict_class, idx)
+                try:
+                    over, sheet, verdict = FE.render_case(tiling, decomp, "allow", lat, K, cand, suffix)
+                except Exception as e:                       # one bad render must not kill the batch
+                    print("   !! render failed %s%s: %s" % (tiling, suffix, e), flush=True)
+                    continue
+                rows.append({
+                    "tiling": tiling, "decomp": decomp, "K": K,
+                    "case": verdict_class + str(idx),
+                    "predicted": "FOLDABLE" if cand["foldable"] else "JAM",
+                    "tw": cand.get("tw"), "holes": cand["holes"],
+                    "trust": _trust(tiling, decomp), "verdict": verdict,
+                    "overlay": os.path.relpath(over), "foldsheet": os.path.relpath(sheet),
+                })
+
+    # manifest + human-readable test plan
+    os.makedirs(out_report, exist_ok=True)
+    with open(os.path.join(out_report, "testset.json"), "w") as f:
+        json.dump(rows, f, indent=1)
+    _write_test_plan(os.path.join(out_report, "TEST_PLAN.md"), rows)
+    n_fold = sum(1 for r in rows if r["predicted"] == "FOLDABLE")
+    print("\n%d cases total (%d predicted FOLDABLE, %d predicted JAM) -> %s"
+          % (len(rows), n_fold, len(rows) - n_fold, os.path.relpath(out_report)), flush=True)
+
+
+def _run_compare(families, args, out_report):
+    """Minimum-viable seam-flag matrix: for every (grid, decomp) emit up to --cap-fold Tw=0 seam-PASS
+    and up to --cap-jam Tw=0 seam-FAIL sheets, then write a comparison manifest + TEST_PLAN. Only the
+    unequal-sided families (righttri / scalene) are expected to populate the FAIL column; an empty FAIL
+    everywhere else is the control that proves the flag bites only non-uniform tiles."""
+    rows, matrix = [], []
+    for tiling, decomp in families:
+        print("=== %s / %s (compare) ===" % (tiling, decomp), flush=True)
+        passes, fails = collect_family_compare(tiling, decomp, args.cap_fold, args.cap_jam, args.budget)
+        print("   Tw=0: %d seam-PASS, %d seam-FAIL" % (len(passes), len(fails)), flush=True)
+        matrix.append({"tiling": tiling, "decomp": decomp,
+                       "n_pass": len(passes), "n_fail": len(fails)})
+        for cls, cases in (("pass", passes), ("fail", fails)):
+            for idx, (lat, K, cand) in enumerate(cases, 1):
+                suffix = "_%s%d" % (cls, idx)
+                try:
+                    over, sheet, verdict = FE.render_case(tiling, decomp, "allow", lat, K, cand, suffix)
+                except Exception as e:                       # one bad render must not kill the batch
+                    print("   !! render failed %s%s: %s" % (tiling, suffix, e), flush=True)
+                    continue
+                rows.append({
+                    "tiling": tiling, "decomp": decomp, "K": K,
+                    "case": cls + str(idx),
+                    "seam_flag": "PASS" if cls == "pass" else "FAIL",
+                    "predicted": "FOLDABLE" if cls == "pass" else "JAM",
+                    "expected": "FOLD" if cls == "pass" else "JAM",
+                    "tw": cand.get("tw"), "seam_ok": cand.get("seam_ok"),
+                    "seam_detail": cand.get("seam_detail"), "holes": cand["holes"],
+                    "verdict": verdict,
+                    "overlay": os.path.relpath(over), "foldsheet": os.path.relpath(sheet),
+                })
+
+    os.makedirs(out_report, exist_ok=True)
+    with open(os.path.join(out_report, "testset.json"), "w") as f:
+        json.dump(rows, f, indent=1)
+    _write_compare_plan(os.path.join(out_report, "TEST_PLAN.md"), rows, matrix)
+    n_pass = sum(1 for r in rows if r["seam_flag"] == "PASS")
+    print("\n%d compare sheets (%d seam-PASS, %d seam-FAIL) -> %s"
+          % (len(rows), n_pass, len(rows) - n_pass, os.path.relpath(out_report)), flush=True)
+
+
+def _write_compare_plan(path, rows, matrix):
+    """Comparison TEST_PLAN: a matrix (which family the flag bites) + per-family PASS/FAIL sheet rows.
+    Both columns share Tw=0 by construction -- the ONLY difference is the new seam flag, so folding a
+    matched PASS/FAIL pair isolates exactly what the flag adds over the twist."""
+    lines = [
+        "# 3-stack seam-flag comparison test set (Tw=0 seam-PASS vs Tw=0 seam-FAIL)",
+        "",
+        "Every sheet here has **Tw=0** (the twist calls it foldable). They are split ONLY by the new",
+        "seam flag — a real FOLD must return the END footprint onto the START footprint as a *rotational",
+        "equivalent* (A->A, B->B, C->C, proper rotation, no mirror). The flag is enforced only on tiles",
+        "with UNEQUAL sides (45-45-90 righttri, 30-60-90 scalene); equilateral + hex are edge-uniform so a",
+        "mirror is invisible and exempt (both decomps).",
+        "",
+        "- **seam-PASS** -> predicted **FOLD**: fold it, expect it to seat flat as a 3-stack.",
+        "- **seam-FAIL** -> predicted **JAM** (same Tw=0!): the END comes back mirrored/off-cell (short",
+        "  seam onto long, or a tile flipped); fold it, expect it to jam. This is the case the twist",
+        "  ALONE mislabels FOLD and the flag catches.",
+        "",
+        "Fold a matched PASS/FAIL pair in the same family to confirm the flag adds real signal.",
+        "",
+        "## Flag fingerprint (where the seam flag bites)",
+        "",
+        "| family | decomp | Tw=0 seam-PASS | Tw=0 seam-FAIL | flag bites? |",
+        "|---|---|---|---|---|",
+    ]
+    for m in matrix:
+        bites = "**YES**" if m["n_fail"] > 0 else ("no" if m["n_pass"] else "n/a (no Tw=0 fold)")
+        lines.append("| %s | %s | %d | %d | %s |" % (
+            m["tiling"], m["decomp"], m["n_pass"], m["n_fail"], bites))
+    lines += [
+        "",
+        "Expected: the FAIL column is populated only on righttri/scalene 2+1 (unequal-sided tiles); every",
+        "uniform family and all 1+1+1 show FAIL=0 (flag never bites). equilateral 1+1+1 is a proven",
+        "obstruction, so it has no Tw=0 fold at all.",
+        "",
+        "## Sheets to fold",
+        "",
+        "| family | case | K | Tw | seam flag | predicted | expected | seam detail | ACTUAL |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append("| %s %s | %s | %d | %s | **%s** | %s | %s | %s |  |" % (
+            r["tiling"], r["decomp"], r["case"], r["K"], _fmt_tw(r["tw"]),
+            r["seam_flag"], r["predicted"], r["expected"], r["seam_detail"] or "-"))
+    lines.append("")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+
+def _fmt_tw(tw):
+    """Compact twist label for the table (list for 1+1+1, scalar for 2+1)."""
+    if isinstance(tw, (list, tuple)):
+        return "0/0/0" if all(v == 0 for v in tw) else ",".join(str(v) for v in tw)
+    return "%g" % tw if isinstance(tw, (int, float)) else str(tw)
+
+
+def _write_test_plan(path, rows):
+    n_fold = sum(1 for r in rows if r["predicted"] == "FOLDABLE")
+    lines = [
+        "# 3-stack foldability physical test set",
+        "",
+        "Print each foldsheet, cut the outer boundary, fold every marked crease (red=mountain,",
+        "blue=valley), and check whether it seats flat as a 3-stack. Record the actual result in the",
+        "last column and compare to the engine PREDICTION.",
+        "",
+        "## How to read the PREDICTION (from the 2026-07-01 gate audit)",
+        "",
+        "Every sheet here already passes the **physical closure gate** — 1+1+1 via `reflection_closes_111`,",
+        "and 2+1 via the printed-sheet flat-fold simulator (`foldsim`: rigid dominoes + START hub, fold",
+        "each crease, require all tiles to seat on {a,mid,b} with uniform K layers). The drawn sheet's",
+        "cut/fold/rigid edges are exactly what that gate validates (sheet rigid == gate rigid: the END",
+        "trapezoid is cut, not glued). That gate is the *authority*. The FOLD-vs-JAM *label* comes from",
+        "the twist (Tw==0 => foldable), whose reliability varies — that is what your folding validates:",
+        "",
+        "- **PROVEN** — equilateral 1+1+1: validated solver, twist is XVAL-locked. Expect agreement.",
+        "- **CLOSURE-PROVEN** — scalene / righttri 1+1+1: bipartite global-sigma, twist reliable but",
+        "  not yet physically validated except the scalene K=16 anchor (ground truth = foldable).",
+        "- **MODEL** — hex 1+1+1 and ALL 2+1: twist is DECORATIVE here (non-bipartite path-sigma /",
+        "  2+1 strand-reduction). The audit measured ~99% twist false-JAM on hex 1+1+1 and both-way",
+        "  disagreement on 2+1. Treat the FOLD/JAM here as a guess; the fold is the real answer. The",
+        "  open question 'does triangle 2+1 seat as the model predicts' is resolved by THESE rows.",
+        "",
+        "%d cases: %d predicted FOLDABLE, %d predicted JAM." % (len(rows), n_fold, len(rows) - n_fold),
+        "",
+        "| family | case | K | predicted | trust | holes | foldsheet | ACTUAL (fold / jam) |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append("| %s %s | %s | %d | **%s** | %s | %d | %s |  |" % (
+            r["tiling"], r["decomp"], r["case"], r["K"], r["predicted"],
+            r["trust"].split(" ")[0], r["holes"], os.path.basename(r["foldsheet"])))
+    lines.append("")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()

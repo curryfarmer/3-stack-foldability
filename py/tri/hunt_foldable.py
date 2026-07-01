@@ -23,10 +23,15 @@ import trirender as TR     # noqa: E402
 import prove_obstruction as PO  # noqa: E402
 
 
-def holes(lat, region):
-    """Return the set of enclosed empty triangles (holes) of `region` within ambient `lat`."""
+def holes(lat, region, interior_deg=3):
+    """Return the set of enclosed empty tiles (holes) of `region` within ambient `lat`.
+
+    `interior_deg` = the dual-degree of a fully-surrounded tile (3 for any triangle tiling, 6 for
+    honeycomb hexagons); a tile with fewer neighbours sits on the ambient outer boundary and seeds
+    the complement flood-fill. Empty tiles the flood never reaches are enclosed holes.
+    """
     region = set(region)
-    boundary = [t for t in lat.tris if t not in region and len(lat.adj[t]) < 3]
+    boundary = [t for t in lat.tris if t not in region and len(lat.adj[t]) < interior_deg]
     seen = set(boundary)
     q = deque(boundary)
     while q:

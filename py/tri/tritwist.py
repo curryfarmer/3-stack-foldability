@@ -28,32 +28,49 @@ def signed_turn_deg(p1, p2, p3):
     return math.degrees(math.atan2(cross, dot))
 
 
+def path_sigma(n):
+    """Path-following sigma: +1,-1,+1,... by loop INDEX (not by a global 2-coloring). On a
+    non-bipartite tiling (honeycomb faces) no universal tid->+-1 exists, so the foldability sigma
+    must alternate along the walk itself; feeding this sequence to loop_twist makes Tw == Tw_index."""
+    return [1 if k % 2 == 0 else -1 for k in range(n)]
+
+
 def loop_twist(loop_tids, cent=None, sigma=None):
     """Closed loop of tile ids -> dict with sigma-weighted twist (deg) + diagnostics.
 
-    `cent`/`sigma` are callables tid->centroid / tid->+-1; default to the equilateral-triangle
-    lattice, so any other reflection tiling (e.g. righttri) just passes its own.
+    `cent` is a callable tid->centroid (default: equilateral lattice). `sigma` is EITHER a callable
+    tid->+-1 (a global 2-coloring; bipartite tilings) OR an explicit length-n sequence of +-1 by
+    loop index (path-following sigma, e.g. path_sigma(n) for non-bipartite honeycomb faces). Other
+    reflection tilings (righttri/scalene) pass their own callable; default is the equilateral sigma.
 
-    Tw_sigma   = sum_k sigma(tri_k) * gamma_k          (the physical twist)
+    Tw_sigma   = sum_k sigma_k * gamma_k                (the physical twist)
     Tw_index   = sum_k (-1)^k * gamma_k                 (index-parity bucketing; == +/-Tw_sigma
                                                           iff sigma strictly alternates round loop)
     gamma_k    = 2 * signed_turn at vertex k (cyclic)
     """
     cent = cent or TL.centroid
-    sigma = sigma or TL.sigma
+    if sigma is None:
+        sigma = TL.sigma
     n = len(loop_tids)
+    if callable(sigma):
+        def sig_at(k):
+            return sigma(loop_tids[k])
+    else:                                   # explicit per-index sequence (path-following sigma)
+        _seq = list(sigma)
+        def sig_at(k):
+            return _seq[k]
     cents = [cent(t) for t in loop_tids]
     gammas, sigs = [], []
     tw_sigma = tw_index = 0.0
     for k in range(n):
         p1, p2, p3 = cents[(k - 1) % n], cents[k], cents[(k + 1) % n]
         g = 2.0 * signed_turn_deg(p1, p2, p3)
-        s = sigma(loop_tids[k])
+        s = sig_at(k)
         gammas.append(round(g, 3))
         sigs.append(s)
         tw_sigma += s * g
         tw_index += (1 if k % 2 == 0 else -1) * g
-    alternates = all(sigma(loop_tids[k]) != sigma(loop_tids[(k + 1) % n]) for k in range(n))
+    alternates = all(sig_at(k) != sig_at((k + 1) % n) for k in range(n))
     return {
         "Tw": round(tw_sigma, 3),
         "Tw_index": round(tw_index, 3),
