@@ -15,6 +15,8 @@ cell-boundary segments (G1 edges), keyed by midpoint — matching the reference'
 edge_mid_lookup.
 """
 
+import hashlib
+import json
 import math
 from collections import defaultdict
 
@@ -198,6 +200,17 @@ def _canonical(circuit, m, n):
     return best
 
 
+def _uid(circuit, m, n):
+    """Stable 12-hex content id: sha1 over (lattice, MxN, D4+cyclic+reversal canonical circuit).
+    Same physical 2-stack fold -> same id across runs. Mirrors generate.py's 3-stack
+    `make_uid(lattice_name, m, n, canonical_hash)` convention (and triangle's independent
+    gen_testset.fold_uid()) -- 2-stack has no canonicalHash field, so _canonical()'s own return
+    (a JSON-serializable tuple of (x,y) tuples) stands in as the canonical-identity input."""
+    canon = _canonical(circuit, m, n)
+    payload = "square2stack|%dx%d|%s" % (m, n, json.dumps(canon, sort_keys=True))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
 # ---------- top-level runner ----------
 
 def run(opts):
@@ -233,6 +246,7 @@ def run(opts):
             ctx["foldable"] += 1
         solutions.append({
             "id": next_id,
+            "uid": _uid(circ, m, n),
             "circuit": [[c[0], c[1]] for c in circ],
             "cutEdge": [[cut[0][0], cut[0][1]], [cut[1][0], cut[1][1]]] if cut else None,
             "verdict": {"reflection": refl_ok, "twist": twist_ok, "foldable": foldable},
