@@ -16,8 +16,8 @@ Reuses the engine's own reflection composition READ-ONLY: seam_filter._region_ed
 record->candidate restore. No engine math is edited; the folded coordinates are exactly what the gate
 sees. Prints the per-tile reflection read-out to stdout.
 
-  python py/tri/render_reflection.py --uid <uid> [--matrix mvp_matrix] [--out <sub>]
-  python py/tri/render_reflection.py --json report/tri/<sub>/folds/<uid>.json
+  python -m triangle.tri.render_reflection --uid <uid> [--matrix mvp_matrix] [--out <sub>]
+  python -m triangle.tri.render_reflection --json report/tri/<sub>/folds/<uid>.json
 """
 import argparse
 import json

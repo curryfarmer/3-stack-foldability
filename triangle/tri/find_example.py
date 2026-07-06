@@ -18,8 +18,8 @@ on non-bipartite honeycomb); it is a model prediction, not a proof. Equilateral 
 solvers (solve_foldable.enum_111/enum_21).
 
 Run:
-  .venv/Scripts/python py/tri/find_example.py --tiling hex --decomp 1plus1plus1 --holes allow
-  .venv/Scripts/python py/tri/find_example.py --all          # every case, summary table
+  .venv/Scripts/python -m triangle.tri.find_example --tiling hex --decomp 1plus1plus1 --holes allow
+  .venv/Scripts/python -m triangle.tri.find_example --all          # every case, summary table
 """
 import argparse
 import json

@@ -19,9 +19,9 @@ XVAL gate (run before trusting any deeper K):
   - cleanliness (every K, fail loud): every gamma a multiple of 120, every Tw a multiple of 360.
 
 Run:
-  .venv/Scripts/python py/tri/solve_foldable.py --xval
-  .venv/Scripts/python py/tri/solve_foldable.py --run --decomp 1plus1plus1 --K 10
-  .venv/Scripts/python py/tri/solve_foldable.py --campaign           # the autonomous loop
+  .venv/Scripts/python -m triangle.tri.solve_foldable --xval
+  .venv/Scripts/python -m triangle.tri.solve_foldable --run --decomp 1plus1plus1 --K 10
+  .venv/Scripts/python -m triangle.tri.solve_foldable --campaign           # the autonomous loop
 """
 import argparse
 import json

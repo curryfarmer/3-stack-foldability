@@ -5,17 +5,15 @@ a hole), so a short-side / along-axis fold appears as an axis-aligned 3-jump and
 90-multiple -> integer Tw in {0, +-720}. The closed loop = body (the 2-chain strand) + reversed(path1)
 (the 1-chain strand). Foldable-onto-the-same-footprint <=> Tw == 0; Tw = +-720 is a self-twist jam,
 sign = handedness. The canonical strand is the one whose two hub seams (the loop-closure edges) are
-non-diagonal -- cosmetic, Tw is idx-independent, but pinned so both engines label the same strand.
+non-diagonal -- cosmetic, Tw is idx-independent, but pinned so the labelling is deterministic.
 
-This is the validated Model B (experimental/jump_decomp/twist.py + experimental/common.py), promoted
-into the shipped engine so search.twist_check DECIDES 2+1 instead of returning NULL. The math here is
-math-identical to common.py: float atan2 doubled-turn angles, sigma = (-1)^i along the loop, and the
-sum rounded to 6 dp ONLY (never per term). It is mirrored cell-for-cell in search.js:twistCheck --
-keep the two in lockstep (tests/test_parity_js.py asserts identical Tw per pattern).
+This is the validated Model B (originally prototyped in the retired experimental/ hypothesis
+scaffolding, now the sole shipped implementation), promoted into the shipped engine so
+search.twist_check DECIDES 2+1 instead of returning NULL. The math: float atan2 doubled-turn
+angles, sigma = (-1)^i along the loop, and the sum rounded to 6 dp ONLY (never per term).
 
 twist_2plus1_from_chains(chains) is the live-engine entry (reads each chain's in-memory `placements`).
-twist_2plus1_from_sol(sol, m, n) re-replays a stored blob (no placements) for cross-checking against
-twist_models.modelB.
+twist_2plus1_from_sol(sol, m, n) re-replays a stored blob (no placements) for the same computation.
 """
 from math import atan2, degrees, hypot
 

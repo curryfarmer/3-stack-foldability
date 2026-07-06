@@ -16,8 +16,8 @@ matches the viewer (origin top-left, +y down). Cells are integer (x, y); centres
 edges are unit cell-boundary segments in corner coords.
 
 Usage:
-  python py/render_twostack.py results/6x4_2stack_dc0a9114.json --mode both --out scratch/2stack.png
-  python py/render_twostack.py results/6x4_2stack_dc0a9114.json --id 3 --mode foldsheet --out fs.png
+  python -m square.render.render_twostack results/6x4_2stack_dc0a9114.json --mode both --out scratch/2stack.png
+  python -m square.render.render_twostack results/6x4_2stack_dc0a9114.json --id 3 --mode foldsheet --out fs.png
 """
 import argparse
 import json

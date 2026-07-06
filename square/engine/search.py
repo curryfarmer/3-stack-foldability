@@ -1,8 +1,7 @@
-"""search.py — exhaustive 3-stack enumerator. Port of search.js (pure compute).
+"""search.py — exhaustive 3-stack enumerator.
 
-Mirrors the JS pipeline stage-for-stage so the two engines can be cross-checked.
-Cells are (x, y) tuples internally; solution dicts use {"x":, "y":} for JSON parity
-with the browser tool's loader.
+Cells are (x, y) tuples internally; solution dicts use {"x":, "y":} so records serialize
+to plain JSON consumable by the render/generate CLIs without a custom encoder.
 """
 
 import os

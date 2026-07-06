@@ -7,8 +7,8 @@ candidate (tile ids -> tuples; equilateral 1+1+1 rebuilds its solver `rec` from 
 and calls find_example.render_case — so the sheet a uid re-renders to is the exact one the matrix
 generated (the matrix generator itself renders through the same render_case path).
 
-  python py/tri/render_fold.py --uid <uid> [--matrix mvp_matrix] [--outdir <sub>]
-  python py/tri/render_fold.py --json report/tri/mvp_matrix/folds/<uid>.json
+  python -m triangle.tri.render_fold --uid <uid> [--matrix mvp_matrix] [--outdir <sub>]
+  python -m triangle.tri.render_fold --json report/tri/mvp_matrix/folds/<uid>.json
 """
 import argparse
 import json

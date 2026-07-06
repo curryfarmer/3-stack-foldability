@@ -15,7 +15,7 @@ three cells of S, whose three end cells form a trapezoid (any trapezoid; all are
 IS exit-footprint congruence). We enumerate all of them from the canonical S inside a disk large
 enough to contain every reachable path, and count. Zero ⇒ no closing fold for that K (any hub).
 
-Run: .\.venv\Scripts\python.exe py/tri/prove_obstruction.py [Kmax]
+Run: .\.venv\Scripts\python.exe -m triangle.tri.prove_obstruction [Kmax]
 """
 import os
 import sys

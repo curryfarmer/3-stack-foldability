@@ -13,8 +13,8 @@ Self-contained: only tritwist (pure twist math) + the record's `geometry` block 
 centroids) are used; no lattice rebuild, no search engine. gamma_k = 2*signed_turn at loop vertex k;
 Tw = sum_k sigma_k * gamma_k; a closed triangle loop's Tw is a clean multiple of 360.
 
-  python py/tri/render_twist.py --uid <uid> [--matrix mvp_matrix] [--out <sub>]
-  python py/tri/render_twist.py --json report/tri/<sub>/folds/<uid>.json
+  python -m triangle.tri.render_twist --uid <uid> [--matrix mvp_matrix] [--out <sub>]
+  python -m triangle.tri.render_twist --json report/tri/<sub>/folds/<uid>.json
 """
 import argparse
 import json

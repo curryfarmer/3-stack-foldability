@@ -8,7 +8,7 @@ Constraints, in order of cost:
     an enclosed hole -> reject;
   - foldable: all three pairwise-loop twists == 0.
 
-Run:  .\.venv\Scripts\python.exe py/tri/hunt_foldable.py [K] [budget]
+Run:  .\.venv\Scripts\python.exe -m triangle.tri.hunt_foldable [K] [budget]
 Prints + renders any hit to report/tri/foldable_K<K>_<n>.png.
 """
 import os

@@ -8,8 +8,9 @@ grid convention, legend layout, fonts, and dpi. Covers both figure kinds:
 Convention (matches the viewer / fold.py): origin TOP-LEFT, +x right, +y DOWN. Cells are integer
 (x, y); cell centres are (x+0.5, y+0.5).
 
-Consumers: py/render_square.py (3-stack foldsheet), py/render_twostack.py (2-stack, both kinds),
-experimental/enumerate_twist.py (2+1 analysis). Triangle renderers (py/tri/*) are a deferred TODO.
+Consumers: square/render/render_square.py (3-stack foldsheet), square/render/render_twostack.py
+(2-stack, both kinds), square/render/render_twist_2plus1.py (2+1 analysis). Triangle renderers
+(triangle/tri/render_*.py) are a separate, independent package and do not import this module.
 
 Backend is forced to Agg here (headless) BEFORE pyplot is imported, so importing figstyle is enough.
 """

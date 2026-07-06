@@ -13,7 +13,7 @@ Dedup key (tile ids are canonical within the fixed ambient hub, so equal id-sets
 
 Output: report/tri/<outdir>/  (overlay_*/foldsheet_* PNGs + TEST_PLAN.md + testset.json).
 
-  python py/tri/gen_testset.py [--outdir testset] [--cap-fold 6] [--cap-jam 6] [--budget 60]
+  python -m triangle.tri.gen_testset [--outdir testset] [--cap-fold 6] [--cap-jam 6] [--budget 60]
 """
 import argparse
 import hashlib
@@ -363,7 +363,7 @@ def _write_quadrant_plan(path, rows, matrix):
         "",
         "Each fold has a stable **uid**; its numerically-complete data is `folds/<uid>.json` (identity +",
         "tile ids + cartesian polygons + per-tile seam analysis). Re-render any fold from that file with",
-        "`python py/tri/render_fold.py --uid <uid>`. Rows marked **suspect** are 45-45-90 righttri, which",
+        "`python -m triangle.tri.render_fold --uid <uid>`. Rows marked **suspect** are 45-45-90 righttri, which",
         "the user flags as physically suspect (kept for the seam-bad column; filter by the `suspect` field",
         "in testset.json).",
         "",

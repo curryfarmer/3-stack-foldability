@@ -113,7 +113,7 @@ class Lattice(ABC):
         p, q = tuple(self.shared[(a, b)])
         return (self._vkey_to_cart(p), self._vkey_to_cart(q))
 
-    shared_edge_cart = shared_edge        # name used by trifold / righttri / scalene
+    shared_edge_cart = shared_edge        # name used by righttri / scalene
 
     def reflect_across_edge(self, tid, edge):
         """Reflect the tile's Cartesian vertices across the crease line `edge` = (p1, p2)."""
