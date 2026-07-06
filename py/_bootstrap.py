@@ -15,7 +15,7 @@ import sys
 
 _PY = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_PY)
-_SUBS = ("engine", "twist", "storage", "findings", "render", "export", "tri")
+_SUBS = ("engine", "twist", "render", "tri")
 for _p in (_REPO, os.path.join(_REPO, "tests"), _PY,
            *(os.path.join(_PY, _s) for _s in _SUBS)):
     if _p not in sys.path:

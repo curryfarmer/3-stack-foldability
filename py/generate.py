@@ -21,7 +21,6 @@ import _bootstrap  # noqa: E402,F401  (runner -> engine/, store -> storage/, + e
 
 import runner as Runner       # noqa: E402
 import twostack as TwoStack   # noqa: E402
-import store as Store         # noqa: E402
 
 
 def parse_args(argv):
@@ -88,16 +87,8 @@ def main(argv):
     args = parse_args(argv)
 
     if args.list:
-        for e in Store.load_manifest():
-            o = e["opts"]
-            stacks = o.get("stacks", 3)
-            if stacks == 2:
-                detail = "stacks=2 (HC)"
-            else:
-                detail = (f"stacks=3 shapes={[k for k,v in o['shapes'].items() if v]} "
-                          f"decomps={[k for k,v in o['decomps'].items() if v]} "
-                          f"nonCorner={o['allowNonCorner']}")
-            print(f"  {e['m']}x{e['n']}  count={e['count']:<5} {detail}  -> {e['file']}  ({e['generated']})")
+        # TODO(square-restructure): replace with out/<uid>/ manifest read (store.py removed)
+        print("(manifest listing disabled -- store.py removed pending new out/<uid>/ JSON format)")
         return 0
 
     if args.m is None or args.n is None:
@@ -118,7 +109,8 @@ def main(argv):
     # Bypass the JSON cache when the engine MUST actually run: --force, --snapshot (needs fresh output
     # to diff), or an explicit --db/--test target (the point is to populate THAT database).
     if not (args.force or args.snapshot or args.db or args.test):
-        cached = Store.find_cached(opts)
+        # TODO(square-restructure): replace with out/<uid>/ cache lookup (store.py removed)
+        cached = None
         if cached:
             print(f"cached: {cached['count']} solutions -> results/{cached['file']} "
                   f"({cached['generated']})  [use --force to regenerate]")
@@ -134,26 +126,16 @@ def main(argv):
     # An explicit DB target (--db/--test) writes ONLY that database — it does NOT touch the legacy
     # results/*.json + manifest (those are being phased out, and a scratch run must not pollute them).
     explicit_db = bool(args.db or args.test)
-    if explicit_db:
-        fname = None
-    else:
-        path = Store.save_result(opts, solutions, ctx)
-        fname = os.path.basename(path)          # os.sep-safe (Windows backslash paths)
+    # TODO(square-restructure): replace with out/<uid>/ JSON write (store.py removed)
+    fname = None
+    if not explicit_db:
+        print("  (JSON result caching disabled -- store.py removed pending new out/<uid>/ format)")
     # Phase-A store-all also lands in the SQLite write-master (the API + live-tag write-back read it);
     # the JSON above stays the file:// / archival fallback. Gated runs stay JSON-only (legacy path).
     if opts["stacks"] == 3 and opts.get("storeAll"):
-        db_path = Store.resolve_db_path(args.db, args.test)
-        if args.snapshot:
-            res = Store.snapshot_and_save(opts, solutions, ctx, lattice="square", region="rect",
-                                          snapshot=args.snapshot, label=args.label, note=args.note,
-                                          path=db_path)
-            print(f"  + SQLite write-master updated -> {db_path} (run {res['run_id']})")
-            _print_diff(res, args.snapshot)
-        else:
-            run_id = Store.save_sqlite(opts, solutions, ctx, lattice="square", region="rect",
-                                       label=args.label, note=args.note, path=db_path)
-            print(f"  + SQLite write-master updated -> {db_path} (run {run_id})")
-    dest = "the SQLite DB only" if fname is None else f"results/{fname}"
+        # TODO(square-restructure): replace with out/<uid>/ JSON write (SQLite write-master removed)
+        print("  (SQLite store-all persistence disabled -- store.py removed pending new output format)")
+    dest = "(no persistence -- store.py removed pending new out/<uid>/ JSON format)"
     if opts["stacks"] == 2:
         foldable = sum(1 for s in solutions if s["verdict"]["foldable"])
         print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {foldable}) -> {dest}")
