@@ -90,7 +90,10 @@ GEN = {
 KPLAN = {
     ("equilateral", "1plus1plus1"): (10, 2, 16),
     ("equilateral", "2plus1"):      (4, 1, 9),
-    ("righttri", "1plus1plus1"):    (12, 2, 18),
+    ("righttri", "1plus1plus1"):    (12, 1, 18),   # step 1: K-parity law — seam-clean (proper)
+                                                   # arrivals exist ONLY at odd K; the old even-only
+                                                   # step 2 was structurally blind to them. Start 12
+                                                   # (first K with closing cands; K=11 yields none)
     ("righttri", "2plus1"):         (3, 1, 8),
     ("scalene", "1plus1plus1"):     (14, 2, 20),
     ("scalene", "2plus1"):          (3, 1, 8),
@@ -143,7 +146,14 @@ def gen_111(tiling, K, hub):
     else:  # hex (non-bipartite)
         lat, S, back = HX.build_ambient_hex(K)
         sig, fast = None, False
-    twsig = "path" if tiling == "hex" else sig
+    # Twist is scored with LOOP-INDEX sigma (path_sigma), not the tiling's bipartite sigma. On a
+    # non-alternating pairwise loop the bipartite sigma reads a spurious Tw=0 (it fails to alternate
+    # round the loop), mislabelling a physically TWISTED fold as foldable — the righttri K=12 folds
+    # 22924/74271 both engine-Tw0 yet physically twist. Loop-index sigma matches ALL 1+1+1 physical
+    # ground truth (righttri K12 jams, scalene folds, eq obstruction). `sig` above stays bipartite:
+    # enum_111_general uses it only for the END-footprint parity/reachability prune, not for twist.
+    # See docs/research/GROUND_TRUTH_folds.md and nonsquare_construction.md.
+    twsig = "path"
 
     def it():
         for (pa, pm, pc) in SF.enum_111_general(lat, S, back, K, sigma=sig, fast=fast):
@@ -209,6 +219,18 @@ def gen_eq(decomp, K):
     return gen_21("equilateral", K)
 
 
+def build_lat(tiling, decomp, K):
+    """Rebuild ONLY the ambient lattice for (tiling, decomp, K), matching the generators exactly (2+1
+    -> gen_21's builder, equilateral 1+1+1 -> PO.build_ambient, else gen_111's). The generators build
+    the lattice eagerly and only the candidate iterator lazily, so taking [0] costs no enumeration.
+    Used by render_fold to redraw a saved fold from its JSON without re-searching."""
+    if decomp == "2plus1":
+        return gen_21(tiling, K)[0]
+    if tiling == "equilateral":
+        return gen_eq(decomp, K)[0]
+    return gen_111(tiling, K, hub=None)[0]
+
+
 # --------------------------------------------------------------------------- search (find first)
 def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget):
     """March K upward; PREFER a foldable (Tw=0) closing fold matching the hole mode, returning it
@@ -257,10 +279,12 @@ def verdict_text(cand):
     return "PREDICTED TO JAM (%s) - fold to verify" % cand["tw_desc"]
 
 
-def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix=""):
-    tag = "%s_%s_%s%s" % (tiling, "1plus1" if decomp == "1plus1plus1" else "2plus1",
-                          holes_mode, suffix)
-    over_name, sheet_name = "overlay_%s.png" % tag, "foldsheet_%s.png" % tag
+def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=None):
+    # name_stem overrides the descriptive tag so the sheets can be keyed by a stable fold uid
+    # (overlay_<uid>.png / foldsheet_<uid>.png) — see gen_testset --quadrants + render_fold.py.
+    stem = name_stem or ("%s_%s_%s%s" % (tiling, "1plus1" if decomp == "1plus1plus1" else "2plus1",
+                                         holes_mode, suffix))
+    over_name, sheet_name = "overlay_%s.png" % stem, "foldsheet_%s.png" % stem
     verdict = verdict_text(cand)
     holes_lab = "NO HOLES" if cand["holes"] == 0 else "%d hole(s)" % cand["holes"]
 
@@ -290,12 +314,16 @@ def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix=""):
         crease = D21.crease_set_21(lat, cand["chains"][0], partners, cand["chains"][1], sig=g["sigma"])
         rigid_ov = D21.rigid_set_21(lat, cand["chains"][0], partners)
 
+    # per-END-tile return orientation (proper/mirror/off-cell + whole-footprint class), single source
+    # of truth = the seam gate. Drives the orientation-aware END colouring on BOTH the overlay + sheet.
+    end_chir = SFILT.tile_chirality(lat, cand)
     over = RG.render(g["mod"], cand["chains"], footprint, title, over_name, note=note,
-                     end_footprint=end_footprint, region=cand["region"], partners=partners)
+                     end_footprint=end_footprint, region=cand["region"], partners=partners,
+                     end_chirality=end_chir)
     sheet = FS.make_sheet(g["LatClass"], g["vcart"], g["tile_cart"], g["sigma"],
                           sheet_chains, footprint, title, sheet_name, K,
                           verdict_note=verdict, crease_override=crease, end_footprint=end_footprint,
-                          rigid_override=rigid_ov)
+                          rigid_override=rigid_ov, end_chirality=end_chir)
     return over, sheet, verdict
 
 

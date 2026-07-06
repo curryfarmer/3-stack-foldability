@@ -11,8 +11,8 @@ __pycache__/
 node_modules/
 report/node_modules/
 
-# Personal local Claude settings (machine-specific; keep out of the repo)
-.claude/settings.local.json
+# Personal local Claude settings + runtime state + handoff notes (machine-specific, local-only)
+.claude/
 
 # tri scan logs
 py/tri/_*.log

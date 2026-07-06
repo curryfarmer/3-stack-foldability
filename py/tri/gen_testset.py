@@ -16,6 +16,7 @@ Output: report/tri/<outdir>/  (overlay_*/foldsheet_* PNGs + TEST_PLAN.md + tests
   python py/tri/gen_testset.py [--outdir testset] [--cap-fold 6] [--cap-jam 6] [--budget 60]
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -56,6 +57,89 @@ def _dedup_key(cand):
         canon = lambda c: tuple(tuple(t) for t in c)         # noqa: E731
         return ("111", canon(ch[1]), frozenset({canon(ch[0]), canon(ch[2])}))
     return ("21", frozenset(tuple(t) for t in cand["region"]))
+
+
+def _tk(t):
+    """Stable, reversible JSON string key for a tile id (json.loads recovers the id list)."""
+    return json.dumps(list(t), separators=(",", ":"))
+
+
+def _canon_key(key):
+    """Deterministic JSON string for a _dedup_key (stable across runs / set iteration order)."""
+    if key[0] == "111":
+        _, mid, arms = key
+        mid_l = [list(t) for t in mid]                        # ordered path (direction is identity)
+        arms_l = sorted([[list(t) for t in a] for a in arms])  # invariant to the arm A/C swap
+        return json.dumps(["111", mid_l, arms_l], separators=(",", ":"))
+    _, region = key
+    return json.dumps(["21", sorted(list(t) for t in region)], separators=(",", ":"))
+
+
+def fold_uid(tiling, decomp, cand):
+    """Stable 12-hex content id for a fold = sha1 over (tiling, decomp, canonical dedup identity).
+    Same physical fold -> same id across runs. Reuses store.pattern_uid's sha1[:12] convention (a
+    local helper, no py/tri -> py/storage coupling). Each id ties 1:1 to a folds/<uid>.json."""
+    payload = "tri|%s|%s|%s" % (tiling, decomp, _canon_key(_dedup_key(cand)))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _fold_record(uid, tiling, decomp, K, quad, cand, tc, verdict, over, sheet):
+    """Self-contained per-fold JSON: identity + topology (tile ids) + CARTESIAN geometry + seam
+    analysis, numerically complete so a consumer needs no engine to read the fold. render_fold.py
+    reconstructs the exact sheet from this file (it is the render source of truth)."""
+    chains = _chains(cand)                                     # handles the eq-1+1+1 rec shape too
+    if "footprint" in cand:
+        footprint = [tuple(t) for t in cand["footprint"]]
+        end_fp = [tuple(t) for t in cand["end_footprint"]]
+    else:                                                     # equilateral 1+1+1 solver-rec shape
+        r = cand["rec"]
+        footprint = [tuple(t) for t in r["footprint"]]
+        end_fp = [tuple(t) for t in r["end_footprint"]]
+    region = sorted(tuple(t) for t in cand["region"])
+    partners = [tuple(t) for t in cand["partners"]] if "partners" in cand else None
+    two_tris = [tuple(t) for t in cand["two_tris"]] if "two_tris" in cand else None
+
+    tile_cart = FE.GEN[tiling]["tile_cart"]                   # tile id -> [cart pts]; pure (no lat)
+    geom_tiles = set(region) | set(footprint) | set(end_fp)
+    for c in chains:
+        geom_tiles |= {tuple(t) for t in c}
+    for extra in (partners, two_tris):
+        if extra:
+            geom_tiles |= set(extra)
+    geometry = {}
+    for t in sorted(geom_tiles):
+        try:
+            geometry[_tk(t)] = [[float(x), float(y)] for (x, y) in tile_cart(t)]
+        except Exception:                                    # a stray id with no geometry must not kill the dump
+            pass
+
+    rec = {
+        "schema": "tri-fold/1", "uid": uid,
+        "tiling": tiling, "decomp": decomp, "K": K,
+        "quadrant": quad, "quad_label": QUAD_LABEL.get(quad, quad),
+        "label": "%s %s %s" % (tiling, decomp, quad),
+        "suspect": tiling == "righttri",                     # user flags 45-45-90 as physically suspect
+        "holes_mode": "allow",
+        "chains": [[list(t) for t in c] for c in chains],
+        "footprint": [list(t) for t in footprint],
+        "end_footprint": [list(t) for t in end_fp],
+        "region": [list(t) for t in region],
+        "tw": cand.get("tw"), "tw_desc": cand.get("tw_desc"),
+        "foldable": bool(cand["foldable"]),
+        "seam_ok": cand.get("seam_ok"), "seam_detail": cand.get("seam_detail"),
+        "seam_note": cand.get("seam_note"),
+        "seam_class": tc.get("klass"), "single_motion": tc.get("single_motion"),
+        "chirality": tc,                                     # full per-tile orientation read-out
+        "holes": cand.get("holes"),
+        "verdict": verdict,
+        "geometry": geometry,
+        "overlay": os.path.basename(over), "foldsheet": os.path.basename(sheet),
+    }
+    if partners is not None:
+        rec["partners"] = [list(t) for t in partners]
+    if two_tris is not None:
+        rec["two_tris"] = [list(t) for t in two_tris]
+    return rec
 
 
 def _gen_for(tiling, decomp, K):
@@ -129,6 +213,175 @@ def collect_family_compare(tiling, decomp, cap_pass, cap_fail, budget):
     return passes, fails
 
 
+# ------------------------------------------------------------------ 4-quadrant MVP matrix (twist x seam)
+# The user's minimum-viable stress set: per (grid, decomp) one example of each combination of the TWO
+# independent fold obstructions — the strand TWIST (Tw=0 vs Tw!=0) and the START<->END SEAM gate
+# (rotational-equivalent vs mirror/off-cell). The four cells:
+#   tw0_seamok  : Tw=0 AND seam-aligned  -> the IDEAL clean FOLD (prefer K>=6 to stress the engine)
+#   twN_seamok  : Tw!=0 AND seam-aligned -> twist says JAM, seam agrees it returns proper (over-rotation)
+#   tw0_seambad : Tw=0 AND seam-misaligned-> the mirror/off-cell JAM the twist ALONE mislabels FOLD
+#   twN_seambad : Tw!=0 AND seam-misaligned-> both obstructions fire (twist over-rotates AND mirrors)
+# seambad cells populate ONLY on unequal-sided tiles (righttri/scalene); uniform families (eq/hex) and
+# scalene (no mirror axis) leave them empty by construction — that emptiness is reported, not hidden.
+QUADS = ("tw0_seamok", "twN_seamok", "tw0_seambad", "twN_seambad")
+QUAD_LABEL = {
+    "tw0_seamok":  "Tw=0, seam-aligned (IDEAL FOLD)",
+    "twN_seamok":  "Tw!=0, seam-aligned (twist-JAM only)",
+    "tw0_seambad": "Tw=0, seam-misaligned (seam-JAM only; twist mislabels FOLD)",
+    "twN_seambad": "Tw!=0, seam-misaligned (both obstructions)",
+}
+
+
+def collect_family_quadrants(tiling, decomp, budget, kmin_ideal=6):
+    """March K; fill one candidate per QUADRANT (twist x seam). tw0_seamok prefers K>=kmin_ideal
+    (falls back to any-K if none big enough within budget). Returns {quad: (lat,K,cand) or None}."""
+    K0, step, kcap = FE.KPLAN[(tiling, decomp)]
+    interior_deg = 6 if tiling == "hex" else 3
+    seen, buckets = set(), {q: None for q in QUADS}
+    ideal_fallback = None
+    t0 = time.time()
+
+    def _hard_quads_done():                 # the 3 non-ideal cells + a K>=kmin ideal all found
+        return (buckets["tw0_seamok"] is not None and buckets["twN_seamok"] is not None
+                and buckets["tw0_seambad"] is not None and buckets["twN_seambad"] is not None)
+
+    for K in range(K0, kcap + 1, step):
+        lat, gen = _gen_for(tiling, decomp, K)
+        for cand in gen:
+            key = _dedup_key(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            tw_fold = bool(cand["foldable"])            # twist label BEFORE the seam gate
+            SFILT.apply(lat, cand)                      # stamps seam_ok; demotes a mirror/off-cell FOLD
+            seam_ok = bool(cand.get("seam_ok"))
+            cand["holes"] = len(HF.holes(lat, cand["region"], interior_deg))
+            if tw_fold and seam_ok:
+                if K >= kmin_ideal and buckets["tw0_seamok"] is None:
+                    buckets["tw0_seamok"] = (lat, K, cand)
+                elif ideal_fallback is None:
+                    ideal_fallback = (lat, K, cand)
+            elif (not tw_fold) and seam_ok and buckets["twN_seamok"] is None:
+                buckets["twN_seamok"] = (lat, K, cand)
+            elif tw_fold and (not seam_ok) and buckets["tw0_seambad"] is None:
+                buckets["tw0_seambad"] = (lat, K, cand)
+            elif (not tw_fold) and (not seam_ok) and buckets["twN_seambad"] is None:
+                buckets["twN_seambad"] = (lat, K, cand)
+            if _hard_quads_done() or time.time() - t0 > budget:
+                break
+        if _hard_quads_done() or time.time() - t0 > budget:
+            break
+    if buckets["tw0_seamok"] is None:               # never found a big one -> accept any-K ideal
+        buckets["tw0_seamok"] = ideal_fallback
+    return buckets
+
+
+def _run_quadrants(families, args, out_report):
+    """Emit the twist x seam MVP matrix: one sheet per populated quadrant per (grid, decomp), each
+    with a stable uid + a self-contained folds/<uid>.json (the render source of truth)."""
+    rows, matrix = [], []
+    folds_dir = os.path.join(out_report, "folds")
+    os.makedirs(folds_dir, exist_ok=True)
+    for tiling, decomp in families:
+        print("=== %s / %s (quadrants) ===" % (tiling, decomp), flush=True)
+        buckets = collect_family_quadrants(tiling, decomp, args.budget, kmin_ideal=args.kmin_ideal)
+        got = {q: (buckets[q] is not None) for q in QUADS}
+        print("   " + "  ".join("%s=%s" % (q, "Y" if got[q] else "-") for q in QUADS), flush=True)
+        matrix.append({"tiling": tiling, "decomp": decomp, **{q: got[q] for q in QUADS}})
+        for q in QUADS:
+            if buckets[q] is None:
+                continue
+            lat, K, cand = buckets[q]
+            uid = fold_uid(tiling, decomp, cand)
+            try:
+                over, sheet, verdict = FE.render_case(tiling, decomp, "allow", lat, K, cand,
+                                                      name_stem=uid)
+            except Exception as e:
+                print("   !! render failed %s %s: %s" % (tiling, uid, e), flush=True)
+                continue
+            tc = SFILT.tile_chirality(lat, cand)
+            data_path = os.path.join(folds_dir, "%s.json" % uid)
+            with open(data_path, "w") as f:
+                json.dump(_fold_record(uid, tiling, decomp, K, q, cand, tc, verdict, over, sheet),
+                          f, indent=1)
+            rows.append({
+                "uid": uid, "suspect": tiling == "righttri",
+                "tiling": tiling, "decomp": decomp, "K": K, "quad": q,
+                "quad_label": QUAD_LABEL[q],
+                "tw": cand.get("tw"),
+                "tw_zero": all(v == 0 for v in cand["tw"]) if isinstance(cand.get("tw"), (list, tuple))
+                           else (abs(cand["tw"]) < 1e-6 if isinstance(cand.get("tw"), (int, float)) else None),
+                "seam_ok": cand.get("seam_ok"), "seam_class": tc["klass"],
+                "single_motion": tc["single_motion"], "seam_detail": cand.get("seam_detail"),
+                "holes": cand["holes"], "predicted": "FOLDABLE" if cand["foldable"] else "JAM",
+                "verdict": verdict,
+                "data": os.path.relpath(data_path),
+                "overlay": os.path.relpath(over), "foldsheet": os.path.relpath(sheet),
+            })
+    os.makedirs(out_report, exist_ok=True)
+    with open(os.path.join(out_report, "testset.json"), "w") as f:
+        json.dump(rows, f, indent=1)
+    _write_quadrant_plan(os.path.join(out_report, "TEST_PLAN.md"), rows, matrix)
+    print("\n%d quadrant sheets (+per-fold json in folds/) -> %s"
+          % (len(rows), os.path.relpath(out_report)), flush=True)
+
+
+def _write_quadrant_plan(path, rows, matrix):
+    lines = [
+        "# 3-stack MVP stress matrix — twist x seam (one example per quadrant per family)",
+        "",
+        "Two INDEPENDENT fold obstructions, crossed. **Twist** = strand over-rotation (Tw=0 vs Tw!=0).",
+        "**Seam** = does the END footprint return onto the START footprint as a *single rigid motion*",
+        "(rotational-equivalent, A->A B->B C->C proper) or come back mirrored / off-cell. A real flat",
+        "fold needs BOTH clear: Tw=0 AND seam-aligned.",
+        "",
+        "| quadrant | Tw | seam | physical meaning | engine verdict |",
+        "|---|---|---|---|---|",
+        "| tw0_seamok  | 0    | aligned      | ideal clean fold (prefer K>=6)             | FOLD |",
+        "| twN_seamok  | !=0  | aligned      | over-rotation only (seam returns proper)    | JAM (twist) |",
+        "| tw0_seambad | 0    | mirror/off   | twist mislabels FOLD; seam catches the mirror| JAM (seam) |",
+        "| twN_seambad | !=0  | mirror/off   | both obstructions fire                       | JAM (both) |",
+        "",
+        "Mirror enforcement applies only to the ISOSCELES-not-uniform tile (45-45-90 righttri), where a",
+        "mirror arrival swaps the equal labelled legs on the same cell. K-PARITY LAW (2026-07-02): an",
+        "on-cell arrival is a mirror at EVEN K and a proper rotation at ODD K (chains alternate sigma),",
+        "so righttri seam-ALIGNED cells require odd K and every even-K righttri fold is a seam JAM.",
+        "30-60-90 scalene mirrors seat the mirror-partner cell with all edge roles matched = exempt;",
+        "equilateral/hex are edge-uniform so a mirror is invisible = exempt. Empty cells below are",
+        "structural absence, not a search miss.",
+        "",
+        "## Coverage (which quadrants exist per family)",
+        "",
+        "| family | tw0_seamok | twN_seamok | tw0_seambad | twN_seambad |",
+        "|---|---|---|---|---|",
+    ]
+    for m in matrix:
+        lines.append("| %s %s | %s | %s | %s | %s |" % (
+            m["tiling"], m["decomp"],
+            *["Y" if m[q] else "-" for q in QUADS]))
+    lines += [
+        "",
+        "Each fold has a stable **uid**; its numerically-complete data is `folds/<uid>.json` (identity +",
+        "tile ids + cartesian polygons + per-tile seam analysis). Re-render any fold from that file with",
+        "`python py/tri/render_fold.py --uid <uid>`. Rows marked **suspect** are 45-45-90 righttri, which",
+        "the user flags as physically suspect (kept for the seam-bad column; filter by the `suspect` field",
+        "in testset.json).",
+        "",
+        "## Sheets to fold",
+        "",
+        "| uid | family | quadrant | K | Tw | seam | class | single_motion | predicted | ACTUAL |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        fam = "%s %s%s" % (r["tiling"], r["decomp"], " (suspect)" if r.get("suspect") else "")
+        lines.append("| `%s` | %s | %s | %d | %s | %s | %s | %s | **%s** |  |" % (
+            r["uid"], fam, r["quad"], r["K"], _fmt_tw(r["tw"]),
+            "ok" if r["seam_ok"] else "BAD", r["seam_class"], r["single_motion"], r["predicted"]))
+    lines.append("")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser(description="batch fold-check test set for all non-square families")
     ap.add_argument("--outdir", default="testset", help="under report/tri/ and results/ (default: testset)")
@@ -140,6 +393,11 @@ def main():
     ap.add_argument("--compare", action="store_true",
                     help="seam-flag comparison matrix: per family emit Tw=0 seam-PASS vs Tw=0 seam-FAIL "
                          "sheets (same twist label, opposite flag) across all grids x both decomps")
+    ap.add_argument("--quadrants", action="store_true",
+                    help="MVP stress matrix: per family emit one sheet per twist x seam quadrant "
+                         "(tw0_seamok / twN_seamok / tw0_seambad / twN_seambad)")
+    ap.add_argument("--kmin-ideal", type=int, default=6, dest="kmin_ideal",
+                    help="prefer K>=this for the tw0_seamok ideal-fold cell (default 6)")
     args = ap.parse_args()
 
     FE.set_outdir(args.outdir)                               # park all renders in report/tri/<outdir>
@@ -148,6 +406,8 @@ def main():
     families = ([tuple(f.split(":")) for f in args.families] if args.families
                 else [(t, d) for t in TILINGS for d in DECOMPS])
 
+    if args.quadrants:
+        return _run_quadrants(families, args, out_report)
     if args.compare:
         return _run_compare(families, args, out_report)
 
