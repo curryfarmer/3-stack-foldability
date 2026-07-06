@@ -22,8 +22,8 @@ CLI (argument parsing, DB lookup by pattern_uid) is a separate, later phase's jo
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
-import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # square/ on path
+import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 
 import figstyle as fs          # noqa: E402  (shared palette/grid/legend/save)
 import twist_jump as tj        # noqa: E402  (Model B geometry: replay/strand_path/loop_terms/tw_of/...)

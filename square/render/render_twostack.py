@@ -25,8 +25,8 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
-import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # square/ on path
+import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 
 import figstyle as fs          # noqa: E402  (shared palette/grid/legend/save)
 import twostack as T2          # noqa: E402  (twist_value — reused, not re-derived)

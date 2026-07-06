@@ -22,8 +22,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
-import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # square/ on path
+import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 import figstyle as fs                                             # noqa: E402
 import matplotlib.pyplot as plt                                   # noqa: E402  (Agg set by figstyle)
 from matplotlib.patches import Rectangle, FancyArrowPatch         # noqa: E402

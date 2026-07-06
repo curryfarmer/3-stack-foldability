@@ -51,6 +51,7 @@ Run standalone from anywhere:  python scripts/validate_square.py
 import json
 import os
 import sys
+import time
 from collections import defaultdict
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -118,7 +119,12 @@ def run():
     for grid, recs in sorted(by_grid.items()):
         m_str, n_str = grid.split("x")
         m, n = int(m_str), int(n_str)
+        print("progress: searching grid %s (%d ground-truth records)..." % (grid, len(recs)),
+              flush=True)
+        _t0 = time.time()
         engine_by_hash = _search_grid(Runner, m, n)
+        print("progress: grid %s search done in %.1fs, %d gate-surviving candidates"
+              % (grid, time.time() - _t0, len(engine_by_hash)), flush=True)
         for r in recs:
             n_total += 1
             key = _norm_hash(r["canonicalHash"])
@@ -141,6 +147,8 @@ def run():
             else:
                 mismatches.append({"grid": grid, "id": r.get("id"), "kind": "verdict_disagree",
                                     "fresh": fresh, "actual": actual})
+        print("progress: grid %s done, running total %d/%d agree (%d mismatches so far)"
+              % (grid, n_agree, n_total, len(mismatches)), flush=True)
 
     return n_agree, n_total, mismatches
 

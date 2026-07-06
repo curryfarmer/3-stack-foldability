@@ -14,8 +14,8 @@ single source of truth shared with the 2-stack and 2+1-analysis renderers.
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # py/ on path
-import _bootstrap  # noqa: E402,F401  (puts every py/ subfolder + repo + tests on sys.path)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # square/ on path
+import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 import figstyle as fs                                            # noqa: E402
 
 _verdict_line = fs.verdict_line                                  # back-compat alias (gate ✓/✗/– line)
