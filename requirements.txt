@@ -3,7 +3,6 @@
 
 # --- test suite (required for `pytest`) ---
 pytest==9.1.0
-jsonschema==4.26.0
 
 # --- engine analysis + rendering (py/render_*.py, py/analyze_*.py, explainer/) ---
 numpy==2.4.6
