@@ -1,93 +1,100 @@
-# Grid Folding Simulator
+# fold3stack
 
-Browser tool for prototyping 2D origami-style folding on a square grid. Define a footprint, break it into composite groups, then drag groups across the grid to lay down their successive **mirrored copies** (folds). Direction vectors anchored on the footprint reflect through every fold automatically.
+Two independent, code-only Python engines that search for and verify **3-stack folds**
+(compact-stack tessellated-plate folding, after Yang–You–Rosen, see [`reference/`](reference/)):
 
-> **New here? Read the [User Manual](docs/guides/USER_MANUAL.md)** — the top-to-bottom guide to the
-> whole repo (concepts, the generate → SQLite → viewer → findings pipeline, tests, repo map, FAQ).
-> This README covers the folding-simulator UI specifically.
+- **`square/`** — folds on a square grid: footprint + 2-chain/1-chain (or 1+1+1) decomposition,
+  reflection-closure + twist gates. Also supports the paper's original 2-stack (Hamiltonian-circuit)
+  mode.
+- **`triangle/`** — folds on non-square tilings: equilateral, 45-45-90 right-isosceles, 30-60-90
+  scalene, and regular hexagon. Same closure/twist idea, ported to each tiling's own geometry.
 
-## Run
+The two packages are **fully independent** — no cross-imports. Each has its own `lattice`
+subpackage, its own `_bootstrap.py`, and its own pair of CLIs. They happen to both use a bare
+module name `lattice` internally, so **never import both packages in the same Python process** —
+run them in separate processes (every script in this repo already does this).
 
-```bash
-python -m http.server 8000      # from repo root (static viewer)
-python serve.py                 # same viewer + in-page finding capture (POST /api/findings)
-```
-
-Open http://localhost:8000
-
-## Python search backend (`py/`)
-
-The heavy search (footprint enumeration + fold DFS + verdicts) is also available as a
-Python CLI — faster to iterate on, and it caches results so you don't regenerate.
+## Install
 
 ```bash
-python py/generate.py --m 6 --n 6               # generate + cache
-python py/generate.py --m 6 --n 5 --decomps 2+1 --allow-non-corner
-python py/generate.py --m 6 --n 6 --force       # ignore cache
-python py/generate.py --list                    # show what's cached
-python py/generate.py --m 6 --n 6 --jobs 8      # multiprocessing (orthogonal: FOLD_PY=pypy)
+python -m venv .venv
+.venv/Scripts/pip install -e .          # editable install; add [test] for pytest
 ```
 
-**Full command reference** (searches, tests, triangle lattice, perf toggles):
-see [`docs/guides/COMMANDS.md`](docs/guides/COMMANDS.md). Performance toggles (`--jobs`/`FOLD_JOBS`,
-`FOLD_PY=pypy`) and their measured speedups are documented in [`tests/README.md`](tests/README.md).
-Research notes and lab logs live in [`docs/research/`](docs/research/).
+This installs four console scripts:
 
-**Physical findings** (`py/findings.py` + `serve.py`): record a real paper-fold result for an
-enumerated candidate, keyed by its `canonicalHash`, into the findings DB (`results/foldfindings.json`)
-plus a dated `docs/research/LAB_LOG.md` entry. Capture in-browser with `python serve.py` (the
-"Record physical finding" panel → Submit), or offline via `python py/findings.py submit <file>`. The
-engine prediction stored alongside is a **gate verdict** (FOLD/JAM + failing gates), never a fold
-index. Full usage in [`docs/guides/COMMANDS.md`](docs/guides/COMMANDS.md#physical-findings).
+| command        | package  | does                                                        |
+|-----------------|----------|--------------------------------------------------------------|
+| `sq-generate`   | square   | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
+| `sq-render`     | square   | re-render an existing `out/<uid>/<uid>.json` record           |
+| `tri-generate`  | triangle | search one tiling/decomposition/K for a closing fold          |
+| `tri-render`    | triangle | re-render an existing triangle record                          |
 
-**2-stack mode** (RSPA baseline, Yang-You-Rosen): `generate.py --stacks 2 --m 6 --n 5`
-enumerates Hamiltonian circuits on the grid graph and applies the paper's two conditions
-(vector-reflection + zero-twist). Load the JSON in the browser's search panel ("Load results
-JSON") to see each kirigami pattern — HC path, creases (red) / slits (gray) / cut edge
-(green), with the foldable/twist verdict. (HC enumeration validated vs OEIS: 4×4=6, 6×6=1072.)
+## Output format
 
-Results are written to `results/<m>x<n>[_2stack]_<hash>.json` with a `results/manifest.json` index.
-A matching cached run is reused unless `--force`. The JSON matches the browser tool's own
-export, so in the search panel use **Load results JSON** to visualise / browse a generated
-file (loads onto the grid, drives the prev/next stepper, respects the Tw / shape / decomp
-filters). The in-browser JS engine (`search.js`) is kept as a cross-checked reference —
-both engines produce identical solutions on 6×4 / 6×5 / 6×6.
+Both engines write the same on-disk contract: one self-contained folder per fold, named after a
+12-hex content hash (`uid`, `sha1(lattice \| MxN \| canonical-geometry)`):
 
-## Workflow
+```
+out/<uid>/
+  <uid>.json              full record: chains, footprint, verdict, geometry
+  foldsheet_<uid>.png      printable foldsheet
+  twist_<uid>.png          twist-enumeration diagram (when the record is a 2+1/1+1+1 case)
+  overlay_<uid>.png        triangle only: chain overlay
+  reflect_<uid>.png        triangle only: vector-reflection diagram (skipped for equilateral
+                           1+1+1 — that case has no chain-footprint geometry to reflect)
+```
 
-1. **Set dimensions** (top bar): pick `m` (cols) and `n` (rows).
-2. **Footprint** tool: click cells to mark the starting region. They get a black outline.
-3. **+ Group** (button on the grid card): create a composite group (A, B, …). It becomes the active group.
-4. **Group select** tool: click footprint cells to add/remove them from the active group. Cells must lie inside the footprint.
-5. **Vector** tool: click+drag inside one of the active group's cells. The arrow snaps to one of the four cell edges (creases) and points in one direction along that edge. Snap rule: dominant drag axis → top/bottom (if horizontal) or left/right (if vertical) edge; which side picked by start-position within the cell; direction = sign of drag along that axis.
-6. **Fold (drag)** tool: click on any placement of a group, drag past an edge of the active placement → that placement reflects across the edge, leaving its image as a new placement. Drag further to chain folds. **Drag back across a crease** to *unfold* the last placement (counter decrements, placement removed). `H`, `V`, and `T = H + V` counters per group track horizontal, vertical, and total folds. Each fold lays down a small **orange chevron** at the crease, pointing in the fold direction. All vectors travel along.
+`*-render` re-derives the same image bundle from a saved `.json` with zero search — regenerating
+a record and re-rendering it are the same code path, so the two are always byte-consistent.
 
-## Tools
+## Examples
 
-| Tool | Action |
-|---|---|
-| Pen | Paint cells with current color |
-| Eraser | Clear paint + highlight on cell |
-| Highlighter | Soft semi-transparent layer in current color |
-| Footprint | Toggle cell membership in footprint |
-| Group select | Toggle cell membership in active group's base |
-| Fold (drag) | Drag a placement past its edge → folds reflect |
-| Vector (drag) | Drag from inside an active-group cell → adds compass-snapped direction vector |
+```bash
+sq-generate --m 6 --n 6                            # 3-stack, both decomps, corner footprints
+sq-generate --m 6 --n 5 --decomps 2+1 --allow-non-corner
+sq-generate --stacks 2 --m 6 --n 5                 # RSPA 2-stack (Hamiltonian circuits)
+sq-generate --list                                  # summarize out/'s bundles
+sq-render out/<uid>/<uid>.json --out somewhere/
 
-## Per-grid card buttons
+tri-generate --tiling righttri --decomp 1plus1plus1 --K 16
+tri-generate --tiling scalene --decomp 2plus1 --K 4
+tri-render out/<uid>/<uid>.json
+```
 
-- **+ Group** — make a new group on this grid
-- **Reset folds** — drop all placements back to the originals
-- **Clear vectors** — remove all vectors from all groups
-- **Clear** — wipe everything on this grid (paint, footprint, groups)
-- **×** — delete this grid
+## Validating against physical ground truth
 
-## Multi-grid
+`scripts/validate.py` re-derives a fresh verdict for every physically-tested fold on record (not
+just re-reading a stored boolean) and checks it still agrees with what was physically folded.
+Requires the gitignored local research data (`docs/`, `report/`, `results/`) — skips gracefully
+per engine if that data isn't present (e.g. a fresh clone):
 
-Press **+ Add Grid** in the top bar to add another grid below. Each grid keeps its own footprint, groups, vectors, and dimensions. The currently focused grid (blue border) is the one the top-bar `m` / `n` / `k` apply to.
+```bash
+python scripts/validate.py
+```
 
-## Notes
+It never imports both engines in one process — it subprocess-dispatches
+`scripts/validate_triangle.py` and `scripts/validate_square.py` independently.
 
-- Folds that would push cells off the grid are silently rejected.
-- Editing dimensions trims any cells/footprint/group cells outside the new bounds and resets folds.
-- No persistence yet — refreshing the page clears state. Undo/redo, save/load are obvious next adds.
+## Tests
+
+```bash
+pytest
+```
+
+Runs `smoketest/` — fast, offline, ground-truth-independent packaging/import/CLI smoke tests
+(not a replacement for `scripts/validate.py`, which is the real regression proof).
+
+## Repository layout
+
+```
+triangle/        installable package: the non-square-tiling engine + tri-render/tri-generate
+square/          installable package: the square-grid engine + sq-render/sq-generate
+scripts/         validate.py + validate_triangle.py + validate_square.py
+smoketest/       tracked pytest suite (packaging/import/CLI smoke only)
+reference/       external source material (the paper + the authors' own reference implementation)
+```
+
+`docs/`, `report/`, `results/`, `deprecated/` are local-only (gitignored) research history: lab
+logs, generated figures, the physical-fold findings DB, and archived exploratory code. They exist
+on the maintainer's machine but are not part of the tracked tree.

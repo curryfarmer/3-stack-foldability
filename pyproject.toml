@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fold3stack"
+version = "0.1.0"
+description = "Two independent 3-stack folding-simulation engines (square grid + triangle/non-square lattices)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==2.4.6",
+    "matplotlib==3.10.9",
+    "pillow==12.2.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.0"]
+
+[project.scripts]
+tri-render = "triangle.tri.render:main"
+tri-generate = "triangle.tri.generate:main"
+sq-render = "square.render_cli:main"
+sq-generate = "square.generate:main"
+
+[tool.setuptools.packages.find]
+include = ["triangle*", "square*"]

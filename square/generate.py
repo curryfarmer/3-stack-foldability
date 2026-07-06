@@ -103,7 +103,7 @@ def _print_manifest(out_dir):
     print(f"{len(entries)} record(s) under {out_dir}/")
 
 
-def main(argv):
+def main(argv=None):
     args = parse_args(argv)
 
     if args.list:

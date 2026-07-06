@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+*.egg-info/
 
 # Node (report tooling)
 node_modules/
@@ -14,11 +15,11 @@ report/node_modules/
 # Personal local Claude settings + runtime state + handoff notes (machine-specific, local-only)
 .claude/
 
-# tri scan logs
-py/tri/_*.log
-
 # Annotated learning copy (regenerable teaching snapshot; not source of truth)
 annotated-codebase/
+
+# Default sq-generate/tri-generate output (out/<uid>/ bundles) -- regenerable, not source of truth
+out/
 
 # Local-only working dirs: kept on disk, untracked (git rm --cached'd). Notes, archived
 # research, the write-up, generated results (SQLite DB lives here), and the test suite all

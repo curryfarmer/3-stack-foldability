@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""render.py — sq-render CLI: render a generate.py/twostack.py record (JSON) into its full
+"""render_cli.py — sq-render CLI: render a generate.py/twostack.py record (JSON) into its full
 out/<uid>/ bundle (JSON + foldsheet PNG [+ twist PNG for 3-stack 2+1]) without re-running the
 search. Schema-sniffs "circuit" (2-stack) vs "chains"+"footprint" (3-stack).
 
 Usage:
-  python square/render.py <record.json> [--out DIR]
-  python square/render.py <DIR-of-json-records> [--out DIR]
+  python square/render_cli.py <record.json> [--out DIR]
+  python square/render_cli.py <DIR-of-json-records> [--out DIR]
 
-NOTE on the name: this file is meant to be *run directly* (python square/render.py ...), not
-imported as a module. square/render/ is already a package of the same name (the low-level
-plotting modules: render_square.py / render_twostack.py / figstyle.py / ...), and a package
-shadows a same-named sibling file in Python's import system -- `import render` from anywhere
-with square/ on sys.path resolves to THAT package, not this file. The actual shared logic lives
-in render_bundle.py (inside square/render/, imported by both this CLI and generate.py) precisely
-to sidestep that collision; this file only owns argument parsing / file discovery / CLI output.
+NOTE on the name: square/render/ is already a package (the low-level plotting modules:
+render_square.py / render_twostack.py / figstyle.py / ...). A package shadows a same-named
+sibling file for DOTTED imports (`square.render` resolves to the package, not a same-named file),
+which breaks a `square.render:main` console-script entry point -- hence this CLI lives at
+render_cli.py instead of render.py. The actual shared logic lives in render_bundle.py (inside
+square/render/, imported by both this CLI and generate.py); this file only owns argument parsing /
+file discovery / CLI output.
 """
 import argparse
 import glob
