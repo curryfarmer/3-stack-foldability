@@ -50,10 +50,15 @@ def _gen_partners(lat, strand, first, reserved):
     yield from dfs(0, set())
 
 
-def enum_domino_21(lat, S, K, cent=None, time_budget=None, t0=None):
+def enum_domino_21(lat, S, K, cent=None, time_budget=None, t0=None, stats=None):
     """Yield closing 2+1 solutions from start trapezoid S=[a, mid, b] (a = strand base, mid =
     partner base, b = 1-chain base). Each dict carries strand/partners/one_chain, the 2-chain tile
-    set, start/end footprints, and the path-following reduced-loop twist (`loop`)."""
+    set, start/end footprints, and the path-following reduced-loop twist (`loop`).
+
+    `stats`, if given, is a dict this mutates in place with pure counters (no effect on which
+    candidates are yielded or their order): "tried" (raw one_chain candidates considered),
+    "topology_pass" (passed the dual-graph exit_ok check), "closure_pass" (passed the physical
+    closure/foldsim gate -- same count as what's yielded)."""
     a, mid, b = S
     all_tiles = set(lat.tris)
     t0 = t0 if t0 is not None else time.time()
@@ -65,8 +70,12 @@ def enum_domino_21(lat, S, K, cent=None, time_budget=None, t0=None):
                 continue
             free1 = all_tiles - two
             for one_chain in TS.grow_walks(lat, b, K, free1):
+                if stats is not None:
+                    stats["tried"] += 1
                 if not TS.exit_ok(lat, [strand[-1], partners[-1], one_chain[-1]]):
                     continue
+                if stats is not None:
+                    stats["topology_pass"] += 1
                 # PHYSICAL CLOSURE GATE (foldsim): exit_ok is only dual-graph topology. Simulate
                 # folding the PRINTED sheet (rigid dominoes + folding ribbon hinges + 1-chain) and
                 # require it to seat as a flat 3-stack onto the START trapezoid (all tiles land on
@@ -77,6 +86,8 @@ def enum_domino_21(lat, S, K, cent=None, time_budget=None, t0=None):
                                              [a, mid, b], end_fp)
                 if not closes:
                     continue
+                if stats is not None:
+                    stats["closure_pass"] += 1
                 loop = list(strand) + list(reversed(one_chain))
                 res = TW.loop_twist(loop, cent=cent, sigma=TW.path_sigma(len(loop)))
                 yield {

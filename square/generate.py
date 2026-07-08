@@ -139,10 +139,15 @@ def main(argv=None):
         print(f"  [{sol['uid']}] -> {produced.get('foldsheet', produced['json'])}")
 
     if opts["stacks"] == 2:
-        foldable = sum(1 for s in solutions if s["verdict"]["foldable"])
-        print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {foldable}) "
+        print(f"search: {ctx['hcCount']} Hamiltonian circuit(s) -> reflection {ctx['reflectionPass']}, "
+              f"twist {ctx['twistPass']}, foldable {ctx['foldable']}")
+        print(f"generated {len(solutions)} HC patterns (foldable 2-stack: {ctx['foldable']}) "
               f"-> {args.out}/ ({len(solutions)} bundles)")
     else:
+        print(f"search: {ctx['footprintsTried']}/{ctx['footprintsTotal']} footprint(s), "
+              f"{ctx['decompCount']} decomposition(s) explored -> exit {ctx['exitPass']}, "
+              f"parity {ctx['parityPass']}, reflection {ctx['reflPass']}, "
+              f"after-dedup {ctx['afterDedup']}, twist-FOLD {ctx['twistPass']}")
         twist0 = sum(1 for s in solutions if s["verdict"]["twist"] is True)
         print(f"generated {len(solutions)} solutions (Tw=0 decided: {twist0}) "
               f"-> {args.out}/ ({len(solutions)} bundles)")

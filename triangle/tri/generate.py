@@ -28,9 +28,22 @@ import render as RENDER       # noqa: E402  render_record_json — the SAME out/
 
 def find_one(tiling, decomp, K, budget=120.0):
     """Search for exactly ONE closing candidate at this fixed K. Reuses find_example.find_first,
-    pinned to a single K (K0=kcap=K, step=1) instead of marching a K-range. Returns (lat, K, cand),
-    or None if no closing candidate exists at this K (a valid, meaningful outcome)."""
-    return FE.find_first(tiling, decomp, "allow", K, 1, K, hub=None, budget=budget)
+    pinned to a single K (K0=kcap=K, step=1) instead of marching a K-range. Returns
+    (result, stats) where result is (lat, K, cand) or None if no closing candidate exists at this
+    K (a valid, meaningful outcome); stats is the search's gate-funnel counter dict."""
+    stats = {"tried": 0, "topology_pass": 0, "closure_pass": 0, "holes_filtered": 0}
+    res = FE.find_first(tiling, decomp, "allow", K, 1, K, hub=None, budget=budget, stats=stats)
+    return res, stats
+
+
+def _print_search_summary(decomp, stats):
+    parts = ["%d candidate(s) tried" % stats["tried"]]
+    if decomp == "2plus1":
+        parts.append("%d passed topology/exit" % stats["topology_pass"])
+    parts.append("%d passed the physical closure (reflection) gate" % stats["closure_pass"])
+    if stats["holes_filtered"]:
+        parts.append("%d holes-filtered" % stats["holes_filtered"])
+    print("search: " + ", ".join(parts))
 
 
 def main(argv=None):
@@ -43,7 +56,8 @@ def main(argv=None):
     ap.add_argument("--budget", type=float, default=120.0, help="search wall-clock budget in seconds")
     args = ap.parse_args(argv)
 
-    res = find_one(args.tiling, args.decomp, args.K, budget=args.budget)
+    res, stats = find_one(args.tiling, args.decomp, args.K, budget=args.budget)
+    _print_search_summary(args.decomp, stats)
     if res is None:
         print("no closing example found for tiling=%s decomp=%s K=%d "
               "(this can be a correct, proven obstruction — e.g. equilateral 1+1+1 never closes —"

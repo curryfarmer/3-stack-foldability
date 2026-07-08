@@ -134,8 +134,11 @@ def central_hubs(lat, interior_deg, n):
 
 
 # --------------------------------------------------------------------------- enumerators
-def gen_111(tiling, K, hub):
-    """(lat, iterator of cand) for a general 1+1+1 case (righttri/scalene/hex)."""
+def gen_111(tiling, K, hub, stats=None):
+    """(lat, iterator of cand) for a general 1+1+1 case (righttri/scalene/hex).
+
+    `stats`, if given, is mutated in place with "tried" (raw pairwise-enumerated candidates) and
+    "closure_pass" (passed reflection_closes_111 -- same count as what's yielded)."""
     g = GEN[tiling]
     if tiling == "righttri":
         lat, S, back = RT.build_ambient_right(K, hub=hub or "HL")
@@ -157,9 +160,13 @@ def gen_111(tiling, K, hub):
 
     def it():
         for (pa, pm, pc) in SF.enum_111_general(lat, S, back, K, sigma=sig, fast=fast):
+            if stats is not None:
+                stats["tried"] += 1
             chains = [list(pa), list(pm), list(pc)]
             if not FC.reflection_closes_111(lat, chains):    # physical closure gate
                 continue
+            if stats is not None:
+                stats["closure_pass"] += 1
             L = pairwise(chains, g["cent"], twsig)
             tw = [int(round(L[nm]["Tw"])) for nm in ("AB", "BC", "AC")]
             yield {"decomp": "1plus1plus1", "chains": chains,
@@ -171,10 +178,12 @@ def gen_111(tiling, K, hub):
     return lat, it()
 
 
-def gen_21(tiling, K, hubs=1):
+def gen_21(tiling, K, hubs=1, stats=None):
     """(lat, iterator of cand) for a general 2+1 case (equilateral/righttri/scalene/hex). `hubs` = how
     many distinct central start trapezoids to enumerate from (1 = the single most-central hub, the
-    single-example default; gen_testset passes more so a 2nd distinct foldable region can surface)."""
+    single-example default; gen_testset passes more so a 2nd distinct foldable region can surface).
+
+    `stats`, if given, is passed through to domino21.enum_domino_21 (see its docstring for keys)."""
     g = GEN[tiling]
     if tiling == "righttri":
         lat = RT.RightTriLattice(2 * K + 4, 2 * K + 4)
@@ -188,7 +197,7 @@ def gen_21(tiling, K, hubs=1):
 
     def it():
         for S in hub_list:
-            for sol in D21.enum_domino_21(lat, S, K, cent=g["cent"]):
+            for sol in D21.enum_domino_21(lat, S, K, cent=g["cent"], stats=stats):
                 r = sol["loop"]
                 tw = round(r["Tw"], 3)
                 yield {"decomp": "2plus1", "chains": [sol["strand"], sol["one_chain"]],
@@ -199,15 +208,21 @@ def gen_21(tiling, K, hubs=1):
     return lat, it()
 
 
-def gen_eq(decomp, K):
-    """(lat, iterator of cand) for equilateral; reuses solve_foldable records (carry rec for SF render)."""
+def gen_eq(decomp, K, stats=None):
+    """(lat, iterator of cand) for equilateral; reuses solve_foldable records (carry rec for SF render).
+
+    `stats`, if given, is mutated/threaded the same way as gen_111/gen_21 (see their docstrings)."""
     if decomp == "1plus1plus1":
         lat, S, back = PO.build_ambient(K)
 
         def it():
             for (pa, pm, pc) in SF.enum_111(lat, S, back, K):
+                if stats is not None:
+                    stats["tried"] += 1
                 if not FC.reflection_closes_111(lat, [list(pa), list(pm), list(pc)]):
                     continue                                  # physical closure gate (additive on eq)
+                if stats is not None:
+                    stats["closure_pass"] += 1
                 rec = SF.record_111(lat, pa, pm, pc, K)
                 yield {"decomp": decomp, "rec": rec, "region": set(pa) | set(pm) | set(pc),
                        "foldable": rec["foldable"],
@@ -216,7 +231,7 @@ def gen_eq(decomp, K):
     # 2+1: unified onto the general domino model (the legacy rhombus enum_21 used an incompatible
     # footprint convention — its trapezoid `mid` is a bridge tile outside the region — and its
     # rhombus-diagonal-as-crease over-folded the rigid domino). gen_21 + foldsim is the correct path.
-    return gen_21("equilateral", K)
+    return gen_21("equilateral", K, stats=stats)
 
 
 def build_lat(tiling, decomp, K):
@@ -232,25 +247,31 @@ def build_lat(tiling, decomp, K):
 
 
 # --------------------------------------------------------------------------- search (find first)
-def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget):
+def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget, stats=None):
     """March K upward; PREFER a foldable (Tw=0) closing fold matching the hole mode, returning it
     immediately. If none turns up within the K range / time budget, fall back to the first closing
-    JAM example that matched the hole mode (a proof-of-concept is still useful even when it jams)."""
+    JAM example that matched the hole mode (a proof-of-concept is still useful even when it jams).
+
+    `stats`, if given, is threaded into whichever gen_* this calls (see their docstrings) and also
+    gets "holes_filtered" bumped here for candidates skipped by holes_mode -- pure counters, no
+    effect on which candidate is returned."""
     t0 = time.time()
     interior_deg = 3 if tiling != "hex" else 6
     fallback = None
     for K in range(K0, kcap + 1, step):
         if tiling == "equilateral":
-            lat, gen = gen_eq(decomp, K)
+            lat, gen = gen_eq(decomp, K, stats=stats)
         elif decomp == "1plus1plus1":
-            lat, gen = gen_111(tiling, K, hub)
+            lat, gen = gen_111(tiling, K, hub, stats=stats)
         else:
-            lat, gen = gen_21(tiling, K)
+            lat, gen = gen_21(tiling, K, stats=stats)
         for cand in gen:
             SFILT.apply(lat, cand)          # STRICT START<->END seam gate: demote a mirror/off-cell FOLD to JAM
             hc = len(HF.holes(lat, cand["region"], interior_deg))
             cand["holes"] = hc
             if holes_mode == "none" and hc > 0:
+                if stats is not None:
+                    stats["holes_filtered"] += 1
                 if time.time() - t0 > budget:
                     return fallback
                 continue
