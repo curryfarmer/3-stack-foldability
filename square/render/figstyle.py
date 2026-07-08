@@ -15,6 +15,7 @@ Consumers: square/render/render_square.py (3-stack foldsheet), square/render/ren
 Backend is forced to Agg here (headless) BEFORE pyplot is imported, so importing figstyle is enough.
 """
 import os
+from fractions import Fraction
 
 import matplotlib
 matplotlib.use("Agg")                          # headless: no display; set before pyplot import
@@ -41,9 +42,10 @@ NEG = "#c0392b"                                # -contribution label (red)
 FOLD_BADGE = "#1a7f48"                         # FOLD verdict (green)
 JAM_BADGE = "#c0392b"                          # JAM verdict (red)
 
-# Checkerboard sigma = (-1)^(x+y) tint (analysis backgrounds).
-CB_LIGHT = "#f4f6fb"                           # even (x+y)
-CB_DARK = "#eef0f3"                            # odd  (x+y)
+# Checkerboard sigma = (-1)^(x+y) parity tint (analysis backgrounds) — red/blue by cell parity,
+# standardised across every square-track analysis figure (2-stack turn diagram, 2+1 twist diagram).
+PARITY_RED = "#f2c6c6"                         # even (x+y)
+PARITY_BLUE = "#c6d5f2"                        # odd  (x+y)
 
 # Shared line styles + sizes (kill the per-file drift).
 DASH = (0, (4, 2))                             # one dashed style for all cut/jump dashes
@@ -109,11 +111,12 @@ def new_grid_axes(m, n, *, pad=0.3, extra_w=0.0, ticklabels=True):
 
 
 def draw_grid_cells(ax, m, n, *, checker=False):
-    """Fill the base m×n grid: plain white, or a sigma=(-1)^(x+y) checkerboard when checker=True."""
+    """Fill the base m×n grid: plain white, or a sigma=(-1)^(x+y) red/blue parity tint when
+    checker=True (the same tile-parity coloring shared by every square analysis figure)."""
     for y in range(n):
         for x in range(m):
             if checker:
-                fc = CB_LIGHT if (x + y) % 2 == 0 else CB_DARK
+                fc = PARITY_RED if (x + y) % 2 == 0 else PARITY_BLUE
             else:
                 fc = "white"
             ax.add_patch(Rectangle((x, y), 1, 1, facecolor=fc, edgecolor=GRID_EDGE,
@@ -174,6 +177,22 @@ def legend_panel(ax, handles, *, loc="upper left", anchor=(1.01, 1.0)):
     """Place the canonical side legend (right of the axes, frameless). One builder so every variant
     matches. I/O: (ax, list[handle], ...) -> Legend."""
     return ax.legend(handles=handles, loc=loc, bbox_to_anchor=anchor)
+
+
+# -------------------------------------------------------------------- angles ---
+
+def pi_label(deg, *, signed=True):
+    """Format a turn/twist angle in degrees as a multiple of π (standardised across every square
+    analysis figure, replacing raw degree labels). E.g. 180 -> "+1π", -360 -> "-2π",
+    90 -> "+1/2π", 0 -> "0". I/O: (degrees: float) -> str."""
+    frac = Fraction(deg / 180).limit_denominator(12)
+    if frac == 0:
+        return "0"
+    sign = "+" if frac > 0 else "-"
+    frac = abs(frac)
+    body = "π" if frac == 1 else (f"{frac.numerator}/{frac.denominator}π" if frac.denominator != 1
+                                        else f"{frac.numerator}π")
+    return f"{sign}{body}" if signed else body
 
 
 # ----------------------------------------------------------------- verdict -----

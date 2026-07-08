@@ -10,9 +10,10 @@ A record is a stamped, self-contained dict: 3-stack (has "footprint" + "chains",
 sol shape) or 2-stack (has "circuit", from twostack.py's sol shape). Both must carry "uid", "m",
 "n" before being handed here.
 
-Writes <out_dir>/<uid>/<uid>.json (verbatim) + foldsheet_<uid>.png, and for 3-stack 2+1 records
-also twist_<uid>.png (the jump-strand twist-loop diagram; 1+1+1 has no analogous diagram, so it is
-skipped with a printed note).
+Writes <out_dir>/<uid>/<uid>.json (verbatim) + foldsheet_<uid>.png, plus a twist_<uid>.png turn/twist
+analysis diagram: for 3-stack 2+1 records the jump-strand twist-loop diagram (1+1+1 has no
+analogous diagram, so it is skipped with a printed note); for 2-stack records the Hamiltonian
+circuit turn-angle analysis (render_twostack.render_analysis).
 """
 import json
 import os
@@ -65,6 +66,9 @@ def render_record(rec, out_dir, *, title=None):
         foldsheet_path = os.path.join(rec_dir, f"foldsheet_{uid}.png")
         render_twostack.render_foldsheet(rec, m, n, foldsheet_path, title=label)
         produced["foldsheet"] = foldsheet_path
+        twist_path = os.path.join(rec_dir, f"twist_{uid}.png")
+        render_twostack.render_analysis(rec, m, n, twist_path, title=label)
+        produced["twist"] = twist_path
     else:
         raise ValueError(f"record {uid} has neither 'footprint'+'chains' nor 'circuit' -- unknown schema")
     return produced

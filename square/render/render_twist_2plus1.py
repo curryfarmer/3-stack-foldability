@@ -82,8 +82,8 @@ def render_plot(uid, sol, m, n, info, out_path):
     nloop = len(loop)
     BODY, PATH1 = fs.CHAIN[0], fs.CHAIN[1]
 
-    fig, ax = fs.new_grid_axes(m, n, pad=0.5, extra_w=2.6)
-    fs.draw_grid_cells(ax, m, n, checker=True)               # sigma = (-1)^(x+y) tint
+    fig, ax = fs.new_grid_axes(m, n, pad=0.5, extra_w=2.6, ticklabels=False)
+    fs.draw_grid_cells(ax, m, n, checker=True)               # sigma = (-1)^(x+y) red/blue parity tint
     fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
 
     def seg(p, q, color, lw, ls="-", z=4, alpha=1.0):
@@ -126,13 +126,13 @@ def render_plot(uid, sol, m, n, info, out_path):
         sig = 1 if i % 2 else -1
         contrib = sig * gamma
         piv = loop[(i + 1) % nloop]
-        ax.annotate(f"{contrib:+.0f}", (piv[0], piv[1]), textcoords="offset points",
+        ax.annotate(fs.pi_label(contrib), (piv[0], piv[1]), textcoords="offset points",
                     xytext=(4, -10), fontsize=7.5, fontweight="bold",
                     color=fs.POS if contrib > 0 else fs.NEG, zorder=10)
 
     tw = info["tw"]
-    verdict = "FOLD (flat)" if tj.is0(tw) else f"JAM (Tw={tw:+.0f})"
-    ax.set_title(f"{uid}  {m}x{n}   jump-strand loop:  Tw = Σ(σ·γ) = {tw:+.0f}°  →  {verdict}")
+    verdict = "FOLD (flat)" if tj.is0(tw) else f"JAM (Tw={fs.pi_label(tw)})"
+    ax.set_title(f"{uid}  {m}x{n}   jump-strand loop:  Tw = Σ(σ·γ) = {fs.pi_label(tw)}  →  {verdict}")
 
     handles = [
         fs.line_handle(BODY, "2-chain kept strand (body)"),

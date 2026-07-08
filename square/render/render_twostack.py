@@ -77,8 +77,28 @@ def _seg_pts(key):
 
 # ---------------------------------------------------------------- foldsheet ----
 
+def _draw_circuit_path(ax, circuit, color, *, prominent=True):
+    """Overlay the Hamiltonian circuit as a directed loop through cell centres (shared by the
+    foldsheet and the analysis figures so the traversal is visible on every 2-stack render).
+    `prominent=False` draws a thinner/lighter variant for laying on top of an already-busy
+    foldsheet; the analysis figure (where the loop IS the subject) keeps the bold default."""
+    from matplotlib.patches import FancyArrowPatch
+    ctr = lambda c: (c[0] + 0.5, c[1] + 0.5)
+    nc = len(circuit)
+    scale, lw, alpha, ms = (11, 2.0, 1.0, 4.0) if prominent else (9, 1.6, 0.85, 3.0)
+    for i in range(nc):
+        p, q = ctr(circuit[i]), ctr(circuit[(i + 1) % nc])
+        ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=scale,
+                                     color=color, lw=lw, zorder=6, alpha=alpha,
+                                     shrinkA=2, shrinkB=2))
+    for c in circuit:
+        p = ctr(c)
+        ax.plot(p[0], p[1], "o", ms=ms, color=color, zorder=8)
+
+
 def render_foldsheet(sol, m, n, out_path, *, title=None):
-    """Printable 2-stack fold-sheet: creases / slits / boundary / highlighted cut edge + legend."""
+    """Printable 2-stack fold-sheet: creases / slits / boundary / highlighted cut edge + the
+    Hamiltonian circuit path itself (directed loop through cell centres) + legend."""
     circuit = [tuple(c) for c in sol["circuit"]]
     crease = _creases(circuit)
     interior = _interior_edges(m, n)
@@ -101,6 +121,9 @@ def render_foldsheet(sol, m, n, out_path, *, title=None):
         xs, ys = _seg_pts(cut)
         ax.plot(xs, ys, color=fs.JUMP, lw=3.6, solid_capstyle="round", zorder=8)
 
+    PATH_C = fs.CHAIN[0]
+    _draw_circuit_path(ax, circuit, PATH_C, prominent=False)
+
     tw = T2.twist_value(circuit)
     badge, bcolor = fs.verdict_badge(sol.get("verdict", {}).get("foldable"))
     ax.set_title(title or f"2-stack  {m}x{n}", color=fs.INK)
@@ -110,6 +133,7 @@ def render_foldsheet(sol, m, n, out_path, *, title=None):
         fs.line_handle(fs.CUT, "slit (interior cut)", ls=(0, fs.DASH[1])),
         fs.line_handle(fs.BOUNDARY, "cut around boundary", lw=2.4),
         fs.line_handle(fs.JUMP, "cut edge (opens the loop)", lw=3.0),
+        fs.line_handle(PATH_C, "Hamiltonian circuit path"),
     ]
     fs.legend_panel(ax, handles)
     fs.draw_subnotes(ax, [f"twist = {tw:+d}    reflection={'✓' if sol.get('verdict',{}).get('reflection') else '✗'}",
@@ -120,23 +144,18 @@ def render_foldsheet(sol, m, n, out_path, *, title=None):
 # ----------------------------------------------------------------- analysis ----
 
 def render_analysis(sol, m, n, out_path, *, title=None):
-    """2-stack twist analysis: the circuit as a directed loop with per-turn signed contributions."""
+    """2-stack twist analysis: the circuit as a directed loop with per-turn signed contributions,
+    a red/blue tile-parity background, and angles in units of π (standardised with the square
+    track's other analysis figure, render_twist_2plus1.py)."""
     circuit = [tuple(c) for c in sol["circuit"]]
     nc = len(circuit)
     LOOP_C = fs.CHAIN[0]
     ctr = lambda c: (c[0] + 0.5, c[1] + 0.5)                   # cell -> centre
 
-    fig, ax = fs.new_grid_axes(m, n, extra_w=2.6)
-    fs.draw_grid_cells(ax, m, n)
+    fig, ax = fs.new_grid_axes(m, n, extra_w=2.6, ticklabels=False)
+    fs.draw_grid_cells(ax, m, n, checker=True)                 # sigma = (-1)^(x+y) red/blue parity tint
 
-    from matplotlib.patches import FancyArrowPatch
-    for i in range(nc):
-        p, q = ctr(circuit[i]), ctr(circuit[(i + 1) % nc])
-        ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=11,
-                                     color=LOOP_C, lw=2.0, zorder=5, shrinkA=0, shrinkB=0))
-    for c in circuit:
-        p = ctr(c)
-        ax.plot(p[0], p[1], "o", ms=4.0, color=LOOP_C, zorder=8)
+    _draw_circuit_path(ax, circuit, LOOP_C)
 
     # per-vertex signed twist contribution (matches twostack.twist_value: total = sum over odd i
     # of ang minus sum over even i, so contrib_i = +ang if i odd else -ang; turn is at vertex i+1).
@@ -151,7 +170,7 @@ def render_analysis(sol, m, n, out_path, *, title=None):
             continue
         contrib = ang if i % 2 else -ang
         piv = ctr(p2)
-        ax.annotate(f"{contrib:+d}", piv, textcoords="offset points", xytext=(4, -10),
+        ax.annotate(fs.pi_label(contrib), piv, textcoords="offset points", xytext=(4, -10),
                     fontsize=7.5, fontweight="bold", color=fs.POS if contrib > 0 else fs.NEG, zorder=10)
 
     if sol.get("cutEdge"):                                     # mark where the loop is cut open
@@ -160,8 +179,9 @@ def render_analysis(sol, m, n, out_path, *, title=None):
         ax.plot(xs, ys, color=fs.JUMP, lw=3.6, solid_capstyle="round", zorder=9)
 
     tw = T2.twist_value(circuit)
-    verdict = "FOLD (flat)" if tw == 0 else f"JAM (twist={tw:+d})"
-    ax.set_title(title or f"2-stack  {m}x{n}   turn-angle balance:  twist = {tw:+d}°  →  {verdict}")
+    verdict = "FOLD (flat)" if tw == 0 else f"JAM (twist={fs.pi_label(tw)})"
+    stem = title or f"2-stack  {m}x{n}"
+    ax.set_title(f"{stem}   turn-angle balance:  twist = {fs.pi_label(tw)}  →  {verdict}")
 
     handles = [
         fs.line_handle(LOOP_C, "Hamiltonian circuit (fold loop)"),
