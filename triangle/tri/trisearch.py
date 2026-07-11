@@ -23,24 +23,26 @@ K = 4  # chain length on the 2x3 grid (12 triangles / 3)
 
 # ---------- generic triangle walk ----------
 def grow_walks(lat, start, length, free):
-    """All simple triangle walks of `length` cells from `start`, staying inside `free`."""
-    out = []
+    """All simple triangle walks of `length` cells from `start`, staying inside `free`.
 
+    LAZY. This used to accumulate every walk into a list before returning the first one, which on a
+    degree-6 unpruned lattice (honeycomb) is millions of walks held at once -- the census OOMed inside
+    here. Yielding in the same DFS order is bit-identical for every caller (all of them just iterate)
+    but holds one walk at a time."""
     def dfs(walk, used):
         if len(walk) == length:
-            out.append(list(walk))
+            yield list(walk)
             return
         for nb in lat.adj[walk[-1]]:
             if nb in free and nb not in used:
                 used.add(nb)
                 walk.append(nb)
-                dfs(walk, used)
+                yield from dfs(walk, used)
                 walk.pop()
                 used.discard(nb)
 
     if start in free:
-        dfs([start], {start})
-    return out
+        yield from dfs([start], {start})
 
 
 def exit_ok(lat, finals):

@@ -48,20 +48,28 @@ def is_trapezoid(lat, cells):
 
 
 def grow(lat, start, K, blocked):
-    """All simple K-node paths from `start` avoiding `blocked` (a set)."""
-    out = []
-    st = [(start, (start,), frozenset((start,)))]
-    # iterative DFS to keep it fast
+    """All simple K-node paths from `start` avoiding `blocked` (a set).
+
+    LAZY, and with a mutable used-set. The old version accumulated every path into a list AND
+    allocated a fresh tuple + frozenset at each node of the walk; on the honeycomb (degree 6, no
+    parity/reachability prune) that is what OOMed the census. Same DFS order, so every caller -- all
+    of which merely iterate -- sees an identical sequence."""
+    if start in blocked:
+        return
+
     def dfs(last, path, used):
         if len(path) == K:
-            out.append(path)
+            yield tuple(path)
             return
         for nb in lat.adj[last]:
             if nb not in used and nb not in blocked:
-                dfs(nb, path + (nb,), used | {nb})
-    if start not in blocked:
-        dfs(start, (start,), frozenset((start,)))
-    return out
+                used.add(nb)
+                path.append(nb)
+                yield from dfs(nb, path, used)
+                path.pop()
+                used.discard(nb)
+
+    yield from dfs(start, [start], {start})
 
 
 def count_closing(lat, S, back, K, cap=None):

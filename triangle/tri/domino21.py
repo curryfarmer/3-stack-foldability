@@ -56,18 +56,29 @@ def enum_domino_21(lat, S, K, cent=None, time_budget=None, t0=None, stats=None):
     set, start/end footprints, and the path-following reduced-loop twist (`loop`).
 
     `stats`, if given, is a dict this mutates in place with pure counters (no effect on which
-    candidates are yielded or their order): "tried" (raw one_chain candidates considered),
-    "topology_pass" (passed the dual-graph exit_ok check), "closure_pass" (passed the physical
-    closure/foldsim gate -- same count as what's yielded)."""
+    candidates are yielded or their order): "strands" (K-walks of the domino spine), "partner_sets"
+    (injective partner rows offered for those strands), "partner_clean" (partner rows that did not
+    collide with the strand -- i.e. actually form K disjoint dominoes), "tried" (raw one_chain
+    candidates considered), "topology_pass" (passed the dual-graph exit_ok check), "closure_pass"
+    (passed the physical closure/foldsim gate -- same count as what's yielded).
+
+    The first three matter for the 2+1-vs-1+1+1 rarity question: they are mortality the 1+1+1 ladder
+    has no analogue for, and they are paid BEFORE a single one_chain is generated."""
     a, mid, b = S
     all_tiles = set(lat.tris)
     t0 = t0 if t0 is not None else time.time()
     for strand in TS.grow_walks(lat, a, K, all_tiles - {mid, b}):
         sset = set(strand)
+        if stats is not None:
+            stats["strands"] = stats.get("strands", 0) + 1
         for partners in _gen_partners(lat, strand, mid, reserved={b}):
+            if stats is not None:
+                stats["partner_sets"] = stats.get("partner_sets", 0) + 1
             two = sset | set(partners)
             if len(two) != 2 * K:                # partners collided with strand -> not a clean 2-chain
                 continue
+            if stats is not None:
+                stats["partner_clean"] = stats.get("partner_clean", 0) + 1
             free1 = all_tiles - two
             for one_chain in TS.grow_walks(lat, b, K, free1):
                 if stats is not None:

@@ -67,19 +67,22 @@ def routed_paths(lat, start, end, K, blocked, dist_to_end):
     `dist_to_end` = bfs_dist(lat, end). Both prunes are necessary conditions (graph reachability
     lower bound + bipartite parity) so no real closing path is ever discarded. The last node is
     forced to be `end` and `end` may not appear before then.
+
+    LAZY: yields in DFS order rather than accumulating every path into a list. At K=18 the innermost
+    arm enumeration is the bulk of the census's live memory, and holding it all was a large part of
+    what OOMed the sweep. Callers only iterate, so the sequence is identical.
     """
     adj = lat.adj
-    out = []
     if start in blocked:
-        return out
+        return
     d0 = dist_to_end.get(start)
     if d0 is None or d0 > K - 1 or ((K - 1 - d0) & 1):
-        return out
+        return
 
     def dfs(node, path, used):
         if len(path) == K:
             if node == end:
-                out.append(tuple(path))
+                yield tuple(path)
             return
         steps_after = K - 1 - len(path)        # edges from the about-to-be-added node to the end
         for nb in adj[node]:
@@ -97,16 +100,15 @@ def routed_paths(lat, start, end, K, blocked, dist_to_end):
                 continue                       # PRUNE2 bipartite parity
             path.append(nb)
             used.add(nb)
-            dfs(nb, path, used)
+            yield from dfs(nb, path, used)
             path.pop()
             used.discard(nb)
 
-    dfs(start, [start], {start})
-    return out
+    yield from dfs(start, [start], {start})
 
 
 # --------------------------------------------------------------------------- 1+1+1 enumerator
-def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t0=None):
+def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t0=None, stats=None):
     """Yield (pa, pm, pc) for every closing 1+1+1 fold from hub S on ANY reflection tiling.
 
     fast=True (bipartite tilings — equilateral / righttri / scalene): prune END trapezoids by the
@@ -116,7 +118,21 @@ def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t
 
     fast=False (non-bipartite honeycomb — no global sigma, interior mids have degree 6): no sigma
     prune, plain disjoint K-walk DFS, mid-chain unforced (pass back=None). Slower, used at small K.
+
+    `stats`, if given, is mutated in place with the pre-closure funnel stages. These are COUNTERS
+    ONLY — they never change what is yielded. The exit-footprint and parity gates are fused into the
+    enumerator (a candidate failing either is never generated), so without these the funnel cannot be
+    reconstructed downstream:
+      fast path — "exit_fp_all" (END footprints = every trapezoid on the lattice), "exit_fp_parity"
+                  (those surviving the sigma-flip rule), "exit_fp_reach" (those also within reach);
+      slow path — "cand" (raw disjoint K-walk triples), "exit_pass" (those whose END triple is a
+                  trapezoid);
+      both      — "routed" (triples yielded = exit AND parity AND topology).
     """
+    def bump(key, n=1):
+        if stats is not None:
+            stats[key] = stats.get(key, 0) + n
+
     arm1, mid, arm2 = S
     if not fast or sigma is None:
         blk = {arm1, arm2}
@@ -126,7 +142,10 @@ def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t
             for pa in PO.grow(lat, arm1, K, um | {arm2}):
                 ua = um | set(pa)
                 for pc in PO.grow(lat, arm2, K, ua):
+                    bump("cand")
                     if PO.is_trapezoid(lat, [pa[-1], pm[-1], pc[-1]]):
+                        bump("exit_pass")
+                        bump("routed")
                         yield (pa, pm, pc)
             if time_budget and t0 is not None and (time.time() - t0) > time_budget:
                 return
@@ -146,11 +165,14 @@ def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t
     want_arm = mult * sigma(arm1)
     hubs = []
     for (a, m, c) in lat.all_trapezoids():
+        bump("exit_fp_all")
         if sigma(m) != want_mid or sigma(a) != want_arm or sigma(c) != want_arm:
             continue
+        bump("exit_fp_parity")
         dm = dist_mid.get(m)
         if dm is None or dm > K - 1 or ((K - 1 - dm) & 1):
             continue
+        bump("exit_fp_reach")
         hubs.append((a, m, c))
 
     for (eA, eMid, eC) in hubs:
@@ -163,23 +185,22 @@ def enum_111_general(lat, S, back, K, sigma=None, fast=True, time_budget=None, t
             um = set(pm)
             for (ta, tc) in ((eA, eC), (eC, eA)):
                 d_ta = dist_from(ta)
-                armA = routed_paths(lat, arm1, ta, K, um | {arm2}, d_ta)
-                if not armA:
-                    continue
-                d_tc = dist_from(tc)
-                for pa in armA:
+                d_tc = dist_from(tc)      # memoised; the old `if not armA` early-out only skipped
+                                          # this lookup, and armA is now a lazy generator
+                for pa in routed_paths(lat, arm1, ta, K, um | {arm2}, d_ta):
                     ua = um | set(pa)
                     for pc in routed_paths(lat, arm2, tc, K, ua, d_tc):
+                        bump("routed")
                         yield (pa, pm, pc)
         if time_budget and t0 is not None and (time.time() - t0) > time_budget:
             return
 
 
-def enum_111(lat, S, back, K, time_budget=None, t0=None):
+def enum_111(lat, S, back, K, time_budget=None, t0=None, stats=None):
     """Equilateral wrapper for enum_111_general (sigma = TL.sigma); the K-even arms-DOWN/mid-UP
     end filter is exactly the sigma-flip rule, so XVAL behaviour is preserved bit-for-bit."""
     yield from enum_111_general(lat, S, back, K, sigma=TL.sigma, fast=True,
-                                time_budget=time_budget, t0=t0)
+                                time_budget=time_budget, t0=t0, stats=stats)
 
 
 # --------------------------------------------------------------------------- 2+1 enumerator

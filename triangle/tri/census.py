@@ -1,0 +1,345 @@
+"""Store-all K-census over the non-square tilings: every closing candidate, every gate stage.
+
+Replaces the deleted `py/tri/k_stress.py` (commit 0750f15), whose outputs survive under
+`report/tri/k-stress/` but which nothing in the repo could regenerate or extend. Differences:
+
+  * STORE-ALL. Every closing candidate is written to a .jsonl, not a ~30-uid sample. The 2+1 records
+    keep `strand`/`partners`/`one_chain` separately (not fused into `chains`), so the
+    dual-decomposition question -- can this rigid domino ribbon be re-read as two twin monomino
+    chains? -- is answerable later as an offline post-pass with no re-search.
+  * FUNNEL. The per-gate counters are persisted, so "why is 2+1 so much rarer than 1+1+1" can be
+    answered by WHERE candidates die, not just by the surviving count.
+  * PARALLEL. Cells (tiling, decomp, K) are independent -> one process each. The triangle stack had
+    no parallelism at all; the square side has had --jobs for a while.
+  * HONEST TRUNCATION. A cell that hits the wall-clock cap is written with truncated=true rather
+    than silently reported as a smaller exhaustive count. Every K=18 row in the old census is in
+    fact truncated, which is how the published tables drifted from the on-disk ones.
+
+The search itself is NOT reimplemented: this drives find_example.gen_111 / gen_21 / gen_eq, the same
+XVAL-guarded generators the rest of the stack uses, and consumes them to exhaustion instead of
+stopping at the first hit.
+
+Usage:
+    python -m triangle.tri.census --all --jobs 20
+    python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8
+"""
+import argparse
+import gzip
+import json
+import os
+import sys
+import time
+import traceback
+from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+from . import find_example as FE
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+OUTDIR = os.path.join(REPO, "results", "census")
+
+TILINGS = ["equilateral", "righttri", "scalene", "hex"]
+DECOMPS = ["1plus1plus1", "2plus1"]
+
+CAP_SEC = 3600.0          # per-cell wall-clock ceiling; overrun -> truncated=true
+# Per-cell resident-memory ceiling. Measured peaks with the lazy enumerators are ~165 MB for the
+# heaviest cell (scalene 1+1+1 K=18, 108572 closers) and 64 MB for the honeycomb cell that used to
+# exhaust the machine, so 1 GB is ~6x headroom. Concurrency is derived from this (see safe_jobs), so
+# do not inflate it "to be safe" -- that just throttles the sweep.
+CAP_RSS_MB = 1024
+CAP_RECORDS = 2_000_000   # per-cell record ceiling; overrun -> truncated=true (disk guard)
+CHECK_EVERY = 2000        # records between resource checks (RSS polling is not free)
+
+# 2+1 START hubs to sweep. A "hub" is a distinct start trapezoid -- a different mid tile AND/OR a
+# different arm pair -- so hubs are genuinely different starting configurations, not translations of
+# one. A single hub yields only ~1 distinct foldable 2+1 region, which is why gen_testset._gen_for
+# sweeps 8; the census matches that so its counts are comparable with the prior k-stress tables.
+# (1+1+1 has no analogue: its start hub is fixed by build_ambient_*, selected by the --hub variant.)
+HUBS_21 = 8
+
+# Funnel stages, in gate order, per decomposition. The two ladders are not identical -- 1+1+1 fuses
+# the exit-footprint and parity gates into the enumerator (a candidate failing either is never
+# generated) whereas 2+1 tests exit_ok on a materialised triple -- so they are reported separately
+# and only the shared tail (closure -> twist) is compared directly.
+FUNNEL_111 = ["exit_fp_all", "exit_fp_parity", "exit_fp_reach", "cand", "exit_pass",
+              "routed", "closure_pass"]
+FUNNEL_21 = ["strands", "partner_sets", "partner_clean", "tried", "topology_pass", "closure_pass"]
+
+
+def _rss_mb():
+    """Resident memory of THIS process, in MB. Returns 0.0 if it cannot be read (guard then no-ops).
+
+    The census OOMed the machine outright on its first run: the walk enumerators used to materialise
+    every path into a list, and 20 workers doing that on the honeycomb exhausted RAM. The enumerators
+    are lazy now, but a hard per-worker ceiling is the thing that turns "the box dies" into "one cell
+    is marked truncated", so it stays regardless."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        class PMC(ctypes.Structure):
+            _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        # argtypes are NOT optional here: without them ctypes marshals the pseudo-handle (-1) as a
+        # 32-bit int on a 64-bit build, the call fails, and the guard silently reports 0 MB forever.
+        gpmi = ctypes.windll.psapi.GetProcessMemoryInfo
+        gpmi.argtypes = [wt.HANDLE, ctypes.POINTER(PMC), wt.DWORD]
+        gpmi.restype = wt.BOOL
+        cur = ctypes.windll.kernel32.GetCurrentProcess
+        cur.restype = wt.HANDLE
+
+        pmc = PMC()
+        pmc.cb = ctypes.sizeof(PMC)
+        if gpmi(cur(), ctypes.byref(pmc), pmc.cb):
+            return pmc.WorkingSetSize / (1024.0 * 1024.0)
+    except Exception:
+        pass
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    except Exception:
+        return 0.0
+
+
+def _norm(cand, decomp):
+    """One yielded candidate -> a flat JSON record. gen_eq wraps its payload in `rec`; gen_111 and
+    gen_21 are already flat. Tile ids are tuples/lists depending on the lattice -> coerce to lists."""
+    def tiles(seq):
+        return [list(t) for t in seq]
+
+    if decomp == "2plus1":
+        return {
+            "strand": tiles(cand["strand"]),
+            "partners": tiles(cand["partners"]),
+            "one_chain": tiles(cand["one_chain"]),
+            "two_tris": tiles(cand["two_tris"]),
+            "footprint": tiles(cand["footprint"]),
+            "end_footprint": tiles(cand["end_footprint"]),
+            "tw": cand["tw"],
+            "foldable": bool(cand["foldable"]),
+        }
+    rec = cand.get("rec")                       # equilateral 1+1+1 comes through gen_eq
+    if rec is not None:
+        return {
+            "chains": [tiles(c) for c in rec["chains"]],
+            "footprint": tiles(rec["footprint"]),
+            "end_footprint": tiles(rec["end_footprint"]),
+            "tw": rec["tw"],
+            "foldable": bool(rec["foldable"]),
+            "holes": rec.get("holes"),
+        }
+    return {
+        "chains": [tiles(c) for c in cand["chains"]],
+        "footprint": tiles(cand["footprint"]),
+        "end_footprint": tiles(cand["end_footprint"]),
+        "tw": cand["tw"],
+        "foldable": bool(cand["foldable"]),
+    }
+
+
+def run_cell(tiling, decomp, K, cap=CAP_SEC, outdir=OUTDIR, hubs=HUBS_21,
+             cap_rss=CAP_RSS_MB, cap_records=CAP_RECORDS):
+    """Exhaust one (tiling, decomp, K) cell. Returns the summary dict; writes .jsonl.gz + .summary.json.
+
+    A cell stops early -- truncated=true, never a silent short count -- on any of three ceilings:
+    wall clock (`cap`), resident memory (`cap_rss`), or records written (`cap_records`). The reason
+    is recorded in `stop`."""
+    t0 = time.time()
+    stats = Counter({"tried": 0, "topology_pass": 0, "closure_pass": 0, "holes_filtered": 0})
+
+    if decomp == "2plus1":
+        # equilateral 2+1 routes here too (gen_eq delegates to gen_21 for the unified domino model),
+        # but gen_eq's signature has no `hubs`, so call gen_21 directly to sweep them.
+        lat, it = FE.gen_21(tiling, K, hubs=hubs, stats=stats, budget=cap, t0=t0)
+    elif tiling == "equilateral":
+        lat, it = FE.gen_eq(decomp, K, stats=stats, budget=cap, t0=t0)
+    else:
+        lat, it = FE.gen_111(tiling, K, hub=None, stats=stats, budget=cap, t0=t0)
+
+    os.makedirs(outdir, exist_ok=True)
+    stem = "%s_%s_K%d" % (tiling, decomp, K)
+    jsonl_path = os.path.join(outdir, stem + ".jsonl.gz")
+
+    closing = tw0 = 0
+    spectrum = Counter()
+    truncated = False
+    stop = None
+    peak_rss = _rss_mb()
+    # gzip: the first sweep put 900 MB on disk before it died, most of it in three K=18 cells. These
+    # records are highly repetitive tile ids, so gzip is ~10x and costs little against the DFS.
+    with gzip.open(jsonl_path, "wt") as fh:
+        for cand in it:
+            closing += 1
+            rec = _norm(cand, decomp)
+            key = tuple(rec["tw"]) if isinstance(rec["tw"], list) else rec["tw"]
+            spectrum[str(key)] += 1
+            if rec["foldable"]:
+                tw0 += 1
+            fh.write(json.dumps(rec) + "\n")
+
+            if closing % CHECK_EVERY:
+                continue
+            rss = _rss_mb()
+            peak_rss = max(peak_rss, rss)
+            if rss > cap_rss:
+                truncated, stop = True, "rss>%dMB" % cap_rss
+            elif closing >= cap_records:
+                truncated, stop = True, "records>=%d" % cap_records
+            elif (time.time() - t0) > cap:
+                truncated, stop = True, "time>%.0fs" % cap
+            if truncated:
+                break
+
+    # The ENUMERATORS honour `cap` internally and simply stop yielding when they hit it. From the
+    # consumer side that is indistinguishable from a finished enumeration -- so a cut-off cell would
+    # otherwise be written out as an exhaustive census with a short count. That is exactly the silent
+    # truncation that corrupted the previous k-stress tables. If we got anywhere near the cap, say so.
+    dt = time.time() - t0
+    if not truncated and dt >= cap * 0.98:
+        truncated, stop = True, "time>%.0fs (enumerator cut)" % cap
+
+    summary = {
+        "tiling": tiling, "decomp": decomp, "K": K,
+        "closing": closing, "tw0": tw0,
+        "truncated": truncated, "stop": stop, "dt": round(dt, 1),
+        "peak_rss_mb": round(peak_rss),
+        "funnel": {k: stats[k] for k in (FUNNEL_21 if decomp == "2plus1" else FUNNEL_111)},
+        "spectrum": dict(spectrum),
+        "jsonl": os.path.relpath(jsonl_path, REPO),
+    }
+    with open(os.path.join(outdir, stem + ".summary.json"), "w") as fh:
+        json.dump(summary, fh, indent=2)
+    return summary
+
+
+def _worker(cell):
+    tiling, decomp, K, cap, outdir, hubs, cap_rss, cap_records = cell
+    try:
+        return run_cell(tiling, decomp, K, cap=cap, outdir=outdir, hubs=hubs,
+                        cap_rss=cap_rss, cap_records=cap_records)
+    except MemoryError:
+        # one cell exhausting RAM must not take the sweep (or the machine) down with it
+        return {"tiling": tiling, "decomp": decomp, "K": K, "closing": 0, "tw0": 0,
+                "truncated": True, "stop": "MemoryError", "dt": 0, "peak_rss_mb": None,
+                "funnel": {}, "spectrum": {}, "jsonl": None}
+    except Exception:
+        return {"tiling": tiling, "decomp": decomp, "K": K, "error": traceback.format_exc()}
+
+
+def safe_jobs(requested, cap_rss=CAP_RSS_MB, headroom_mb=4096):
+    """Cap concurrency by RAM, not by core count. Peak sweep memory is roughly jobs x cap_rss, so on a
+    24-core box `--jobs 20` at 3 GB/cell wants 60 GB and the machine dies -- which is exactly what
+    happened on the first run. Leave `headroom_mb` for the OS and everything else."""
+    try:
+        import ctypes
+
+        class MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        ms = MS()
+        ms.dwLength = ctypes.sizeof(MS)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms))
+        avail_mb = ms.ullAvailPhys / (1024.0 * 1024.0)
+    except Exception:
+        return requested                       # cannot measure -> trust the operator
+    budget = max(1, int((avail_mb - headroom_mb) // cap_rss))
+    return max(1, min(requested, budget))
+
+
+def plan_cells(tilings, decomps, kmin, kmax, cap, outdir, even_111=True, hubs=HUBS_21,
+               cap_rss=CAP_RSS_MB, cap_records=CAP_RECORDS):
+    """1+1+1 is enumerated at EVEN K only by default: the k-even criterion puts every flat fold at
+    even sub-chain length, and the big 1+1+1 cells are the expensive ones. 2+1 is enumerated at
+    every K -- it is cheap (tens of closers per family, all K combined) and the on-disk scalene 2+1
+    census records flat folds at K=11, which an even-only sweep would silently miss."""
+    cells = []
+    for t in tilings:
+        for d in decomps:
+            for K in range(kmin, kmax + 1):
+                if d == "1plus1plus1" and even_111 and K % 2:
+                    continue
+                cells.append((t, d, K, cap, outdir, hubs, cap_rss, cap_records))
+    # biggest-first: long cells start early so they overlap the short tail
+    cells.sort(key=lambda c: (-c[2], c[0]))
+    return cells
+
+
+def main():
+    ap = argparse.ArgumentParser(description="store-all K-census over the non-square tilings")
+    ap.add_argument("--tiling", action="append", choices=TILINGS)
+    ap.add_argument("--decomp", action="append", choices=DECOMPS)
+    ap.add_argument("--kmin", type=int, default=3)
+    ap.add_argument("--kmax", type=int, default=18)
+    ap.add_argument("--cap", type=float, default=CAP_SEC, help="per-cell wall-clock ceiling (s)")
+    ap.add_argument("--cap-rss", type=int, default=CAP_RSS_MB, dest="cap_rss",
+                    help="per-cell resident-memory ceiling (MB); overrun -> truncated, not OOM")
+    ap.add_argument("--cap-records", type=int, default=CAP_RECORDS, dest="cap_records",
+                    help="per-cell record ceiling (disk guard)")
+    ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 4))
+    ap.add_argument("--outdir", default=OUTDIR)
+    ap.add_argument("--hubs", type=int, default=HUBS_21,
+                    help="2+1 start hubs to sweep (default %d, matching the prior census)" % HUBS_21)
+    ap.add_argument("--all-K-111", action="store_true",
+                    help="also enumerate 1+1+1 at odd K (default: even K only)")
+    ap.add_argument("--all", action="store_true", help="every tiling x every decomp")
+    args = ap.parse_args()
+
+    tilings = args.tiling or (TILINGS if args.all else None)
+    decomps = args.decomp or (DECOMPS if args.all else None)
+    if not tilings or not decomps:
+        ap.error("give --tiling/--decomp, or --all")
+
+    cells = plan_cells(tilings, decomps, args.kmin, args.kmax, args.cap, args.outdir,
+                       even_111=not args.all_K_111, hubs=args.hubs,
+                       cap_rss=args.cap_rss, cap_records=args.cap_records)
+    jobs = safe_jobs(args.jobs, cap_rss=args.cap_rss)
+    if jobs < args.jobs:
+        print("jobs %d -> %d (RAM-capped: %d jobs x %d MB would not fit)"
+              % (args.jobs, jobs, args.jobs, args.cap_rss), flush=True)
+    print("census: %d cells, %d jobs, caps %.0fs / %dMB / %d recs per cell -> %s"
+          % (len(cells), jobs, args.cap, args.cap_rss, args.cap_records,
+             os.path.relpath(args.outdir, REPO)), flush=True)
+
+    done = []
+    with ProcessPoolExecutor(max_workers=jobs) as ex:
+        futs = {ex.submit(_worker, c): c for c in cells}
+        for fut in as_completed(futs):
+            s = fut.result()
+            done.append(s)
+            if "error" in s:
+                print("  ERROR %s %s K=%d\n%s" % (s["tiling"], s["decomp"], s["K"], s["error"]),
+                      flush=True)
+                continue
+            print("  %-12s %-12s K=%-2d closing=%-7d tw0=%-6d %-22s (%.0fs, %sMB)"
+                  % (s["tiling"], s["decomp"], s["K"], s["closing"], s["tw0"],
+                     ("TRUNCATED " + s["stop"]) if s["truncated"] else "exhaustive",
+                     s["dt"], s["peak_rss_mb"]), flush=True)
+
+    ok = [s for s in done if "error" not in s]
+    ok.sort(key=lambda s: (s["tiling"], s["decomp"], s["K"]))
+    index = os.path.join(args.outdir, "index.json")
+    with open(index, "w") as fh:
+        json.dump({"cells": ok, "errors": [s for s in done if "error" in s]}, fh, indent=2)
+    print("\n%d/%d cells ok, %d truncated -> %s"
+          % (len(ok), len(done), sum(1 for s in ok if s["truncated"]),
+             os.path.relpath(index, REPO)), flush=True)
+    return 0 if len(ok) == len(done) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

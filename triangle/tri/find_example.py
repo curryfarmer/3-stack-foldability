@@ -134,11 +134,15 @@ def central_hubs(lat, interior_deg, n):
 
 
 # --------------------------------------------------------------------------- enumerators
-def gen_111(tiling, K, hub, stats=None):
+def gen_111(tiling, K, hub, stats=None, budget=None, t0=None):
     """(lat, iterator of cand) for a general 1+1+1 case (righttri/scalene/hex).
 
     `stats`, if given, is mutated in place with "tried" (raw pairwise-enumerated candidates) and
-    "closure_pass" (passed reflection_closes_111 -- same count as what's yielded)."""
+    "closure_pass" (passed reflection_closes_111 -- same count as what's yielded), plus the
+    pre-closure stages counted inside enum_111_general (see its docstring).
+
+    `budget`/`t0`, if given, cap the ENUMERATOR itself (wall-clock seconds since t0). Without this a
+    cell that spends hours in the DFS without yielding cannot be interrupted from the consumer loop."""
     g = GEN[tiling]
     if tiling == "righttri":
         lat, S, back = RT.build_ambient_right(K, hub=hub or "HL")
@@ -159,7 +163,8 @@ def gen_111(tiling, K, hub, stats=None):
     twsig = "path"
 
     def it():
-        for (pa, pm, pc) in SF.enum_111_general(lat, S, back, K, sigma=sig, fast=fast):
+        for (pa, pm, pc) in SF.enum_111_general(lat, S, back, K, sigma=sig, fast=fast, stats=stats,
+                                                time_budget=budget, t0=t0):
             if stats is not None:
                 stats["tried"] += 1
             chains = [list(pa), list(pm), list(pc)]
@@ -178,7 +183,7 @@ def gen_111(tiling, K, hub, stats=None):
     return lat, it()
 
 
-def gen_21(tiling, K, hubs=1, stats=None):
+def gen_21(tiling, K, hubs=1, stats=None, budget=None, t0=None):
     """(lat, iterator of cand) for a general 2+1 case (equilateral/righttri/scalene/hex). `hubs` = how
     many distinct central start trapezoids to enumerate from (1 = the single most-central hub, the
     single-example default; gen_testset passes more so a 2nd distinct foldable region can surface).
@@ -197,10 +202,16 @@ def gen_21(tiling, K, hubs=1, stats=None):
 
     def it():
         for S in hub_list:
-            for sol in D21.enum_domino_21(lat, S, K, cent=g["cent"], stats=stats):
+            for sol in D21.enum_domino_21(lat, S, K, cent=g["cent"], stats=stats,
+                                          time_budget=budget, t0=t0):
                 r = sol["loop"]
                 tw = round(r["Tw"], 3)
                 yield {"decomp": "2plus1", "chains": [sol["strand"], sol["one_chain"]],
+                       # strand/one_chain are also kept under their own keys: `chains` fuses the
+                       # domino's two halves into one entry, but the dual-decomposition test (can this
+                       # rigid domino ribbon be re-read as two twin monomino chains?) needs the strand
+                       # and its partner row separately. See census.py / dual_decomp.
+                       "strand": sol["strand"], "one_chain": sol["one_chain"],
                        "partners": sol["partners"], "two_tris": sol["two_tris"],
                        "footprint": sol["footprint"], "end_footprint": sol["end_footprint"],
                        "region": set(sol["two_tris"]) | set(sol["one_chain"]), "tw": tw,
@@ -208,15 +219,16 @@ def gen_21(tiling, K, hubs=1, stats=None):
     return lat, it()
 
 
-def gen_eq(decomp, K, stats=None):
+def gen_eq(decomp, K, stats=None, budget=None, t0=None):
     """(lat, iterator of cand) for equilateral; reuses solve_foldable records (carry rec for SF render).
 
-    `stats`, if given, is mutated/threaded the same way as gen_111/gen_21 (see their docstrings)."""
+    `stats`/`budget`/`t0` are threaded the same way as gen_111/gen_21 (see their docstrings)."""
     if decomp == "1plus1plus1":
         lat, S, back = PO.build_ambient(K)
 
         def it():
-            for (pa, pm, pc) in SF.enum_111(lat, S, back, K):
+            for (pa, pm, pc) in SF.enum_111(lat, S, back, K, stats=stats,
+                                            time_budget=budget, t0=t0):
                 if stats is not None:
                     stats["tried"] += 1
                 if not FC.reflection_closes_111(lat, [list(pa), list(pm), list(pc)]):
@@ -231,7 +243,7 @@ def gen_eq(decomp, K, stats=None):
     # 2+1: unified onto the general domino model (the legacy rhombus enum_21 used an incompatible
     # footprint convention — its trapezoid `mid` is a bridge tile outside the region — and its
     # rhombus-diagonal-as-crease over-folded the rigid domino). gen_21 + foldsim is the correct path.
-    return gen_21("equilateral", K, stats=stats)
+    return gen_21("equilateral", K, stats=stats, budget=budget, t0=t0)
 
 
 def build_lat(tiling, decomp, K):
