@@ -83,7 +83,7 @@ def _draw_unfolded(ax, lat, cand, tile_cart, vcart, crease):
         if (pe[0] - ps[0]) ** 2 + (pe[1] - ps[1]) ** 2 < 1e-9:
             continue                                       # already coincident (short chain) -> no arrow
         ax.add_patch(FancyArrowPatch(pe, ps, arrowstyle="-|>", mutation_scale=13, lw=1.5,
-                                     color=ARROW_COL, zorder=7, shrinkA=7, shrinkB=7,
+                                     color=ARROW_COL, zorder=10, shrinkA=7, shrinkB=7,
                                      connectionstyle="arc3,rad=0.16", alpha=0.85))
     ax.set_title("unfolded sheet — creases (brown) = mirror axes;\narrows: END footprint reflects onto START",
                  fontsize=9, color="#444")

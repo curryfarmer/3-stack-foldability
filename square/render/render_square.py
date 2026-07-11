@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # square/ on path
 import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 import figstyle as fs                                            # noqa: E402
+import twist_jump as tj                                          # noqa: E402  (real per-step replay)
 
 _verdict_line = fs.verdict_line                                  # back-compat alias (gate ✓/✗/– line)
 
@@ -38,7 +39,9 @@ def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
         base = fs.cells(ch.get("baseCells", []))
         fs.draw_base_cells(ax, base, color, letter)
         arrows = ch.get("foldArrows", [])
-        fs.draw_fold_arrows(ax, base, arrows, color)
+        placements = tj.replay(ch.get("baseCells", []), arrows, m, n)
+        path = tj.strand_path(placements, 0)
+        fs.draw_fold_path(ax, path, color)
         chain_notes.append(f"{letter} ({ch.get('kind', '?')}): {'→'.join(arrows) or '·'}")
 
     ax.set_title(title or "", color=fs.INK)

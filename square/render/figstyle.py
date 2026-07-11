@@ -20,7 +20,7 @@ from fractions import Fraction
 import matplotlib
 matplotlib.use("Agg")                          # headless: no display; set before pyplot import
 import matplotlib.pyplot as plt                # noqa: E402
-from matplotlib.patches import Rectangle, FancyArrow, Patch  # noqa: E402
+from matplotlib.patches import Rectangle, FancyArrowPatch, Patch  # noqa: E402
 from matplotlib.lines import Line2D            # noqa: E402
 
 # ------------------------------------------------------------------ palette ----
@@ -143,22 +143,15 @@ def draw_base_cells(ax, base, color, letter):
                 fontsize=12, fontweight="bold", zorder=6)
 
 
-def draw_fold_arrows(ax, base, arrows, color):
-    """Fan a chain's L/R/U/D fold sequence out from its base centroid (skips empty base / unknown
-    dirs). I/O: (ax, list[(x,y)], list[str], color) -> None."""
-    if not base:
-        return
-    cx = sum(x for x, _ in base) / len(base) + 0.5
-    cy = sum(y for _, y in base) / len(base) + 0.5
-    for k, a in enumerate(arrows):
-        dx, dy = ARROW.get(a, (0, 0))
-        if (dx, dy) == (0, 0):
-            continue
-        off = 0.12 * (k - (len(arrows) - 1) / 2)    # fan so multiple arrows don't overlap
-        ax.add_patch(FancyArrow(cx + (off if dx == 0 else 0), cy + (off if dy == 0 else 0),
-                                dx * 0.34, dy * 0.34, width=0.015, head_width=0.16,
-                                head_length=0.12, length_includes_head=True,
-                                color=color, zorder=7, alpha=0.9))
+def draw_fold_path(ax, path, color):
+    """Draw a chain's true per-step fold path (real cell-center positions, e.g. from
+    twist_jump.strand_path — physically replayed, not a fan) as a connected polyline with
+    per-segment arrowheads. I/O: (ax, list[(x,y)], color) -> None."""
+    for p, q in zip(path, path[1:]):
+        ax.plot([p[0], q[0]], [p[1], q[1]], color=color, lw=1.6, zorder=6, alpha=0.85,
+                solid_capstyle="round")
+        ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=10,
+                                     color=color, lw=0, zorder=7))
 
 
 # ------------------------------------------------------------------ legend -----
