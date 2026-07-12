@@ -4,11 +4,20 @@ Same machinery as the square engine (py/search.py _pair_loop_twist, py/twostack.
 walk a closed centroid loop, take the doubled signed turn gamma = 2*turn at each vertex, and form
 the sigma-weighted sum Tw = sum sigma(v) * gamma(v). Foldable <=> Tw = 0.
 
-Two things make the square framework port verbatim:
-  - sigma is the bipartite up/down 2-coloring (UP=+1, DOWN=-1); every dual step flips it, so
-    sigma-parity == index-parity along any walk (same as the square checkerboard along a unit walk).
-  - turns are multiples of 60 deg, so gamma is a multiple of 120 and a closed loop's Tw is a
-    multiple of 360 (the triangle analog of "no 936 pathology").
+What sigma is (Yang-You-Rosen 2025, Def 4.2 eq 5): the sign is assigned by POSITION along the closed
+kinematic chain -- +1 on odd-index folds (i = 1, 3, ..., 2n-1), -1 on even-index folds. That is
+index-parity along the walk, NOT a property of the tile. path_sigma() implements it literally, and
+their reference notwist.py does the same (bucket gamma by i % 2, test sum(odd) - sum(even) == 0).
+
+The bipartite up/down tile 2-coloring (TL.sigma, UP=+1/DOWN=-1) is a DERIVED shortcut, not the
+definition: on a proper single walk whose tile colors strictly alternate, every dual step flips the
+color, so the tile-coloring happens to equal YYR's index-parity. It stops being valid where that
+alternation breaks -- on the non-bipartite honeycomb (no global tid->+-1 exists) and on a spliced
+pairwise loop chainA + reversed(chainB) (not one proper walk; the join defeats the alternation and
+the tile-coloring reads a spurious Tw=0). Use path_sigma there -- that IS applying YYR as written.
+
+Turns are multiples of 60 deg, so gamma is a multiple of 120 and a closed loop's Tw is a multiple
+of 360 (the triangle analog of "no 936 pathology").
 """
 import math
 import os
@@ -29,9 +38,10 @@ def signed_turn_deg(p1, p2, p3):
 
 
 def path_sigma(n):
-    """Path-following sigma: +1,-1,+1,... by loop INDEX (not by a global 2-coloring). On a
-    non-bipartite tiling (honeycomb faces) no universal tid->+-1 exists, so the foldability sigma
-    must alternate along the walk itself; feeding this sequence to loop_twist makes Tw == Tw_index."""
+    """YYR's sigma as written (Def 4.2 eq 5): +1,-1,+1,... by loop INDEX. This is the DEFINITION,
+    not a fallback -- the tile-coloring is the shortcut (see module docstring). On a non-bipartite
+    tiling (honeycomb faces) no universal tid->+-1 exists, so index-parity is the only well-defined
+    sigma; feeding this sequence to loop_twist makes Tw == Tw_index."""
     return [1 if k % 2 == 0 else -1 for k in range(n)]
 
 
