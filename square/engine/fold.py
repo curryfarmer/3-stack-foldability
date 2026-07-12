@@ -161,7 +161,8 @@ def reflection_verdict(chains):
         imgI = _seg_director(seg_i, _reflect_cell_through(Pi, chain_i))
         imgJ = _seg_director(seg_j, _reflect_cell_through(Pj, chain_j))
         coince = _seg_key(seg_i) == _seg_key(seg_j)
-        pairs.append({"i": i, "j": j, "Pi": Pi, "Pj": Pj, "imgI": imgI, "imgJ": imgJ, "pass": coince})
+        pairs.append({"i": i, "j": j, "Pi": Pi, "Pj": Pj, "imgI": imgI, "imgJ": imgJ,
+                      "segI": seg_i, "segJ": seg_j, "pass": coince})
         if not coince:
             ok = False
     return {"pass": ok, "pairs": pairs}

@@ -134,6 +134,15 @@ def draw_footprint(ax, fp_cells, *, letters=None):
                     color=FOOTPRINT_EDGE, fontsize=11, fontweight="bold", zorder=10)
 
 
+def draw_end_footprint(ax, fp_cells):
+    """Outline the ENDING footprint (each chain's terminal placement cells, unioned) — dashed purple
+    so it reads as the far end of the fold path, distinct from the solid starting footprint.
+    I/O: (ax, list[(x,y)]) -> None."""
+    for (x, y) in cells(fp_cells):
+        ax.add_patch(Rectangle((x, y), 1, 1, facecolor="none", edgecolor=FOOTPRINT_EDGE,
+                               lw=FP_LW, ls=DASH, zorder=5))
+
+
 def draw_base_cells(ax, base, color, letter):
     """Tint a chain's base cells + drop its letter at each. I/O: (ax, list[(x,y)], color, str)."""
     for (x, y) in base:
@@ -152,6 +161,31 @@ def draw_fold_path(ax, path, color):
                 solid_capstyle="round")
         ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=10,
                                      color=color, lw=0, zorder=7))
+
+
+REFLECTION_SPLIT = 0.045    # perpendicular offset of each chain's half-arrow off the shared centerline
+
+
+def draw_reflection(ax, seed, segs, passed):
+    """Overlay the reflection gate for one shared-crease pair. The seed crease is drawn as one
+    directed arrow (tinted by pass/fail — this IS the crease arrow in the starting foldsheet, oriented
+    per Fold._crease_segment's +x/+y tangent convention). Each chain's reflected image segment
+    (Fold.reflection_verdict's own segI/segJ — coincident on PASS) is drawn as a short half-width arrow
+    offset to its own side of the centerline, so both chains stay visible instead of one hiding the
+    other when they land on the identical segment.
+    segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)). I/O: (ax, seg, list, bool) -> None."""
+    badge = FOLD_BADGE if passed else JAM_BADGE
+    ax.add_patch(FancyArrowPatch(seed[0], seed[1], arrowstyle="-|>", mutation_scale=13,
+                                 lw=3.0, color=badge, zorder=8, alpha=0.9))
+    n = len(segs)
+    for k, (color, (p, q)) in enumerate(segs):
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        perp = (-dy, dx)                                    # unit perp (segs are axis-aligned, unit length)
+        off = REFLECTION_SPLIT * (2 * k - (n - 1))          # spread each half to its own side, symmetric
+        pk = (p[0] + perp[0] * off, p[1] + perp[1] * off)
+        qk = (q[0] + perp[0] * off, q[1] + perp[1] * off)
+        ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=9, lw=1.8,
+                                     color=color, ls=DASH, zorder=9, alpha=0.95))
 
 
 # ------------------------------------------------------------------ legend -----
