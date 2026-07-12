@@ -150,45 +150,50 @@ def scan(tilings, census=CENSUS, verbose=False):
         if tiling not in tilings:
             continue
         K = int(ktag[1:])
-        with gzip.open(os.path.join(census, path), "rt") as fh:
-            recs = [json.loads(ln) for ln in fh if ln.strip()]
-        if not recs:
-            continue
         lat = FE.build_lat(tiling, decomp, K)
 
-        n = len(recs)
-        fold = sum(1 for r in recs if r["foldable"])
-        convertible = dual = 0
-        runs = []            # the PARTIAL statistic: longest parallel/walk stretch, per record
-        for r in recs:
-            if decomp == "2plus1":
-                partners = [_t(x) for x in r["partners"]]
-                runs.append(path_run(lat, partners))
-                s = split_21_to_111(lat, tiling, r)
-                if s is None:
+        # STREAM. The biggest cell holds 2,000,000 records; materialising them (and a per-record run
+        # list) is hundreds of MB to GBs for no reason. Accumulate scalars + a run histogram instead.
+        n = fold = convertible = dual = 0
+        run_sum = run_max = run_max_fold = run_half = 0
+        with gzip.open(os.path.join(census, path), "rt") as fh:
+            for line in fh:
+                if not line.strip():
                     continue
-                convertible += 1
-                if r["foldable"] and s["foldable_111"]:
-                    dual += 1
-            else:
-                A, B, C = ([_t(x) for x in c] for c in r["chains"])
-                runs.append(max(lockstep_run(lat, A, B), lockstep_run(lat, C, B)))
-                ms = merge_111_to_21(lat, tiling, r)
-                if not ms:
-                    continue
-                convertible += 1
-                if r["foldable"] and any(m["foldable_21"] for m in ms):
-                    dual += 1
+                r = json.loads(line)
+                n += 1
+                foldable = r["foldable"]
+                fold += bool(foldable)
 
-        # how far along the chain the two readings agree: full run == K means fully convertible
-        fold_runs = [ru for ru, r in zip(runs, recs) if r["foldable"]]
+                if decomp == "2plus1":
+                    run = path_run(lat, [_t(x) for x in r["partners"]])
+                    s = split_21_to_111(lat, tiling, r)
+                    ok = s is not None and foldable and s["foldable_111"]
+                    convertible += s is not None
+                else:
+                    A, B, C = ([_t(x) for x in c] for c in r["chains"])
+                    run = max(lockstep_run(lat, A, B), lockstep_run(lat, C, B))
+                    ms = merge_111_to_21(lat, tiling, r)
+                    ok = bool(ms) and foldable and any(m["foldable_21"] for m in ms)
+                    convertible += bool(ms)
+                dual += bool(ok)
+
+                run_sum += run
+                run_max = max(run_max, run)
+                if foldable:
+                    run_max_fold = max(run_max_fold, run)
+                if run * 2 >= K:
+                    run_half += 1
+        if not n:
+            continue
+
         rows.append(dict(
             tiling=tiling, decomp=decomp, K=K, n=n, fold=fold,
             convertible=convertible, dual=dual,
-            run_max=max(runs) if runs else 0,
-            run_mean=round(sum(runs) / len(runs), 2) if runs else 0,
-            run_max_fold=max(fold_runs) if fold_runs else 0,
-            run_half=sum(1 for ru in runs if ru * 2 >= K),   # parallel over >= half the chain
+            run_max=run_max,
+            run_mean=round(run_sum / n, 2),
+            run_max_fold=run_max_fold,
+            run_half=run_half,          # parallel over >= half the chain
         ))
         if verbose:
             print("  %-12s %-12s K=%-2d n=%-6d fold=%-5d conv=%-5d dual=%-4d "

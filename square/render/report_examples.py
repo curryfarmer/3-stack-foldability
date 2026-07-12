@@ -237,16 +237,18 @@ def model_b_strip(sol, out_path):
 
 # --------------------------------------------------- census: 2+1 vs 1+1+1 ----
 
-# Right-triangle (tetrakis) flat-fold counts per sub-chain length N_t, from the published density
-# census (docs/research/FINDINGS_nonsquare_2026-07.md §2). Both decompositions live on this tiling,
-# so it is the clean single-tiling contrast. '>=' floors are marked with the `floor` flag.
-RIGHTTRI_2P1 = {4: 5, 6: 2, 8: 4, 10: 0, 12: 0, 14: 0, 16: 0}
-RIGHTTRI_111 = {4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 14: 40, 16: 931}
-FLOOR_111 = {16}    # 931 is a >= floor (per-K time budget)
+# Right-triangle (tetrakis) flat-fold counts per sub-chain length N_t, from the EXHAUSTIVE store-all
+# census (results/census/, driver triangle/tri/census.py; tables in
+# docs/research/FINDINGS_nonsquare_2026-07.md §5.0). Both decompositions live on this tiling, so it is
+# the clean single-tiling contrast. Every cell below ran to exhaustion — no time-budget floors, which
+# is why the old '>= 931' at N_t=16 is now an exact 953 and N_t=18 exists at all.
+RIGHTTRI_2P1 = {4: 5, 6: 2, 8: 4, 10: 0, 12: 0, 14: 0, 16: 0, 18: 0}
+RIGHTTRI_111 = {4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 14: 40, 16: 953, 18: 18936}
+FLOOR_111 = set()   # exhaustive: no '>=' floors
 
 
 def census_count_vs_nt(out_path):
-    """Grouped log-bar chart: right-triangle flat-fold count vs N_t for 2+1 (bounded, dies by N_t=10)
+    """Grouped log-bar chart: right-triangle flat-fold count vs N_t for 2+1 (bounded, dies after N_t=8)
     vs 1+1+1 (zero until N_t=14, then explodes). I/O: (path) -> path."""
     fs.apply_style()
     nts = sorted(set(RIGHTTRI_2P1) | set(RIGHTTRI_111))
@@ -271,7 +273,7 @@ def census_count_vs_nt(out_path):
     plot_bars(RIGHTTRI_2P1, set(), -w / 2, fs.CHAIN[0], "2+1  (bounded, caps ≤ N_t = 8)")
     plot_bars(RIGHTTRI_111, FLOOR_111, w / 2, fs.CHAIN[2], "1+1+1  (grows ~20× per +2)")
     ax.set_yscale("log")
-    ax.set_ylim(0.8, 3000)
+    ax.set_ylim(0.8, 60000)
     ax.set_xticks(x)
     ax.set_xticklabels([str(k) for k in nts])
     ax.set_xlabel("sub-chain length  N_t  (right-triangle tiling)")
