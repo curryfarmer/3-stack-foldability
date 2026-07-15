@@ -276,6 +276,147 @@ def test_fingerprint_changes_when_checker_edited(pkg, tmp_path):
     assert OC.fingerprint("square", str(pkg), _OPTS, extra_files=[str(checker)]) != base
 
 
+# ---------- oracle_cache.py: source scope (the search's import closure) ----------
+
+_SCOPE = ("a.py",)          # includes fakepkg/a.py, excludes fakepkg/sub/b.py
+
+
+def test_source_digest_include_ignores_out_of_scope_edits(pkg):
+    """The point of scoping: editing a file the search cannot import must NOT burn a cold run.
+
+    Concretely — a figure tweak under square/render/ must not invalidate a 5-hour K=16 entry."""
+    before = OC.source_digest(str(pkg), include=_SCOPE)
+    (pkg / "sub" / "b.py").write_text("B = 999\n", encoding="utf-8")
+    assert OC.source_digest(str(pkg), include=_SCOPE) == before
+
+
+def test_source_digest_include_still_catches_in_scope_edits(pkg):
+    """...and the safety property must survive the scoping: in-closure edits still invalidate."""
+    before = OC.source_digest(str(pkg), include=_SCOPE)
+    (pkg / "a.py").write_text("A = 999\n", encoding="utf-8")
+    assert OC.source_digest(str(pkg), include=_SCOPE) != before
+
+
+def test_source_digest_include_missing_path_changes_digest(pkg):
+    """A vanished/renamed in-scope path must CHANGE the digest, not silently shrink the manifest.
+
+    Without the <missing> sentinel a deleted engine dir would produce a smaller manifest that could
+    collide with a legitimately-narrower one — a stale hit against code that no longer exists."""
+    before = OC.source_digest(str(pkg), include=_SCOPE)
+    (pkg / "a.py").unlink()
+    assert OC.source_digest(str(pkg), include=_SCOPE) != before
+
+
+def test_source_digest_include_deduplicates_overlapping_entries(pkg):
+    """Overlapping include entries (a dir and a file inside it) must not double-count."""
+    assert (OC.source_digest(str(pkg), include=("sub", "sub/b.py"))
+            == OC.source_digest(str(pkg), include=("sub",)))
+
+
+def test_fingerprint_changes_with_source_scope(pkg):
+    """Two scopes over one tree are two different claims about what was proven, so they must not
+    share a cache slot even when the digested bytes happen to coincide."""
+    assert (OC.fingerprint("square", str(pkg), _OPTS, include=("a.py",))
+            != OC.fingerprint("square", str(pkg), _OPTS, include=("a.py", "sub")))
+    assert (OC.fingerprint("square", str(pkg), _OPTS, include=None)
+            != OC.fingerprint("square", str(pkg), _OPTS, include=("a.py", "sub")))
+
+
+def test_engine_import_closure_excludes_non_search_sources():
+    """PINS validate_square._SEARCH_SOURCES: nothing the search imports may live outside it.
+
+    The cache key digests only the closure, so if the engine ever grows an import of a renderer or a
+    CLI, that file's edits would stop invalidating the cache — a stale hit, i.e. a masked regression.
+    This fails loudly instead.
+
+    Parsed with `ast`, not grep: lattice/reflect.py:6 mentions 'twostack' in prose, and a text search
+    would either flag that false positive or be loosened until it flagged nothing at all."""
+    import ast
+
+    square = os.path.join(_REPO, "square")
+    if not os.path.isdir(square):
+        pytest.skip("square package not present")
+
+    # Derived, not hardcoded: every module OUTSIDE the closure. Adding a renderer keeps this honest
+    # without anyone remembering to update a list.
+    outside = {os.path.splitext(f)[0] for f in os.listdir(os.path.join(square, "render"))
+               if f.endswith(".py")} - {"__init__"}
+    outside |= {"generate", "render_cli", "twostack", "matplotlib"}
+
+    offenders = []
+    for sub in ("engine", "lattice", "twist"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(square, sub)):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for fn in sorted(f for f in filenames if f.endswith(".py")):
+                path = os.path.join(dirpath, fn)
+                with open(path, encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=path)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        roots = [a.name.split(".")[0] for a in node.names]
+                    elif isinstance(node, ast.ImportFrom):
+                        roots = [(node.module or "").split(".")[0]]
+                    else:
+                        continue
+                    for root in roots:
+                        if root in outside:
+                            offenders.append("%s:%d imports %s"
+                                             % (os.path.relpath(path, _REPO), node.lineno, root))
+    assert not offenders, (
+        "engine imports code outside _SEARCH_SOURCES -- the oracle cache key would no longer cover "
+        "everything the search can reach:\n  " + "\n  ".join(offenders))
+
+
+# ---------- validate_square: interpreter resolution ----------
+
+# Driven in a SUBPROCESS on purpose. Importing validate_square runs square/_bootstrap.py, which puts
+# a bare `lattice` on sys.path; square and triangle each ship one and must never share an
+# interpreter (see test_packaging.py:9-11). This test would be the first place to break that rule.
+_FOLD_PY_PROBE = '''
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("vsq", sys.argv[1])
+vsq = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vsq)                       # module level: sys.path only, no engine import
+
+class _Fake:
+    def __init__(self, has): self._has = has
+    def pypy_available(self): return self._has
+
+os.environ.pop("FOLD_PY", None)
+vsq._resolve_fold_py(_Fake(False))
+print("no_pypy=%r" % os.environ.get("FOLD_PY"))
+
+os.environ.pop("FOLD_PY", None)
+vsq._resolve_fold_py(_Fake(True))
+print("has_pypy=%r" % os.environ.get("FOLD_PY"))
+
+os.environ["FOLD_PY"] = "cpython"
+vsq._resolve_fold_py(_Fake(True))
+print("override=%r" % os.environ.get("FOLD_PY"))
+'''
+
+
+def test_resolve_fold_py_never_claims_an_absent_pypy(tmp_path):
+    """The key must name the interpreter that ACTUALLY ran.
+
+    runner.run_search silently falls back to CPython when FOLD_PY=pypy but no PyPy is installed. If
+    _resolve_fold_py set FOLD_PY=pypy unconditionally, a machine without PyPy would run CPython while
+    keying the entry as 'pypy' — two interpreters sharing one cache slot, which is precisely the
+    stale hit this cache exists to make impossible. Also pins that an explicit FOLD_PY always wins."""
+    checker = os.path.join(_REPO, "scripts", "validate_square.py")
+    if not os.path.isfile(checker):
+        pytest.skip("validate_square.py not present")
+    probe = tmp_path / "probe.py"
+    probe.write_text(_FOLD_PY_PROBE, encoding="utf-8")
+    proc = subprocess.run([sys.executable, str(probe), checker],
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "no_pypy=None" in out, out          # no PyPy found -> must NOT claim pypy
+    assert "has_pypy='pypy'" in out, out       # PyPy found -> opt in
+    assert "override='cpython'" in out, out    # operator override wins
+
+
 # ---------- oracle_cache.py: cache behaviour ----------
 
 class _Counter:

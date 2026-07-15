@@ -48,10 +48,16 @@ and be byte-identical to the serial path, so this is a performance knob only, no
 That is also why `jobs` is excluded from the oracle cache key (see oracle_cache.py).
 
 CACHING. The per-grid search dominates the wall clock; the record checks are cheap. `_search_grid`
-is memoized by `scripts/phystest/oracle_cache.py`, keyed on the whole `square/` package source plus
-the opts plus the runtime — so any engine edit invalidates everything and the cache cannot mask a
+is memoized by `scripts/phystest/oracle_cache.py`, keyed on the search's IMPORT CLOSURE
+(`_SEARCH_SOURCES` — not the whole `square/` tree: renderers and CLIs cannot reach the search, and
+digesting them would burn the multi-hour K=16 cold run on every figure tweak) plus the opts plus the
+runtime. Any edit to code the search can import invalidates everything, so the cache cannot mask a
 regression. Records are re-read and re-checked on EVERY run, hit or miss. `ORACLE_CACHE=0` forces a
 cold run; the `--json` payload reports per-grid hit/miss so a PASS states its provenance.
+
+INTERPRETER. `_resolve_fold_py` opts into PyPy when one is installed (~1.9x on the grids that matter;
+verified to produce identical candidate sets and verdicts on 6x4/6x6/6x7). FOLD_PY is part of the
+cache key, so CPython and PyPy entries never share a slot. Set FOLD_PY explicitly to override.
 
 Run standalone from anywhere:  python scripts/validate_square.py
 """
@@ -73,6 +79,18 @@ if _PHYSTEST_DIR not in sys.path:
 import oracle_cache as OC  # noqa: E402  stdlib-only; imports no engine package
 
 GROUND_TRUTH_PATH = os.path.join(_REPO_ROOT, "results", "foldfindings.json")
+
+# The search's REAL import closure, relative to square/ — the only sources that can change a search
+# result, and therefore the only ones in the oracle cache key. Derived by reading every import under
+# engine/ lattice/ twist/: the sole non-stdlib names are `search`, `fold`, `twist_jump`, `lattice.*`
+# and `_bootstrap`. Nothing reaches render/ (no matplotlib anywhere in the closure), generate.py,
+# render_cli.py or twostack.py — twostack appears only in a prose comment at lattice/reflect.py:6,
+# which is why the pinning test parses imports with `ast` instead of grepping for the name.
+# __init__.py/_bootstrap.py are included: they are sys.path machinery that decides which modules
+# resolve at all, they never churn, and getting them wrong would silently redirect an import.
+# Pinned by test_engine_import_closure_excludes_non_search_sources — if the engine ever grows an
+# import outside this set, that test fails rather than the cache going quietly stale.
+_SEARCH_SOURCES = ("__init__.py", "_bootstrap.py", "engine", "lattice", "twist")
 
 
 def _norm_hash(canonical_hash_str):
@@ -107,6 +125,28 @@ def _jobs():
         except ValueError:
             pass
     return os.cpu_count()
+
+
+def _resolve_fold_py(Runner):
+    """Pick the interpreter BEFORE the fingerprint is taken, so the key names what actually ran.
+
+    Measured on this ground truth (CPython vs PyPy 7.3.20, identical candidate sets and verdicts at
+    every grid): 6x6 88.1s -> 48.4s, 6x7 1267.9s -> 664.2s (~1.9x). The gain is capped because
+    FOLD_JOBS fans the work across short-lived workers that each re-pay JIT warmup — which is also
+    why tiny grids LOSE (6x4 0.6s -> 7.9s, all warmup + spawn). It is still ~1.9x across the run as
+    a whole, and the K=16 grids are the entire cold-run budget.
+
+    Two things make the ordering load-bearing:
+      * runner.run_search SILENTLY falls back to CPython when FOLD_PY=pypy but no PyPy is installed
+        (runner.py:51-55). Claiming "pypy" in the key without one would mean two different
+        interpreters sharing one cache entry — the exact stale-hit this cache must never allow. So
+        only assert pypy once find_pypy() has actually found one.
+      * fingerprint() reads os.environ["FOLD_PY"], so this must run before any fingerprint() call.
+    An explicitly-set FOLD_PY always wins and is keyed verbatim (including FOLD_PY=cpython etc.)."""
+    if os.environ.get("FOLD_PY", "").strip():
+        return                                  # operator override; the key records it as given
+    if Runner.pypy_available():
+        os.environ["FOLD_PY"] = "pypy"
 
 
 def _opts(m, n):
@@ -153,6 +193,8 @@ def run():
 
     import runner as Runner  # noqa: E402  lazy: keeps this module import-safe/side-effect-light
 
+    _resolve_fold_py(Runner)                   # MUST precede fingerprint(): it reads FOLD_PY
+
     n_agree = 0
     n_total = 0
     mismatches = []
@@ -166,7 +208,8 @@ def run():
         opts = _opts(m, n)
         try:
             engine_by_hash, hit = OC.get_or_compute(
-                OC.fingerprint("square", _SQUARE_DIR, opts, extra_files=[os.path.abspath(__file__)]),
+                OC.fingerprint("square", _SQUARE_DIR, opts, extra_files=[os.path.abspath(__file__)],
+                               include=_SEARCH_SOURCES),
                 lambda: _search_grid(Runner, m, n),
                 meta={"engine": "square", "grid": grid, "opts": opts,
                       "recordsDigest": OC.records_digest(recs)})

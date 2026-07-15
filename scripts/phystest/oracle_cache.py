@@ -6,9 +6,13 @@ verdict for every physically-folded record. The expensive part is the per-grid e
 memoizes ONLY that search, keyed by a fingerprint of everything that can change its result.
 
 WHY THIS IS SAFE (the cache lives inside the only proof the gates are correct):
-  * The key is COARSE ON PURPOSE. It covers the whole engine package source, so ANY engine edit
-    invalidates every entry — the cache can never mask a regression, only skip re-proving an
-    engine that is byte-for-byte the one already proven.
+  * The key is COARSE ON PURPOSE. It covers the engine's whole IMPORT CLOSURE, so any edit to code
+    the search can reach invalidates every entry — the cache can never mask a regression, only skip
+    re-proving an engine that is byte-for-byte the one already proven. Coarse means "every file the
+    search can import", NOT "every file in the directory": renderers and CLIs are excluded because
+    they are unreachable from the search, and digesting them would burn a multi-hour cold run every
+    time a figure is tweaked. The closure is asserted, not assumed — see the caller's `include` and
+    test_engine_import_closure_excludes_non_search_sources.
   * Every failure mode degrades to a MISS (recompute), never to a stale hit: corrupt file, truncated
     -name collision, unreadable dir, schema bump.
   * store() is called only AFTER compute() returns, so a failed search is never memoized.
@@ -16,7 +20,9 @@ WHY THIS IS SAFE (the cache lives inside the only proof the gates are correct):
     whether it came from a search or from disk) and ORACLE_CACHE=0 forces a cold run.
 
 WHAT IS IN THE KEY, AND WHY:
-  * engine package source — every *.py, content-addressed (mtime ignored, line endings normalized).
+  * engine source — every *.py in the search's import closure, content-addressed (mtime ignored,
+    line endings normalized), plus the scope itself (two scopes over one tree are two different
+    claims about what was proven, so widening/narrowing must invalidate).
   * opts MINUS `jobs` — `jobs` is behaviour-neutral: search.py replays dedup/id assignment serially
     in the parent, documented byte-identical to serial (search.py:430/517/563). Keying on it would
     make the cache per-core-count, so FOLD_JOBS=4 then FOLD_JOBS=8 would each pay a full cold run.
@@ -67,14 +73,48 @@ def enabled():
 
 # ------------------------------------------------------------------ fingerprint ----
 
-def _iter_sources(pkg_dir):
-    """(posix_relpath, abspath) for every *.py under pkg_dir, __pycache__ pruned, sorted."""
-    for dirpath, dirnames, filenames in os.walk(pkg_dir):
+def _walk_py(root, pkg_dir):
+    """(posix_relpath, abspath) for every *.py at/under root, __pycache__ pruned, sorted."""
+    if os.path.isfile(root):
+        yield os.path.relpath(root, pkg_dir).replace(os.sep, "/"), root
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
         for fn in sorted(filenames):
             if fn.endswith(".py"):
                 ap = os.path.join(dirpath, fn)
                 yield os.path.relpath(ap, pkg_dir).replace(os.sep, "/"), ap
+
+
+def _iter_sources(pkg_dir, include=None):
+    """(posix_relpath, abspath_or_None) for the *.py of pkg_dir, __pycache__ pruned, sorted.
+
+    `include` restricts the manifest to specific subpaths (dirs or files, posix-relative to
+    pkg_dir) -- the engine's real IMPORT CLOSURE. None means the whole package.
+
+    Why restrict at all: the key is coarse on purpose, but "coarse" must still mean "everything
+    that can change the search RESULT", not "every file that happens to sit in the directory".
+    square/render/*.py and the CLIs cannot reach the search (no module under engine/, lattice/ or
+    twist/ imports them -- pinned by test_engine_import_closure_excludes_non_search_sources), yet
+    they are the files that churn most. Digesting them means a figure tweak burns the K=16 cold
+    run, which is hours. Narrowing costs no safety: a file that cannot be imported by the search
+    cannot change its output.
+
+    A listed path that does not exist yields abspath None, so a vanished/renamed directory CHANGES
+    the digest (-> miss -> recompute) instead of silently shrinking the manifest into a stale hit."""
+    if include is None:
+        yield from _walk_py(pkg_dir, pkg_dir)
+        return
+    seen = set()
+    for rel in include:
+        root = os.path.join(pkg_dir, rel.replace("/", os.sep))
+        if not os.path.exists(root):
+            yield rel, None                     # recorded as <missing>: absence is a key input
+            continue
+        for r, ap in _walk_py(root, pkg_dir):
+            if r not in seen:                   # overlapping include entries must not double-count
+                seen.add(r)
+                yield r, ap
 
 
 def _file_digest(path):
@@ -84,24 +124,30 @@ def _file_digest(path):
         return hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
 
 
-def source_digest(pkg_dir):
+def source_digest(pkg_dir, include=None):
     """sha256 over the sorted (posix relpath, content digest) manifest of pkg_dir's *.py.
 
     Content-addressed: touching a file without editing it is ignored; edits, adds, deletes and
-    renames all change the digest (the relpath is hashed alongside the content).
-    I/O: (path) -> 64-hex str."""
-    manifest = sorted([rel, _file_digest(ap)] for rel, ap in _iter_sources(pkg_dir))
+    renames all change the digest (the relpath is hashed alongside the content). `include` scopes
+    the manifest to the search's import closure (see _iter_sources).
+    I/O: (path, [str]|None) -> 64-hex str."""
+    manifest = sorted([rel, _file_digest(ap) if ap else "<missing>"]
+                      for rel, ap in _iter_sources(pkg_dir, include))
     blob = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 
-def fingerprint(engine, pkg_dir, opts, extra_files=()):
+def fingerprint(engine, pkg_dir, opts, extra_files=(), include=None):
     """Cache key over every input that can change the search result. See the module docstring for
-    what is included and what is deliberately excluded. I/O: (str, path, dict, [path]) -> 64-hex."""
+    what is included and what is deliberately excluded.
+    I/O: (str, path, dict, [path], [str]|None) -> 64-hex."""
     key = {
-        "v": 1,
-        "engine": engine,
-        "source": source_digest(pkg_dir),
+        "v": 2,                                 # v1 digested the whole package; v2 scopes to the
+        "engine": engine,                       # import closure -> every v1 entry is unreachable
+        "source": source_digest(pkg_dir, include),
+        # The scope itself is a key input: widening/narrowing it must invalidate, since two
+        # different scopes over the same tree are two different claims about what was proven.
+        "sourceScope": sorted(include) if include is not None else None,
         "checkers": {os.path.basename(p): _file_digest(p) for p in sorted(extra_files)},
         "opts": {k: v for k, v in opts.items() if k not in _NON_SEMANTIC_OPTS},  # m,n live here
         "runtime": {
