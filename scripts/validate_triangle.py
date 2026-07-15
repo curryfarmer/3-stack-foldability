@@ -184,7 +184,15 @@ def run():
 
 
 if __name__ == "__main__":
+    _json = "--json" in sys.argv[1:]
     n_agree, n_total, mismatches = run()
+    if _json:
+        # Machine-readable form consumed by scripts/phystest (the physical-testing suite). Exit
+        # code matches the human form: 0 on PASS or SKIP, 1 only on a real mismatch.
+        print(json.dumps({"engine": "triangle", "skipped": n_total is None,
+                          "nAgree": n_agree, "nTotal": n_total,
+                          "mismatches": mismatches or []}))
+        sys.exit(1 if mismatches else 0)
     if n_total is None:
         print("triangle: SKIPPED (no ground-truth data present)")
         sys.exit(0)
