@@ -166,29 +166,47 @@ def draw_fold_path(ax, path, color):
                                      color=color, lw=0, zorder=7))
 
 
-REFLECTION_SPLIT = 0.045    # perpendicular offset of each chain's half-arrow off the shared centerline
+REFLECTION_SPLIT = 0.14    # perpendicular offset of each chain's arrow off the shared centerline
+
+
+def _split_sides(p, q, n):
+    """n offset (px,py)->(qx,qy) endpoint pairs, spread symmetrically to either side of the p-q
+    centerline (perpendicular to it) — shared by the seed-crease and reflected-image arrows so
+    both sets of per-chain arrows split the same way instead of overlapping into one blended line."""
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    perp = (-dy, dx)                                        # unit perp (segs are axis-aligned, unit length)
+    out = []
+    for k in range(n):
+        off = REFLECTION_SPLIT * (2 * k - (n - 1))
+        out.append(((p[0] + perp[0] * off, p[1] + perp[1] * off),
+                    (q[0] + perp[0] * off, q[1] + perp[1] * off)))
+    return out
 
 
 def draw_reflection(ax, seed, segs, passed):
     """Overlay the reflection gate for one shared-crease pair. The seed crease is drawn as one
-    directed arrow (tinted by pass/fail — this IS the crease arrow in the starting foldsheet, oriented
-    per Fold._crease_segment's +x/+y tangent convention). Each chain's reflected image segment
-    (Fold.reflection_verdict's own segI/segJ — coincident on PASS) is drawn as a short half-width arrow
-    offset to its own side of the centerline, so both chains stay visible instead of one hiding the
-    other when they land on the identical segment.
+    arrow PER CHAIN (colored to match, split to either side like the images below it — two solid
+    colors instead of one, since a single shared-color arrow read as an unintended blend of both
+    chains' colors). Each chain's reflected image segment (Fold.reflection_verdict's own
+    segI/segJ — coincident on PASS) is drawn as its own full arrow on a separate side of that
+    centerline, dashed to distinguish it from the solid seed. Pass/fail (✓ coincide / ✗ mismatch)
+    is marked once at the seed's midpoint, tinted FOLD_BADGE/JAM_BADGE.
     segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)). I/O: (ax, seg, list, bool) -> None."""
-    badge = FOLD_BADGE if passed else JAM_BADGE
-    ax.add_patch(FancyArrowPatch(seed[0], seed[1], arrowstyle="-|>", mutation_scale=13,
-                                 lw=3.0, color=badge, zorder=8, alpha=0.9))
     n = len(segs)
+    for (pk, qk), (color, _) in zip(_split_sides(seed[0], seed[1], n), segs):
+        ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=13,
+                                     lw=3.0, color=color, zorder=8, alpha=0.9))
+
     for k, (color, (p, q)) in enumerate(segs):
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        perp = (-dy, dx)                                    # unit perp (segs are axis-aligned, unit length)
-        off = REFLECTION_SPLIT * (2 * k - (n - 1))          # spread each half to its own side, symmetric
-        pk = (p[0] + perp[0] * off, p[1] + perp[1] * off)
-        qk = (q[0] + perp[0] * off, q[1] + perp[1] * off)
-        ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=9, lw=1.8,
+        pk, qk = _split_sides(p, q, n)[k]
+        ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=10, lw=2.0,
                                      color=color, ls=DASH, zorder=9, alpha=0.95))
+
+    badge = FOLD_BADGE if passed else JAM_BADGE
+    mid = ((seed[0][0] + seed[1][0]) / 2, (seed[0][1] + seed[1][1]) / 2)
+    mark = "✓" if passed else "✗"
+    ax.annotate(mark, mid, textcoords="offset points", xytext=(0, 6), ha="center",
+                fontsize=11, fontweight="bold", color=badge, zorder=10)
 
 
 # ------------------------------------------------------------------ legend -----

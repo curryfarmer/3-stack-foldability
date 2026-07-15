@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt                # noqa: E402
 import figstyle as fs                          # noqa: E402
 import twist_jump as tj                        # noqa: E402
 import render_square as rsq                    # noqa: E402
+import search as Search                        # noqa: E402
 from render_twist_2plus1 import build_loop     # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -147,10 +148,11 @@ def _grid_panel(ax, m, n, *, checker=False):
     fs.draw_grid_cells(ax, m, n, checker=checker)
 
 
-def model_b_strip(sol, out_path):
-    """Three-panel Model B story on a real 2+1 FOLD: (1) decompose + replay, (2) keep one strand,
-    twin = hole, along-axis fold = 3-jump, (3) close the loop -> twist total. I/O: (dict, path) -> path."""
-    from matplotlib.patches import FancyArrowPatch
+def model_b_steps(sol, out_dir):
+    """Model B story on a real 2+1 FOLD, as three SEPARATE single-panel figures (one file each,
+    meant to sit side by side in the report): (1) decompose + replay, (2) keep one strand, twin =
+    hole, along-axis fold = 3-jump, (3) close the loop -> twist total.
+    I/O: (dict, dir) -> [path1, path2, path3]."""
     m, n = sol["m"], sol["n"]
     two = next(c for c in sol["chains"] if len(c["baseCells"]) == 2)
     one = next(c for c in sol["chains"] if len(c["baseCells"]) == 1)
@@ -164,21 +166,24 @@ def model_b_strip(sol, out_path):
     terms = tj.loop_terms(loop)
     tw = tj.tw_of(terms)
     BODY, PATH1 = fs.CHAIN[0], fs.CHAIN[1]
-
-    fig, axes = plt.subplots(1, 3, figsize=(16.5, 5.6))
+    out_paths = []
 
     # panel 1 — decompose + replay the fold arrows
-    ax = axes[0]; _grid_panel(ax, m, n)
+    fig, ax = plt.subplots(figsize=(6.0, 5.0))
+    _grid_panel(ax, m, n)
     fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
     fs.draw_base_cells(ax, fs.cells(two["baseCells"]), BODY, "A")
     fs.draw_base_cells(ax, fs.cells(one["baseCells"]), PATH1, "B")
     fs.draw_fold_path(ax, body, BODY)
     fs.draw_fold_path(ax, path1, PATH1)
-    ax.set_title("1.  Decompose (A = domino, B = monomino) and replay each fold sequence",
-                 fontsize=9.5, fontweight="bold")
+    ax.set_title("1.  Decompose (A = domino, B = monomino)\nand replay each fold sequence",
+                 fontsize=10, fontweight="bold")
+    fig.tight_layout()
+    out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step1_decompose.png")))
 
     # panel 2 — keep one strand, twin = hole, along-axis fold = 3-jump
-    ax = axes[1]; _grid_panel(ax, m, n)
+    fig, ax = plt.subplots(figsize=(6.0, 5.0))
+    _grid_panel(ax, m, n)
     fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
     # twin strand as hollow grey holes
     for p in twin:
@@ -197,10 +202,13 @@ def model_b_strip(sol, out_path):
                     fontsize=7, color=BODY, zorder=9)
     ax.set_title("2.  Keep ONE strand; the twin fills the gap (hole).\n"
                  "An along-axis fold lands the strand 3 away — the 3-jump (red).",
-                 fontsize=9.5, fontweight="bold")
+                 fontsize=10, fontweight="bold")
+    fig.tight_layout()
+    out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step2_strand.png")))
 
     # panel 3 — close the loop -> twist total
-    ax = axes[2]; _grid_panel(ax, m, n, checker=True)
+    fig, ax = plt.subplots(figsize=(6.0, 5.0))
+    _grid_panel(ax, m, n, checker=True)
     fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
     nloop = len(loop)
     K = len(body)
@@ -218,21 +226,13 @@ def model_b_strip(sol, out_path):
         ax.plot([p[0], q[0]], [p[1], q[1]], color=col, lw=lw, ls=ls, zorder=4,
                 solid_capstyle="round")
     verdict = "FOLD (flat)" if tj.is0(tw) else f"JAM (Tw = {fs.pi_label(tw)})"
-    ax.set_title(f"3.  Close: loop = body + reversed(path1).\n"
+    ax.set_title(f"3.  Close: loop = body + reversed(path1) (green = hub seam).\n"
                  f"Tw = Σ σ·γ = {fs.pi_label(tw)}  →  {verdict}",
-                 fontsize=9.5, fontweight="bold")
+                 fontsize=10, fontweight="bold")
+    fig.tight_layout()
+    out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step3_close.png")))
 
-    handles = [fs.line_handle(BODY, "kept 2-chain strand (A)"),
-               fs.line_handle(PATH1, "1-chain strand (B)"),
-               fs.line_handle(fs.JUMP, "3-jump (along-axis fold)", ls=fs.DASH),
-               fs.line_handle(fs.SEAM, "hub seam"),
-               fs.patch_handle("none", "footprint", alpha=1.0, edgecolor=fs.FOOTPRINT_EDGE)]
-    fig.legend(handles=handles, loc="lower center", ncol=5, fontsize=8, frameon=False,
-               bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle("The 2+1 twist math, step by step (Model B jump-strand reduction)",
-                 fontsize=12, fontweight="bold")
-    fig.tight_layout(rect=(0, 0.04, 1, 0.97))
-    return fs.save(fig, out_path)
+    return out_paths
 
 
 # --------------------------------------------------- census: 2+1 vs 1+1+1 ----
@@ -335,6 +335,64 @@ def sparsity_vs_wrapping(out_path):
     return fs.save(fig, out_path)
 
 
+# ------------------------------------------------------ gate funnel, per grid ----
+
+def gate_stats(m, n, decomp_key):
+    """Run the real search on one grid and return the funnel stage counts, straight from
+    Search.run's ctx (no SQLite/webapp layer). 'candidates' is coveredCount // 4 -- the covered-
+    candidate enumeration counts every D4 rotation of a footprint separately, a 4x redundancy over
+    the canonical-orientation count the report's §3.6 table already publishes (verified equal to
+    that table's candidates column on all four grids: 153/285/1990/3406 for 2+1 on 6x4..6x7).
+    I/O: (int, int, '2+1'|'1+1+1') -> dict."""
+    opts = {"m": m, "n": n, "panels": 3, "shapes": {"L": True, "Rect": True},
+            "decomps": {"2+1": decomp_key == "2+1", "1+1+1": decomp_key == "1+1+1"},
+            "allowNonCorner": True, "dedup": True, "jobs": 20}
+    sols, ctx, err = Search.run(opts)
+    if err:
+        raise RuntimeError(f"{m}x{n} {decomp_key}: {err}")
+    fold = sum(1 for s in sols if s["verdict"]["twist"] is True)
+    return {
+        "candidates": ctx["coveredCount"] // 4,
+        "exit": ctx["exitPass"], "parity": ctx["parityPass"],
+        "survivors": ctx["afterDedup"], "fold": fold, "jam": ctx["afterDedup"] - fold,
+    }
+
+
+def gate_funnel_by_grid(grids, decomp_key, out_path, title):
+    """Grouped log-bar chart: one group per grid, 4 bars per group (exit-footprint -> parity ->
+    reflection survivors -> twist-FOLD), the same funnel stages as the report's survivor-census
+    tables. No legend box -- the stage color key is spelled out in the title instead.
+    I/O: ([(m,n), ...], '2+1'|'1+1+1', path, str) -> path."""
+    fs.apply_style()
+    import numpy as np
+    stats = [gate_stats(m, n, decomp_key) for (m, n) in grids]
+    stages = ["exit", "parity", "survivors", "fold"]
+    colors = [fs.CHAIN[0], fs.CHAIN[1], fs.JUMP, fs.SEAM]
+    x = np.arange(len(grids))
+    w = 0.2
+    fig, ax = plt.subplots(figsize=(8.4, 4.8))
+    for i, (stage, color) in enumerate(zip(stages, colors)):
+        offset = (i - 1.5) * w
+        heights = [max(s[stage], 1) for s in stats]
+        ax.bar(x + offset, heights, w, color=color, zorder=3)
+        for xi, s in zip(x + offset, stats):
+            ax.text(xi, max(s[stage], 1) * 1.08, str(s[stage]), ha="center", va="bottom",
+                    fontsize=7, color=color, fontweight="bold", rotation=90)
+    ax.set_yscale("log")
+    max_h = max(max(s[stage] for stage in stages) for s in stats)
+    ax.set_ylim(0.8, max_h * 60)          # headroom for the rotated value labels + 2-line title
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{m}×{n}" for (m, n) in grids])
+    ax.set_xlabel("grid")
+    ax.set_ylabel("count  [log]")
+    ax.set_title(f"{title}\nbars left→right per grid:  exit-footprint → parity → reflection "
+                 f"(survivors) → twist-FOLD",
+                 fontsize=11, fontweight="bold")
+    ax.grid(axis="y", which="both", color="#eeeeee", zorder=0)
+    fig.tight_layout()
+    return fs.save(fig, out_path)
+
+
 # --------------------------------------------------------------------- main ----
 
 def main():
@@ -348,8 +406,8 @@ def main():
         os.path.join(FIGDIR, "fig3_2plus1_grids.png"),
         "The 2+1 decomposition on different square grids"))
 
-    # (a) math — Model B step strip on the 6×4 FOLD, and the twist-accumulation plot
-    made.append(model_b_strip(b64, os.path.join(FIGDIR, "fig3_modelB_steps.png")))
+    # (a) math — Model B steps on the 6×4 FOLD, as 3 separate side-by-side figures
+    made.extend(model_b_steps(b64, FIGDIR))
     jam = _find_uid("g_2p1_6x7", "4cc6f36d0ca4")
     if jam is None:                     # fall back to any Tw!=0 6x7 survivor
         for p in sorted(glob.glob(os.path.join(REPO, "g_2p1_6x7", "*", "*.json"))):
@@ -379,6 +437,13 @@ def main():
     # (c) rarity — census bars + sparsity/wrapping schematic
     made.append(census_count_vs_nt(os.path.join(FIGDIR, "fig3_count_vs_Nt.png")))
     made.append(sparsity_vs_wrapping(os.path.join(FIGDIR, "fig3_sparsity_vs_wrapping.png")))
+
+    # (d) gate funnel — per-grid gate-survival, one chart per decomposition
+    grids = [(6, 4), (6, 5), (6, 6), (6, 7)]
+    made.append(gate_funnel_by_grid(grids, "2+1", os.path.join(FIGDIR, "fig3_funnel_by_grid.png"),
+                "2+1: gate survival per grid"))
+    made.append(gate_funnel_by_grid(grids, "1+1+1", os.path.join(FIGDIR, "fig4_funnel_by_grid.png"),
+                "1+1+1: gate survival per grid"))
 
     for p in made:
         print("wrote", os.path.relpath(p, REPO))

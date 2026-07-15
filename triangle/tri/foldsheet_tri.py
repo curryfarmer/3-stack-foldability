@@ -50,8 +50,9 @@ def draw_footprints(ax, tile_cart, start_fp, end_fp=None, z0=8.4, labelsize=11, 
             return
         for ci, t in enumerate(fp):
             pc = tile_cart(t)
-            cx = sum(p[0] for p in pc) / len(pc)
-            cy = sum(p[1] for p in pc) / len(pc)
+            n = len(pc)
+            cx = sum(p[0] for p in pc) / n
+            cy = sum(p[1] for p in pc) / n
             klass = chir[ci]["klass"] if (chir and ci < len(chir)) else None
             oc = CHIR_COLOR.get(klass, outline)
             if fill is not None:
@@ -61,11 +62,15 @@ def draw_footprints(ax, tile_cart, start_fp, end_fp=None, z0=8.4, labelsize=11, 
                 kw["linestyle"] = (0, dashes)
             ax.add_patch(Polygon(pc, closed=True, **kw))
             vx, vy = pc[0]                       # nudge the label toward vertex0 so start/end don't collide
-            ax.text(cx + nudge * (vx - cx), cy + nudge * (vy - cy), "ABC"[ci % 3], ha="center",
+            # Scale the nudge by 3/n: tuned for triangles (n=3); on rounder n-gons (e.g. hexagons,
+            # n=6) the same fraction of a single vertex's pull reads as visibly off-centre, since
+            # there are more, closer-together vertices to pull toward.
+            nf = nudge * min(1.0, 3.0 / n)
+            ax.text(cx + nf * (vx - cx), cy + nf * (vy - cy), "ABC"[ci % 3], ha="center",
                     va="center", color=oc, fontsize=labelsize, fontweight="bold", zorder=zt,
                     bbox=dict(boxstyle="circle,pad=0.12", fc="white", ec=oc, lw=0.8, alpha=0.85))
             if klass:                            # orientation tag beside the END label (the seam verdict)
-                ax.text(cx - nudge * (vx - cx), cy - nudge * (vy - cy), CHIR_TAG.get(klass, "?"),
+                ax.text(cx - nf * (vx - cx), cy - nf * (vy - cy), CHIR_TAG.get(klass, "?"),
                         ha="center", va="center", color=oc, fontsize=labelsize - 4, fontweight="bold",
                         zorder=zt, bbox=dict(boxstyle="round,pad=0.1", fc="white", ec=oc, lw=0.7,
                                              alpha=0.9))
