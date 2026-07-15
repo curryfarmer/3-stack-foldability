@@ -24,8 +24,11 @@ from matplotlib.patches import Rectangle, FancyArrowPatch, Patch  # noqa: E402
 from matplotlib.lines import Line2D            # noqa: E402
 
 # ------------------------------------------------------------------ palette ----
-# Chain / strand colors (A / B / C) — the canonical anchor shared with the tri track.
-CHAIN = ["#1f77b4", "#e8820c", "#2ca02c"]      # A blue / B orange / C green
+# Chain / strand colors (A / B / C / ...) — A/B/C are the canonical anchor shared with the tri
+# track; D/E/F extend the palette for n-stack (N>3) all-singleton decompositions, picked to stay
+# distinguishable from the semantic colors below (FOOTPRINT_EDGE purple, JUMP/MNT red, CUT teal).
+CHAIN = ["#1f77b4", "#e8820c", "#2ca02c",      # A blue / B orange / C green
+         "#8c564b", "#e377c2", "#bcbd22"]      # D brown / E magenta / F olive
 FOOTPRINT_EDGE = "#6f4fb0"                     # tromino destination outline (purple)
 GRID_EDGE = "#dddddd"                          # cell gridlines (light grey)
 INK = "#222222"                                # text / labels / near-black borders

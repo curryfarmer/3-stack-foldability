@@ -24,9 +24,11 @@ L_BASE = SquareLattice.L_BASE
 
 def enumerate_footprints(m, n, opts):
     out = []
+    panels = opts.get("panels", 3)
     if opts["shapes"].get("L"):
+        tpls = SquareLattice.l_template(panels)
         for rot in range(4):
-            tpl = L_BASE[rot]
+            tpl = tpls[rot]
             for ay in range(n):
                 for ax in range(m):
                     cells = [(x + ax, y + ay) for (x, y) in tpl]
@@ -40,12 +42,12 @@ def enumerate_footprints(m, n, opts):
                         arms = sorted(cells[1:], key=lambda c: (c[0], c[1]))
                         out.append({
                             "shape": "L", "rotation": rot, "anchor": (ax, ay),
-                            "cells": [corner] + arms,
-                            "cellRoles": ["corner", "arm", "arm"],
+                            "cells": [corner] + arms, "panels": panels,
+                            "cellRoles": ["corner"] + ["arm"] * (panels - 1),
                         })
     if opts["shapes"].get("Rect"):
         for orient in ("H", "V"):
-            tpl = [(0, 0), (1, 0), (2, 0)] if orient == "H" else [(0, 0), (0, 1), (0, 2)]
+            tpl = SquareLattice.rect_template(panels, orient)
             for ay in range(n):
                 for ax in range(m):
                     cells = [(x + ax, y + ay) for (x, y) in tpl]
@@ -55,20 +57,39 @@ def enumerate_footprints(m, n, opts):
                                 continue
                         out.append({
                             "shape": "Rect", "rotation": 0 if orient == "H" else 1,
-                            "anchor": (ax, ay), "cells": cells,
-                            "cellRoles": ["end", "mid", "end"],
+                            "anchor": (ax, ay), "cells": cells, "panels": panels,
+                            "cellRoles": ["end"] + ["mid"] * (panels - 2) + ["end"],
                         })
     return out
 
 
 # --- Stage 3: decomposition enumeration ---
 
+def _all_singleton_decomp_key(panels):
+    """'1+1+1' at panels=3, '1+1+1+1' at panels=4, etc. — the CLI/opts key naming the
+    all-singleton (N chains of 1 base cell each) decomposition for a given panel count."""
+    return "+".join(["1"] * panels)
+
+
 def enumerate_decompositions(footprint, opts):
     out = []
     cells = footprint["cells"]
-    if footprint["shape"] == "L":
-        corner, armA, armB = cells[0], cells[1], cells[2]
-        if opts["decomps"].get("2+1"):
+    panels = footprint.get("panels", 3)
+
+    # All-singleton (1+1+1+...+1): one 1-chain per footprint cell. Generic over any panel
+    # count and shape — byte-identical to the old hardcoded 3-cell 1+1+1 branches at panels=3.
+    if opts["decomps"].get(_all_singleton_decomp_key(panels)):
+        out.append({
+            "decomp": _all_singleton_decomp_key(panels),
+            "chains": [{"kind": "1chain", "baseCells": [c]} for c in cells],
+        })
+
+    # 2+1 (one 2-chain + one 1-chain): only defined for panels==3 — the combinatorial pairing
+    # below assumes exactly 3 cells, and the jump-strand twist model (twist_jump.py) is hard-
+    # gated to exactly 2 chains, so there is no N>3 analogue to generalize to yet.
+    if panels == 3 and opts["decomps"].get("2+1"):
+        if footprint["shape"] == "L":
+            corner, armA, armB = cells[0], cells[1], cells[2]
             adj = lambda a, b: abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
             pairs = [(corner, armA, armB), (corner, armB, armA), (armA, armB, corner)]
             for p0, p1, tail in pairs:
@@ -81,18 +102,8 @@ def enumerate_decompositions(footprint, opts):
                         {"kind": "1chain", "baseCells": [tail]},
                     ],
                 })
-        if opts["decomps"].get("1+1+1"):
-            out.append({
-                "decomp": "1+1+1",
-                "chains": [
-                    {"kind": "1chain", "baseCells": [corner]},
-                    {"kind": "1chain", "baseCells": [armA]},
-                    {"kind": "1chain", "baseCells": [armB]},
-                ],
-            })
-    else:  # Rect
-        end0, mid, end1 = cells
-        if opts["decomps"].get("2+1"):
+        else:  # Rect
+            end0, mid, end1 = cells
             out.append({"decomp": "2+1", "chains": [
                 {"kind": "2chain", "baseCells": [end0, mid]},
                 {"kind": "1chain", "baseCells": [end1]},
@@ -100,12 +111,6 @@ def enumerate_decompositions(footprint, opts):
             out.append({"decomp": "2+1", "chains": [
                 {"kind": "2chain", "baseCells": [mid, end1]},
                 {"kind": "1chain", "baseCells": [end0]},
-            ]})
-        if opts["decomps"].get("1+1+1"):
-            out.append({"decomp": "1+1+1", "chains": [
-                {"kind": "1chain", "baseCells": [end0]},
-                {"kind": "1chain", "baseCells": [mid]},
-                {"kind": "1chain", "baseCells": [end1]},
             ]})
     return out
 
@@ -249,16 +254,16 @@ set_fold_counts = SquareLattice.set_fold_counts            # unconditional nH/nV
 
 # --- Stage 5.5: exit footprint ---
 
-def exit_footprint_check(chains, start_shape):
+def exit_footprint_check(chains, start_shape, panels=3):
     cells = []
     for c in chains:
         for cell in c["placements"][-1]["cells"]:
             cells.append(cell)
-    if len(cells) != 3:
+    if len(cells) != panels:
         return False
-    if len(set(cells)) != 3:
+    if len(set(cells)) != panels:
         return False
-    shape = SquareLattice.exit_shape(cells)
+    shape = SquareLattice.exit_shape(cells, panels)
     if shape is None:
         return False
     return shape == start_shape
@@ -366,7 +371,7 @@ def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False):
     REAL gate verdicts plus the new `vectorParity` column, so the foldability tests become
     non-destructive filterable columns instead of pruners.
     """
-    ev = exit_footprint_check(chains, fp["shape"])
+    ev = exit_footprint_check(chains, fp["shape"], fp.get("panels", 3))
     if not store_all and not ev:
         return 0, None
     pa = parity_check(chains)
@@ -541,11 +546,12 @@ def run(opts, on_solution=None, is_cancelled=None):
     next_id = [1]
 
     # TEST gates (relaxed): removed the mn-even/%6 requirement, the K-even gate,
-    # and the n>=4 gate so tiny/odd grids (e.g. 3x1) can be probed. Only mn%3==0
-    # is kept — it is structural (K = mn/3 must be a positive integer to tile).
-    if (m * n) % 3 != 0:
-        return solutions, ctx, "mn not divisible by 3 (K must be integer)"
-    K = (m * n) // 3
+    # and the n>=4 gate so tiny/odd grids (e.g. 3x1) can be probed. Only mn%panels==0
+    # is kept — it is structural (K = mn/panels must be a positive integer to tile).
+    panels = opts.get("panels", 3)
+    if (m * n) % panels != 0:
+        return solutions, ctx, f"mn not divisible by {panels} (K must be integer)"
+    K = (m * n) // panels
     if K < 1:
         return solutions, ctx, "K < 1 (empty grid)"
 

@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # square/ on pat
 import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 
 import runner as Runner            # noqa: E402
+import search as Search            # noqa: E402  (decomp key naming only)
 import twostack as TwoStack        # noqa: E402
 import render_bundle as RenderB    # noqa: E402
 
@@ -36,9 +37,15 @@ def parse_args(argv):
     p.add_argument("--m", type=int, help="columns")
     p.add_argument("--n", type=int, help="rows")
     p.add_argument("--stacks", type=int, default=3, choices=(2, 3),
-                   help="2 = RSPA Hamiltonian-circuit 2-stack; 3 = footprint/decomp 3-stack (default)")
-    p.add_argument("--shapes", default="L,Rect", help="comma list: L,Rect (3-stack only)")
-    p.add_argument("--decomps", default="2+1,1+1+1", help="comma list: 2+1,1+1+1")
+                   help="2 = RSPA Hamiltonian-circuit 2-stack; 3 = footprint/decomp engine (default)")
+    p.add_argument("--panels", type=int, default=3,
+                   help="footprint panel count / chain count for the 3-stack-family engine "
+                        "(default 3; use e.g. 4 or 5 for an all-singleton 1+1+1+...+1 n-stack). "
+                        "--decomps '2+1' is only defined at --panels 3.")
+    p.add_argument("--shapes", default="L,Rect", help="comma list: L,Rect (3-stack-family only)")
+    p.add_argument("--decomps", default=None,
+                   help="comma list, e.g. 2+1,1+1+1 (default: '2+1,1+1+1' at --panels 3, else "
+                        "the all-singleton decomp for --panels N, e.g. '1+1+1+1' at N=4)")
     p.add_argument("--allow-non-corner", action="store_true")
     p.add_argument("--store-all", action="store_true",
                    help="Phase A: emit EVERY covered candidate (D4-deduped) with non-destructive "
@@ -57,10 +64,15 @@ def parse_args(argv):
 def build_opts(args):
     if args.stacks == 2:
         return {"m": args.m, "n": args.n, "stacks": 2, "dedup": not args.no_dedup}
+    if args.panels < 3:
+        raise ValueError(f"--panels must be >= 3 (got {args.panels})")
+    all_singleton_key = Search._all_singleton_decomp_key(args.panels)
+    default_decomps = f"2+1,{all_singleton_key}" if args.panels == 3 else all_singleton_key
+    decomps_str = args.decomps if args.decomps is not None else default_decomps
     shapes = {s: (s in args.shapes.split(",")) for s in ("L", "Rect")}
-    decomps = {d: (d in args.decomps.split(",")) for d in ("2+1", "1+1+1")}
+    decomps = {d: (d in decomps_str.split(",")) for d in ("2+1", all_singleton_key)}
     return {
-        "m": args.m, "n": args.n, "stacks": 3,
+        "m": args.m, "n": args.n, "stacks": 3, "panels": args.panels,
         "shapes": shapes, "decomps": decomps,
         "allowNonCorner": args.allow_non_corner,
         "dedup": not args.no_dedup,
@@ -133,7 +145,7 @@ def main(argv=None):
             # uid already stamped by twostack.run() (no canonicalHash concept for 2-stack)
         else:
             sol["lattice"] = LATTICE_3STACK
-            sol["stacks"] = 3
+            sol["stacks"] = opts.get("panels", 3)
             sol["uid"] = make_uid(LATTICE_3STACK, m, n, sol["canonicalHash"])
         produced = RenderB.render_record(sol, args.out)
         print(f"  [{sol['uid']}] -> {produced.get('foldsheet', produced['json'])}")

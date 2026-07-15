@@ -129,15 +129,16 @@ class SquareLattice(Lattice):
                 return False
         return True
 
-    # Exit-footprint congruence classifier (Rect / L by the 3 end cells' bounding box).
+    # Exit-footprint congruence classifier (Rect / L by the N end cells' bounding box).
     @staticmethod
-    def exit_shape(cells):
+    def exit_shape(cells, panels=3):
         xs = [c[0] for c in cells]
         ys = [c[1] for c in cells]
         dx, dy = max(xs) - min(xs), max(ys) - min(ys)
-        if (dx == 2 and dy == 0) or (dx == 0 and dy == 2):
+        a, b = SquareLattice._l_arm_split(panels)
+        if (dx == panels - 1 and dy == 0) or (dx == 0 and dy == panels - 1):
             return "Rect"
-        if dx == 1 and dy == 1:
+        if (dx == a and dy == b) or (dx == b and dy == a):
             return "L"
         return None
 
@@ -148,6 +149,36 @@ class SquareLattice(Lattice):
         [(0, 0), (-1, 0), (0, -1)],   # rot 2 (180)
         [(0, 0), (0, -1), (1, 0)],    # rot 3 (270 CW)
     ]
+
+    @staticmethod
+    def _l_arm_split(panels):
+        """Two straight-arm lengths (a, b), split as evenly as possible, a+b = panels-1.
+        panels=3 -> (1, 1), matching L_BASE exactly."""
+        a = (panels - 1) // 2
+        return a, (panels - 1) - a
+
+    @staticmethod
+    def l_template(panels):
+        """4 rotations of a corner + two straight arms (lengths from _l_arm_split), corner at
+        (0,0). Generalizes L_BASE (panels=3 reproduces it verbatim: arms of length 1 each,
+        one along +x, one along +y)."""
+        a, b = SquareLattice._l_arm_split(panels)
+        base = [(0, 0)] + [(i, 0) for i in range(1, a + 1)] + [(0, j) for j in range(1, b + 1)]
+
+        def rot90(cells):
+            return [(-y, x) for (x, y) in cells]
+
+        rots = [base]
+        for _ in range(3):
+            rots.append(rot90(rots[-1]))
+        return rots
+
+    @staticmethod
+    def rect_template(panels, orient):
+        """Straight line of `panels` cells from (0,0); orient 'H' along +x, 'V' along +y."""
+        if orient == "H":
+            return [(i, 0) for i in range(panels)]
+        return [(0, i) for i in range(panels)]
 
     # D4 canonical dedup (the grid symmetry group; the golden orbit counts are D4-orbit counts).
     @staticmethod
