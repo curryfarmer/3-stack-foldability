@@ -327,57 +327,77 @@ pass from a fresh clone (data-gated ones skip cleanly).
 
 ---
 
-# S3 — canonical_hash automorphism fix + ground-truth migration
+# S3 — canonical_hash automorphism fix + ground-truth migration — **DONE (2026-07-16)**
 
-**Goal.** Fix the latent D4 over-merge and migrate the stored ground truth through it, provably.
+**Shipped.** `canonical_hash` now minimizes over the sheet's automorphism subgroup; the stored ground
+truth was migrated through it and the oracle re-proved cold. What follows is what the session actually
+found — **the plan below it was wrong on its central claim**, so read this part first.
 
-**Blocked on S1** reporting **zero `not-enumerated`**.
+### CORRECTION 1 — there was no over-merge. The premise was false.
 
-### State of the world (verified)
+The plan claimed all-of-D4 was "merging genuinely distinct folds". **It cannot**, and never did:
 
-`square/lattice/square.py:206-224` — `canonical_hash` minimizes over all 8 D4 elements
-(`for rot in range(4): for flip in range(2)`, `:209-211`) with **no `m != n` guard**. `apply_transform`
-(`:184-196`) mixes extents on odd rotations — `rot==1 → (Y, m-1-X)`, `rot==3 → (n-1-Y, X)` — with nothing
-keying off `m != n`. So on a non-square grid the minimum can be taken over images that are not
-automorphisms, merging genuinely distinct folds. (Contrast `twostack._canonical`, which restricts to D2 when
-`m != n`. `validate_square.py`'s docstring also records an "m-vs-n axis-order finding".)
+> A 3-stack fold covers the whole `m x n` sheet — `search.search_chains` admits a candidate only when
+> its chains reserve all `m*n` cells. If two legal `m x n` candidates A, B share a D4 hash then the
+> signature (fp cells + base + arrows) determines the configuration, so `B = s(A)` for some `s ∈ D4`.
+> If `s` transposes, `s(A)` covers `n x m`; but B is legal on `m x n`; so `m == n`. **For `m != n`,
+> D4-merge ⟺ D2-merge.**
 
-### The risk that makes this its own session
+Measured on every candidate of four grids (oracle opts, `dedup=False`) — **over-merged classes: 0**:
 
-Fixing this **changes hashes on 6x4/6x5/6x7/6x8/8x6** — which invalidates the stored `canonicalHash` in
-`results/foldfindings.json`, the exact key the oracle matches on, and the 16 goldens. 21 of the 61 ground-truth
-records live on non-square grids.
+| grid | \|Aut\| | candidates | distinct old | distinct new | over-merged | reps changed |
+|---|---|---|---|---|---|---|
+| 6x4 | 4 | 52 | 13 | 13 | **0** | 13/13 |
+| 6x5 | 4 | 52 | 13 | 13 | **0** | 9/13 |
+| 6x6 | 8 | 428 | 107 | 107 | **0** | 0/107 |
+| 9x4 | 4 | 360 | 90 | 90 | **0** | 90/90 |
 
-### Fix
+So: dedup classes identical → **no golden count moved on any grid**; old→new is a **bijection** → no
+data loss was ever possible. Pinned by `square/tests/test_canonical_group.py`.
 
-Canonicalize over the sheet's actual **automorphism subgroup** of D4 — keep element `t` only if `t(S) == S`
-over the bbox. Full square → all 8 (golden counts unchanged); non-square/asymmetric → the valid subset only.
+**What was real** is a *representation* defect: the minimum could be attained at a non-automorphism, so
+the representative described the fold on the transposed sheet and could sit **off-grid** (a stored 9x4
+bundle had `fp` y=5 with n=4). That is unsound for anything reading the hash back as geometry —
+`test_physical_deciders._is_corner_footprint` tests fp cells against the grid's corners. The fix makes
+representatives on-grid by construction.
 
-### Migration
+### CORRECTION 2 — the migration needs no search, and the plan's search was the expensive half.
 
-`canonicalHash` is a serialized canonical *form*, not a digest — but the old representative may live in
-transposed coordinates, so it **cannot be re-canonicalized in place**. Instead:
+`Fold.make_fold` returns `None` when a fold leaves the grid, so a stored hash (which *is* the fold,
+serialized) can be replayed and checked for legality without enumerating anything. The plan's "re-search
+each of the 6 grids" would have cost ~4.5h (6x8 = 2.1h, 8x6 = 2.0h, 6x7 = 21min) to migrate the 5 records
+living on those grids. `scripts/migrate_canonical_hash.py` runs in seconds and was validated **223/223**
+against an enumeration-derived witness map on 6x4/6x5/6x6/9x4.
 
-1. Re-search each of the 6 grids computing **both** canonicalizations side by side.
-2. Build the `old_hash → new_hash` map from the candidate set.
-3. Rewrite `results/foldfindings.json` (70 records) and `results/to_test_folds.json` (50,605 bytes, exists,
-   referenced by no code today) through the map.
-4. Back up both files first. Any old hash that doesn't map is a **stop**, not a skip.
+### CORRECTION 3 — 7 grids, not 6; and 3 files, not 2.
 
-### Gate
+Ground truth spans `6x4, 6x5, 6x6, 6x7, 6x8, 8x6, **9x4**`. The oracle never searches 9x4 (no cache
+entry), so a 6-grid migration would have stranded it. Migrated: `results/foldfindings.json` (70),
+`square/tests/fixtures/twoplus1_labels.json` (13 — **`gen_golden.probe_deciders` matches these against the
+vet goldens**, so skipping it silently degrades every non-square decider to "not in any vet golden set"),
+and `results/to_test_folds.json` (13, carries its own geometry and so cross-checks the migration).
 
-Oracle PASS **before** the change; PASS **after** the migration with the same 61 records agreeing; goldens
-regenerated via `gen_golden.py` with the count delta explained per grid (square: unchanged; non-square:
-documented and justified); `run_tests.py` green.
+**Deliberately NOT migrated:** `square/tests/fixtures/{6x4_bbc04a7f,6x5_c25f38f8}.json` — frozen bundles
+from earlier separately-dated runs. `test_manifest_counts` anchors on their solution COUNTS (unmoved) and
+never reads their hashes; rewriting them with today's engine would erode the independence that makes them
+a cross-check. Their hashes are stale-but-unread, by design.
 
-### Gotchas
+### CORRECTION 4 — the key-order artifact interacts with uids.
 
-- The S1 cache fingerprints engine source — this change invalidates it wholesale. Expect one full cold run.
-  That is correct behavior, not a bug.
-- `records.append_square_finding` dedups on `(grid, norm_hash)` (`records.py:57-59`). Post-migration, the
-  dedup key changes meaning for non-square grids. Verify no two records collide after remapping.
-- `make_uid` (`square/generate.py:84-89`) hashes `canonical_hash` into the bundle uid — **every non-square
-  uid changes too.** Any on-disk `<uid>/` bundle, batch manifest, or doc citing a non-square uid goes stale.
+61 of 70 stored hashes serialize `"chains"` before `"fp"` (older serializer; `validate_square.py:20-28`).
+`make_uid` hashes the RAW string, so **two records for the same fold had different uids purely from key
+order** (`e194f4a50fe6` / `2c2f2702a626`, both 6x4 → now both `0728f7a454d5`). The migrator therefore
+rewrites only hashes whose *content* changed, leaving the legacy key order — and the uid — untouched
+everywhere else. 17 uids changed; `results/s3_uid_map.json` (`scripts/s3_uid_map.py`) lists them.
+
+### Gotchas that held up
+
+- The S1 cache fingerprints engine source — this change invalidated it wholesale; one full cold run.
+- `records.append_square_finding` dedups on `(grid, norm_hash)` (`records.py:57-59`) — checked, no collisions.
+- `make_uid` hashes `canonical_hash` into the bundle uid. One on-disk scratch bundle is now misnamed:
+  `g_2p1_6x4/e194f4a50fe6` → `0728f7a454d5`. Left alone (untracked scratch).
+- **`records.py:76` writes `foldfindings.json` with `indent=1` but the file on disk is `indent=2`** — the
+  next `logresult` append will reformat the whole file. Pre-existing, not S3's; flagged for S11.
 
 ---
 
