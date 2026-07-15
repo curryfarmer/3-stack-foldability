@@ -22,12 +22,18 @@ annotated-codebase/
 out/
 
 # Local-only working dirs: kept on disk, untracked (git rm --cached'd). Notes, archived
-# research, the write-up, generated results (SQLite DB lives here), and the test suite all
-# live locally and are not part of the shared tree. (annotated-codebase/ above is the same idea.)
+# research, the write-up and generated results (SQLite DB lives here) live locally and are not part
+# of the shared tree. (annotated-codebase/ above is the same idea.)
 deprecated/
 report/
 results/
-tests/
+
+# The repo-root tests/ holds only local analysis scripts. LEADING SLASH IS LOAD-BEARING: a bare
+# `tests/` has no slash, so git matches it against a directory named `tests` at ANY depth -- which
+# silently swallowed the tracked square/tests/ and triangle/tests/ suites. `/tests/` anchors the
+# rule to the repo root. Anchoring, not a `!square/tests/` negation: per the docs/ note below, git
+# cannot re-include a file whose parent dir is excluded, so a negation here would be inert.
+/tests/
 
 # docs/ is local-only EXCEPT the shared execution plan. Note the pattern: git cannot re-include a
 # file whose parent dir is excluded, so this must ignore docs/* (contents) rather than docs/ (the
