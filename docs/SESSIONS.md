@@ -93,17 +93,27 @@ square and all four triangle tilings**, on a clean, tested, documented codebase.
 - **`results/` is 1.5 GB / 304 files** (one bundle, `8x6_ab9ad15e.json`, is 152 MB). Never checksum the tree.
 - **`results/` and `report/` are gitignored** — every consumer needs a skip-guard so a fresh clone passes.
 
-## Pre-flight (do this before S1)
+## Pre-flight — baseline the tree (do this before S1, same session)
 
-**The working tree is dirty and the dirt is load-bearing.** `git status` shows modified:
-`pytest.ini`, `scripts/validate_square.py`, `scripts/validate_triangle.py`, `square/engine/search.py`,
-`square/generate.py`, `square/lattice/square.py`, `square/render/figstyle.py`,
-`square/render/report_examples.py`, `triangle/tri/foldsheet_tri.py`; untracked: `scripts/phystest/`,
-`smoketest/test_physical_suite.py`, `g_*/`, `scratch2s/`, `scratch_examples/`.
+**The working tree is dirty and the dirt is load-bearing.** It carries **two unrelated, tangled efforts**,
+both uncommitted, and both depended on by sessions below. Nothing here may be discarded.
 
-**The uncommitted `square/generate.py` + `search.py` changes are the n-stack `--panels` support that S4
-builds on.** Decide before S1: commit this work as a baseline, or stash it. Do not start S1 on top of an
-ambiguous tree — every session's gate is a before/after comparison and needs a known baseline.
+| Effort | Files | Depended on by |
+|---|---|---|
+| **n-stack `--panels` support** | `square/generate.py` (the `--panels` arg + `build_opts`), `square/engine/search.py` (`_all_singleton_decomp_key`), `square/render/figstyle.py` (CHAIN D/E/F for N>3) | **S4** |
+| **S0 physical-testing suite** | `scripts/phystest/` (untracked), `smoketest/test_physical_suite.py` (untracked), `scripts/validate_square.py` + `validate_triangle.py` (`--json`), `pytest.ini` (`slow` marker) | **S1** (repairs it) |
+| *unclassified — inspect before assigning* | `square/lattice/square.py`, `square/render/report_examples.py`, `triangle/tri/foldsheet_tri.py` | ? |
+
+Untracked output/scratch dirs (`g_*/`, `scratch2s/`, `scratch_examples/`) are **not** to be committed —
+S11 gitignores them. But **`scratch_examples/hunt_n4n5_results.jsonl` is S4's entire known-answer oracle**
+and must be moved into the tracked test corpus before that ignore lands (S4 does this).
+
+**Do:** split into separate commits on `grid-ingest`, one per effort, so each session's gate has a clean
+before/after. Read `square/lattice/square.py`'s diff carefully — S3 rewrites `canonical_hash` in that same
+file, and it must not start from an unexplained delta.
+
+**Do not** start S1 on an ambiguous tree. Every session's gate is a before/after comparison and is
+meaningless without a known baseline.
 
 ## The standing gate
 
