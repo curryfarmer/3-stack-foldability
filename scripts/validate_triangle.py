@@ -169,6 +169,12 @@ def run():
             mismatches.append({"uid": uid, "file": rec["_file"], "tiling": tiling, "decomp": decomp,
                                 "K": K, "kind": "closure_gate_failed",
                                 "detail": "stored chains no longer close under the current gate"})
+            # A record whose chains no longer close is already a reported regression, and its
+            # geometry is not trustworthy input for the seam/twist filter below. Without this
+            # `continue` it fell through to SFILT.apply on non-closing chains and could (a) log a
+            # SECOND mismatch for the same uid or, worse, (b) reach `n_agree += 1` and be counted
+            # as AGREEING despite having failed the closure gate.
+            continue
 
         SFILT.apply(lat, cand)
         fresh = bool(cand["foldable"])

@@ -42,9 +42,16 @@ candidate in this ground truth too — an undecided twist here would itself be a
 
 `allowNonCorner=True` always (confirmed in prior investigation: ALL foldable 6x6 2+1 ground truth is
 off-corner; a corner-only search would silently miss real folds), both decomps + both shapes enabled,
-D4 dedup on, multiprocessing on (jobs=os.cpu_count()) purely for wall-clock — the parallel path is
-documented (search.py `_search_parallel`) to replay dedup/id serially in the parent and be byte-
-identical to the serial path, so this is a performance knob only, not a behavior change.
+D4 dedup on, multiprocessing on (FOLD_JOBS, defaulting to os.cpu_count()) purely for wall-clock — the
+parallel path is documented (search.py `_search_parallel`) to replay dedup/id serially in the parent
+and be byte-identical to the serial path, so this is a performance knob only, not a behavior change.
+That is also why `jobs` is excluded from the oracle cache key (see oracle_cache.py).
+
+CACHING. The per-grid search dominates the wall clock; the record checks are cheap. `_search_grid`
+is memoized by `scripts/phystest/oracle_cache.py`, keyed on the whole `square/` package source plus
+the opts plus the runtime — so any engine edit invalidates everything and the cache cannot mask a
+regression. Records are re-read and re-checked on EVERY run, hit or miss. `ORACLE_CACHE=0` forces a
+cold run; the `--json` payload reports per-grid hit/miss so a PASS states its provenance.
 
 Run standalone from anywhere:  python scripts/validate_square.py
 """
@@ -59,6 +66,11 @@ _SQUARE_DIR = os.path.join(_REPO_ROOT, "square")
 if _SQUARE_DIR not in sys.path:
     sys.path.insert(0, _SQUARE_DIR)
 import _bootstrap  # noqa: E402  puts square/ (for `import lattice`) + square/{engine,twist,render} on sys.path
+
+_PHYSTEST_DIR = os.path.join(_REPO_ROOT, "scripts", "phystest")
+if _PHYSTEST_DIR not in sys.path:
+    sys.path.insert(0, _PHYSTEST_DIR)                  # after the engine bootstrap: engine wins any tie
+import oracle_cache as OC  # noqa: E402  stdlib-only; imports no engine package
 
 GROUND_TRUTH_PATH = os.path.join(_REPO_ROOT, "results", "foldfindings.json")
 
@@ -82,59 +94,104 @@ def _load_ground_truth():
     return by_grid, True
 
 
-def _search_grid(Runner, m, n):
-    """Run the real 3-stack search for one grid, default (non-store-all) mode, allow-non-corner,
-    both shapes/decomps. Returns {normalized_canonical_hash: sol}."""
-    opts = {
+def _jobs():
+    """Worker count: FOLD_JOBS when set, else os.cpu_count().
+
+    NB: do NOT "simplify" this to `jobs: None`. search.py's `_resolve_jobs` only consults FOLD_JOBS
+    when opts["jobs"] is None and otherwise falls back to *1*, so passing None would silently make
+    this oracle serial — hours slower — whenever FOLD_JOBS happens to be unset."""
+    env = os.environ.get("FOLD_JOBS", "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    return os.cpu_count()
+
+
+def _opts(m, n):
+    """The exact search opts for one grid. Extracted so the cache key and the search itself read
+    from ONE literal and cannot drift apart. I/O: (int, int) -> dict."""
+    return {
         "m": m, "n": n, "stacks": 3,
         "shapes": {"L": True, "Rect": True},
         "decomps": {"2+1": True, "1+1+1": True},
         "allowNonCorner": True,
         "dedup": True,
-        "jobs": os.cpu_count(),
+        "jobs": _jobs(),
         "storeAll": False,
     }
+
+
+def _search_grid(Runner, m, n):
+    """Run the real 3-stack search for one grid, default (non-store-all) mode, allow-non-corner,
+    both shapes/decomps.
+
+    Returns {normalized_canonical_hash: twist_tristate}, where the tri-state is
+    sol["verdict"]["twist"] (True=FOLD / False=JAM / None=undecided) — the only field the caller
+    consumes, and the only one that needs to survive a JSON round-trip through the cache.
+    NB: a value of None is MEANINGFUL (undecided); absence of the key means not-enumerated. Callers
+    must test membership, not truthiness."""
+    opts = _opts(m, n)
     solutions, ctx, err = Runner.run_search(opts)
     if err:
         raise RuntimeError("search rejected m=%d n=%d: %s" % (m, n, err))
     by_hash = {}
     for sol in solutions:
-        by_hash.setdefault(_norm_hash(sol["canonicalHash"]), sol)
+        by_hash.setdefault(_norm_hash(sol["canonicalHash"]), sol["verdict"]["twist"])
     return by_hash
 
 
 def run():
-    """Returns (n_agree, n_total, mismatches). n_total is None (skip signal) when
+    """Returns (n_agree, n_total, mismatches, cache). n_total is None (skip signal) when
     results/foldfindings.json is absent. `mismatches` entries are dicts with kind in
-    {"not-enumerated", "verdict_disagree", "twist_undecided"}."""
+    {"not-enumerated", "verdict_disagree", "twist_undecided", "exception"}. `cache` maps each grid
+    to "hit"/"miss" so a PASS can state whether it came from a fresh search or from disk."""
     by_grid, present = _load_ground_truth()
     if not present or not by_grid:
-        return None, None, None
+        return None, None, None, {}
 
     import runner as Runner  # noqa: E402  lazy: keeps this module import-safe/side-effect-light
 
     n_agree = 0
     n_total = 0
     mismatches = []
+    cache = {}
     for grid, recs in sorted(by_grid.items()):
         m_str, n_str = grid.split("x")
         m, n = int(m_str), int(n_str)
         print("progress: searching grid %s (%d ground-truth records)..." % (grid, len(recs)),
               flush=True)
         _t0 = time.time()
-        engine_by_hash = _search_grid(Runner, m, n)
-        print("progress: grid %s search done in %.1fs, %d gate-surviving candidates"
-              % (grid, time.time() - _t0, len(engine_by_hash)), flush=True)
+        opts = _opts(m, n)
+        try:
+            engine_by_hash, hit = OC.get_or_compute(
+                OC.fingerprint("square", _SQUARE_DIR, opts, extra_files=[os.path.abspath(__file__)]),
+                lambda: _search_grid(Runner, m, n),
+                meta={"engine": "square", "grid": grid, "opts": opts,
+                      "recordsDigest": OC.records_digest(recs)})
+        except Exception as exc:                       # one bad grid degrades to a mismatch...
+            cache[grid] = "error"
+            for r in recs:                             # ...rather than killing the whole proof
+                n_total += 1
+                mismatches.append({"grid": grid, "id": r.get("id"), "kind": "exception",
+                                    "detail": "%s: %s" % (type(exc).__name__, exc)})
+            print("progress: grid %s FAILED: %s: %s" % (grid, type(exc).__name__, exc), flush=True)
+            continue
+        cache[grid] = "hit" if hit else "miss"
+        print("progress: grid %s search done in %.1fs (cache %s), %d gate-surviving candidates"
+              % (grid, time.time() - _t0, cache[grid], len(engine_by_hash)), flush=True)
         for r in recs:
             n_total += 1
             key = _norm_hash(r["canonicalHash"])
-            sol = engine_by_hash.get(key)
-            if sol is None:
+            # Membership, NOT .get(): a present value may legitimately be None (twist undecided).
+            # Conflating the two would misreport every not-enumerated record as twist_undecided.
+            if key not in engine_by_hash:
                 mismatches.append({"grid": grid, "id": r.get("id"), "kind": "not-enumerated",
                                     "detail": "ground-truth canonicalHash not found among the "
                                               "engine's gate-surviving candidates for this grid"})
                 continue
-            twist = sol["verdict"]["twist"]
+            twist = engine_by_hash[key]
             if twist is None:
                 mismatches.append({"grid": grid, "id": r.get("id"), "kind": "twist_undecided",
                                     "detail": "engine twist verdict is undecided for a matched "
@@ -150,21 +207,22 @@ def run():
         print("progress: grid %s done, running total %d/%d agree (%d mismatches so far)"
               % (grid, n_agree, n_total, len(mismatches)), flush=True)
 
-    return n_agree, n_total, mismatches
+    return n_agree, n_total, mismatches, cache
 
 
 if __name__ == "__main__":
     _json = "--json" in sys.argv[1:]
-    n_agree, n_total, mismatches = run()
+    n_agree, n_total, mismatches, cache = run()
     if _json:
         # Machine-readable form consumed by scripts/phystest (the physical-testing suite). Exit
         # code matches the human form: 0 on PASS or SKIP, 1 only on a real mismatch.
         print(json.dumps({"engine": "square", "skipped": n_total is None,
                           "nAgree": n_agree, "nTotal": n_total,
-                          "mismatches": mismatches or []}))
+                          "mismatches": mismatches or [], "cache": cache}))
         sys.exit(1 if mismatches else 0)
     if n_total is None:
         print("square: SKIPPED (no ground-truth data present)")
         sys.exit(0)
-    print("square: %d/%d agree (mismatches: %s)" % (n_agree, n_total, mismatches))
+    print("square: %d/%d agree (cache: %s) (mismatches: %s)"
+          % (n_agree, n_total, cache or "-", mismatches))
     sys.exit(0 if not mismatches else 1)
