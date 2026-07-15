@@ -17,6 +17,7 @@ Two faces, both square-specific in the same way the triangle lattices are triang
     bodies (1:1 with the former fold.py / search.py logic).
 """
 import json
+from functools import lru_cache
 
 from lattice.base import Lattice
 
@@ -204,21 +205,55 @@ class SquareLattice(Lattice):
         return d
 
     @staticmethod
-    def canonical_hash(footprint, chains, m, n):
-        best = None
+    @lru_cache(maxsize=None)
+    def automorphisms(m, n):
+        """The subgroup of D4 that maps the m x n sheet onto itself, as a tuple of transforms.
+
+        Derived rather than special-cased: keep t iff t(S) == S over the sheet's own cell set.
+        Square -> all 8 (D4). Non-square -> the 4 with rot in {0, 2} (D2: identity, flipH, flipV,
+        rot180), because apply_transform's odd rotations land on the TRANSPOSED n x m sheet and so
+        are not symmetries of this one. Matches twostack._canonical, which has always done this.
+        Cached: canonical_hash calls this once per candidate (hundreds of thousands per search)."""
+        cells = frozenset((x, y) for x in range(m) for y in range(n))
+        keep = []
         for rot in range(4):
             for flip in range(2):
                 t = {"rot": rot, "flip": flip}
-                fp = sorted([list(SquareLattice.apply_transform(t, c[0], c[1], m, n))
-                             for c in footprint["cells"]])
-                chain_sigs = []
-                for c in chains:
-                    base = sorted([list(SquareLattice.apply_transform(t, b[0], b[1], m, n))
-                                   for b in c["baseCells"]])
-                    arrows = [SquareLattice.transform_arrow(t, a) for a in c["foldArrows"]]
-                    chain_sigs.append({"kind": c["kind"], "base": base, "arrows": arrows})
-                chain_sigs.sort(key=lambda s: (s["kind"], json.dumps(s["base"])))
-                sig = json.dumps({"fp": fp, "chains": chain_sigs}, separators=(",", ":"))
-                if best is None or sig < best:
-                    best = sig
+                if frozenset(SquareLattice.apply_transform(t, x, y, m, n) for (x, y) in cells) == cells:
+                    keep.append(t)
+        return tuple(keep)
+
+    @staticmethod
+    def _hash_over(elements, footprint, chains, m, n):
+        """Minimal fold signature over `elements` (a subset of D4). Shared body so canonical_hash
+        and any caller needing a different group (e.g. the S3 migrator reconstructing the historic
+        all-of-D4 hash) cannot drift apart."""
+        best = None
+        for t in elements:
+            fp = sorted([list(SquareLattice.apply_transform(t, c[0], c[1], m, n))
+                         for c in footprint["cells"]])
+            chain_sigs = []
+            for c in chains:
+                base = sorted([list(SquareLattice.apply_transform(t, b[0], b[1], m, n))
+                               for b in c["baseCells"]])
+                arrows = [SquareLattice.transform_arrow(t, a) for a in c["foldArrows"]]
+                chain_sigs.append({"kind": c["kind"], "base": base, "arrows": arrows})
+            chain_sigs.sort(key=lambda s: (s["kind"], json.dumps(s["base"])))
+            sig = json.dumps({"fp": fp, "chains": chain_sigs}, separators=(",", ":"))
+            if best is None or sig < best:
+                best = sig
         return best
+
+    @staticmethod
+    def canonical_hash(footprint, chains, m, n):
+        """Dedup key: the minimal signature over the sheet's automorphism subgroup.
+
+        Minimizing over all 8 of D4 (the historic behaviour) does NOT over-merge -- a 3-stack fold
+        covers the whole m x n sheet, so a transposed image covers n x m and can never be a legal
+        m x n candidate; for m != n, D4-merge and D2-merge coincide, and the orbit COUNTS are the
+        same either way. What it does do is let the minimum be attained at a non-automorphism, so
+        the representative describes a fold on the transposed sheet and can sit off-grid -- which
+        breaks any consumer that reads this string back as geometry on m x n. Restricting to the
+        automorphisms keeps the same classes and makes the representative on-grid by construction."""
+        return SquareLattice._hash_over(
+            SquareLattice.automorphisms(m, n), footprint, chains, m, n)

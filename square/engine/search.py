@@ -342,14 +342,19 @@ def twist_check(chains):
     return {"decided": False, "pass": None, "pairs": []}
 
 
-# --- Stage 8: D4 canonical hash ---
+# --- Stage 8: canonical hash (automorphism-subgroup dedup) ---
 
-# D4 canonical dedup now lives on SquareLattice (the golden orbit counts ARE D4-orbit counts).
+# Canonical dedup lives on SquareLattice. The golden orbit counts are AUTOMORPHISM-orbit counts:
+# D4 on a square sheet, D2 on a non-square one. They are numerically identical to the historic
+# all-of-D4 counts (a transposed image of a sheet-covering fold covers n x m, so it is never a
+# legal m x n candidate -- for m != n the two groups induce the same classes); what changed in S3
+# is only WHICH member of each class is the representative. See SquareLattice.canonical_hash.
 # Re-exported so search and test_gates resolve apply_transform / transform_arrow / canonical_hash
 # by name while the bodies live in one place.
 apply_transform = SquareLattice.apply_transform
 transform_arrow = SquareLattice.transform_arrow
 canonical_hash = SquareLattice.canonical_hash
+automorphisms = SquareLattice.automorphisms
 
 
 # --- Candidate evaluation / admission (shared by serial + parallel paths) ---

@@ -119,11 +119,15 @@ def closing_candidates(
 
 # ---------- canonical-hash matching (physical-decider lookup) ----------
 #
-# NOTE: a canonical hash is a D4 *dedup key*, NOT a replayable fold path — `transform_arrow`
+# NOTE: a canonical hash is a *dedup key* (minimal signature over the sheet's automorphism
+# subgroup — see SquareLattice.canonical_hash), NOT a replayable fold path — `transform_arrow`
 # is not replay-equivariant with `apply_transform`, so replaying a canonical hash's (base,
 # arrows) can leave the grid (e.g. 6x6 decider #1's arrows exit at the 2nd 'U'). To test a
 # physical decider we therefore MATCH its canonical hash against the engine's own enumerated
 # closing set (same canonical_hash on both sides), never replay it.
+#
+# S3 narrowed the group from all of D4 to the automorphism subgroup, so reps are now on-grid;
+# that does NOT make them replayable, and this example is a square grid (Aut == D4) anyway.
 
 def norm_hash(canonical_hash: str) -> str:
     """Normalize a canonical-hash JSON string (sorted keys, compact) for robust comparison.

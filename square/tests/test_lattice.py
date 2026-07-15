@@ -119,6 +119,21 @@ def test_square_fold_directions():
     assert SquareLattice.fold_directions() == ("L", "R", "U", "D")
 
 
+def test_square_automorphisms_are_d4_on_square_and_d2_otherwise():
+    """The canonicalization group is the sheet's own symmetry group, derived not hardcoded.
+
+    A square sheet admits all 8 of D4; a non-square one only the 4 with rot in {0, 2} (D2), since
+    apply_transform's odd rotations land on the TRANSPOSED n x m sheet. This is the same rule
+    twostack._canonical has always applied, and S3 brought the 3-stack engine into line with it."""
+    for (m, n) in [(6, 6), (5, 5), (1, 1)]:
+        assert len(SquareLattice.automorphisms(m, n)) == 8, f"{m}x{n} should admit all of D4"
+    for (m, n) in [(6, 4), (4, 6), (9, 4), (8, 6)]:
+        auto = SquareLattice.automorphisms(m, n)
+        assert len(auto) == 4, f"{m}x{n} should admit only D2"
+        assert {t["rot"] for t in auto} == {0, 2}
+        assert {t["flip"] for t in auto} == {0, 1}
+
+
 def test_square_d4_canonical_invariant_under_flip():
     """canonical_hash is invariant under a manual D4 flip of footprint + arrows."""
     m, n = 6, 4

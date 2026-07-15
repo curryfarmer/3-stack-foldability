@@ -5,9 +5,14 @@ we MATCH its canonical hash against the engine's own enumerated closing-candidat
 golden) and assert the engine's foldable tag equals the physical outcome. These are the ground-truth
 anchors: a mismatch means the maths disagrees with reality.
 
-Why match-by-hash and not replay: a canonical hash is a D4 dedup key, not a replayable fold
-path (transform_arrow is not replay-equivariant with apply_transform), so replaying it can
-leave the grid. Matching the engine's own canonical_hash on both sides is exact and safe.
+Why match-by-hash and not replay: a canonical hash is a dedup key -- the minimal signature over the
+sheet's automorphism subgroup (S3; all of D4 before it) -- not a replayable fold path
+(transform_arrow is not replay-equivariant with apply_transform), so replaying it can leave the
+grid. Matching the engine's own canonical_hash on both sides is exact and safe.
+
+_is_corner_footprint below DOES read a stored rep back as geometry, which is exactly what S3 made
+sound: minimizing over all of D4 could pick a rep describing the fold on the TRANSPOSED sheet, so a
+non-square rep could sit off-grid and be mis-classified. Reps are now on-grid by construction.
 
 WHY A SNAPSHOT, NOT results/foldfindings.json. The live findings DB is gitignored AND append-written
 at runtime (scripts/phystest/logresult.py, via records.py:52). Reading it directly made this module

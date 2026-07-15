@@ -48,11 +48,13 @@ def parse_args(argv):
                         "the all-singleton decomp for --panels N, e.g. '1+1+1+1' at N=4)")
     p.add_argument("--allow-non-corner", action="store_true")
     p.add_argument("--store-all", action="store_true",
-                   help="Phase A: emit EVERY covered candidate (D4-deduped) with non-destructive "
-                        "gate verdicts as columns, instead of pruning to gate-survivors")
+                   help="Phase A: emit EVERY covered candidate (deduped up to the sheet's symmetry) "
+                        "with non-destructive gate verdicts as columns, instead of pruning to "
+                        "gate-survivors")
     p.add_argument("--jobs", type=int, default=None,
                    help="parallel worker processes (default 1; env FOLD_JOBS as fallback)")
-    p.add_argument("--no-dedup", action="store_true", help="disable D4 dedup")
+    p.add_argument("--no-dedup", action="store_true",
+                   help="disable canonical dedup (D4 on a square sheet, D2 otherwise)")
     p.add_argument("--force", action="store_true",
                    help="(accepted for CLI compat; a no-op now -- generate is stateless and always "
                         "re-derives + overwrites its bundles)")
