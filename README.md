@@ -54,6 +54,7 @@ a record and re-rendering it are the same code path, so the two are always byte-
 sq-generate --m 6 --n 6                            # 3-stack, both decomps, corner footprints
 sq-generate --m 6 --n 5 --decomps 2+1 --allow-non-corner
 sq-generate --stacks 2 --m 6 --n 5                 # RSPA 2-stack (Hamiltonian circuits)
+sq-generate --stacks 4 --m 4 --n 8                 # n-stack: all-singleton 1+1+1+1
 sq-generate --list                                  # summarize out/'s bundles
 sq-render out/<uid>/<uid>.json --out somewhere/
 
@@ -64,37 +65,60 @@ tri-render out/<uid>/<uid>.json
 
 ## Validating against physical ground truth
 
-`scripts/validate.py` re-derives a fresh verdict for every physically-tested fold on record (not
-just re-reading a stored boolean) and checks it still agrees with what was physically folded.
-Requires the gitignored local research data (`docs/`, `report/`, `results/`) — skips gracefully
-per engine if that data isn't present (e.g. a fresh clone):
+The engines make falsifiable claims about paper: every fold on record was physically folded by hand,
+and the engine's verdict must still match that outcome. Both tools below **re-derive** a fresh
+verdict by re-running the search — never by re-reading a stored boolean — and need the gitignored
+local research data (`results/`), skipping gracefully per engine when it is absent (a fresh clone):
 
 ```bash
-python scripts/validate.py
+python scripts/validate.py       # both engines' regression proofs
+python scripts/phystest check    # the acceptance oracle (see the caveat below)
 ```
 
-It never imports both engines in one process — it subprocess-dispatches
-`scripts/validate_triangle.py` and `scripts/validate_square.py` independently.
+Neither imports both engines in one process; both subprocess-dispatch the per-engine checkers.
+
+**`phystest check` is expensive and its result is not a simple pass/fail.** It re-enumerates every
+recorded grid from scratch, which is hours on the big ones (6x8 alone measured 2.6h), so results are
+cached per `(engine-source fingerprint, grid)` under `results/.oracle_cache/` — edit anything under
+`square/{engine,lattice,twist}` and every square entry is invalidated by design. It distinguishes
+`FAIL` (a record genuinely disagrees — a real regression) from `ERROR` (the harness timed out or
+broke, so **nothing was proven either way**); conflating those two is what made an earlier version of
+this oracle untrustworthy. Note its 4h default timeout is smaller than a fully-cold square run, so
+from a cold cache it takes **two invocations** — the per-grid cache survives a kill, so just re-run.
 
 ## Tests
 
 ```bash
-pytest
+python scripts/run_tests.py     # the gate: all three suites, each in its own interpreter
+pytest                          # smoketest/ only (what a bare pytest is configured to run)
 ```
 
-Runs `smoketest/` — fast, offline, ground-truth-independent packaging/import/CLI smoke tests
-(not a replacement for `scripts/validate.py`, which is the real regression proof).
+There are three tracked suites, and they can **never share an interpreter** — `square/` and
+`triangle/` each put their own bare-named `lattice` on `sys.path`, so collecting both in one process
+races whichever `_bootstrap` ran second. `run_tests.py` dispatches each separately:
+
+| suite            | covers                                                        |
+|------------------|---------------------------------------------------------------|
+| `smoketest/`     | packaging / import / CLI smoke — offline, ground-truth-free     |
+| `square/tests/`  | the square engine: gates, goldens, canonical hashing, n-stack   |
+| `triangle/tests/`| the triangle engine: per-tiling geometry, closure, fold validity |
+
+Expensive engine sweeps are marked `slow` and **deselected by default** (`pytest.ini`'s
+`addopts = -m "not slow"`). Run them with `pytest -m slow`; some honour `FOLD_JOBS=N` to parallelize.
+
+Passing tests are not the same as agreeing with reality — for that, see below.
 
 ## Repository layout
 
 ```
 triangle/        installable package: the non-square-tiling engine + tri-render/tri-generate
 square/          installable package: the square-grid engine + sq-render/sq-generate
-scripts/         validate.py + validate_triangle.py + validate_square.py
+  tests/         the square suite (golden baselines + fixtures live here, tracked)
+scripts/         run_tests.py (the gate) + validate*.py + phystest/ (the acceptance oracle)
 smoketest/       tracked pytest suite (packaging/import/CLI smoke only)
 reference/       external source material (the paper + the authors' own reference implementation)
 ```
 
-`docs/`, `report/`, `results/`, `deprecated/` are local-only (gitignored) research history: lab
-logs, generated figures, the physical-fold findings DB, and archived exploratory code. They exist
-on the maintainer's machine but are not part of the tracked tree.
+`docs/`, `report/`, `results/` are local-only (gitignored) research history: lab logs, generated
+figures, and the physical-fold findings DB. They exist on the maintainer's machine but are not part
+of the tracked tree — everything needed to run the suites is tracked.
