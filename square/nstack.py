@@ -9,13 +9,14 @@ nH-even/nV-odd branch, reflection's all-pairs shared-crease scan, and a `panels`
 exit_shape). This module is the missing *front door*: it names the opts, fixes the row schema, and
 gives the sweep something tracked to call.
 
-REPLACES `scratch_examples/hunt_worker.py` (untracked). The opts and row schema below are
-byte-compatible with it by design -- `square/tests/fixtures/nstack_p4_hunt_results.jsonl` is that
-script's output and is the only oracle we have for n-stack, so drifting the schema would strand it.
-Two deliberate divergences from the scratch original, both documented in `run_grid`:
-  * `jobs` defaults to None (serial / FOLD_JOBS), not a hardcoded 20.
-  * `storeAll` stays absent, so the search is gate-PRUNED, not store-all. The oracle rows were
-    produced that way; turning it on changes `survivors` and invalidates the comparison.
+THE ROW SCHEMA BELOW IS FROZEN by `square/tests/fixtures/nstack_p4_hunt_results.jsonl` — the only
+oracle we have for n-stack, recorded by the overnight sweep that this module's opts reproduce.
+Drifting the schema strands it, and it cannot be cheaply remade (that sweep burned an 8h budget and
+still never reached panels=5). Two opts are load-bearing for that comparison:
+  * `storeAll` must stay ABSENT, so the search is gate-PRUNED, not store-all. The oracle rows were
+    produced that way; turning it on changes `survivors` and invalidates every row.
+  * `allowNonCorner` must stay True — the sweep was non-corner, and corner-only is known to HIDE
+    foldability outright.
 
 HASHES IN THIS SCHEMA ARE NOT COMPARABLE ACROSS S3. `bentExamples[].hash` is a `canonicalHash`, and
 S3 (2026-07-16) narrowed canonicalization from all of D4 to the sheet's automorphism subgroup, which
@@ -80,9 +81,9 @@ def is_bent(rec):
 def run_grid(m, n, panels, *, allow_non_corner=True, dedup=True, jobs=None, use_runner=True):
     """Run one grid's all-singleton search -> one result row (the oracle jsonl's schema).
 
-    `use_runner=True` goes through runner.run_search, picking up the FOLD_PY=pypy toggle; the scratch
-    original called Search.run in-process. Both produce identical rows -- the PyPy boundary marshals
-    (solutions, ctx, err) -- so this only buys speed. Pass use_runner=False to force in-process.
+    `use_runner=True` goes through runner.run_search, picking up the FOLD_PY=pypy toggle. Both paths
+    produce identical rows -- the PyPy boundary marshals (solutions, ctx, err) back -- so this only
+    buys speed. Pass use_runner=False to force in-process.
 
     On engine rejection the row is `{m, n, panels, err}` with NO gate fields, matching the 24 timeout
     rows in the oracle: callers must check `err` before reading counts.

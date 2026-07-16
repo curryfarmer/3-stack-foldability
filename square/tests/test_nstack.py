@@ -1,10 +1,9 @@
 """test_nstack.py — the n-stack engine vs its recorded known-answer oracle.
 
-fixtures/nstack_p4_hunt_results.jsonl is the ONLY oracle for n-stack (N > 3): 35 rows from the
-overnight ladder that scratch_examples/hunt_n4n5.py ran, of which 11 completed and 24 timed out. It
-is TRACKED precisely because it cannot be cheaply recreated -- the sweep burned an 8h budget and
-still never reached panels=5, so every row here is expensive evidence. These tests pin square/nstack.py
-(the tracked replacement for that scratch worker) against it.
+fixtures/nstack_p4_hunt_results.jsonl is the ONLY oracle for n-stack (N > 3): 35 rows from an
+overnight grid ladder, of which 11 completed and 24 timed out. It is TRACKED precisely because it
+cannot be cheaply recreated -- that sweep burned an 8h budget and still never reached panels=5, so
+every row here is expensive evidence. These tests pin square/nstack.py against it.
 
 WHAT IS COMPARED, AND WHY NOT MORE. Only the COUNT columns
 (coveredCount/exitPass/parityPass/survivors/fold/jam/bentFoldCount). Never `bentExamples[].hash`:

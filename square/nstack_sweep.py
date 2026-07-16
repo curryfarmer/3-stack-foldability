@@ -6,10 +6,9 @@ wall-clock timeout, and durably appends one JSON line per grid to a .jsonl -- fl
 results survive the process/session being torn down mid-run. Re-running RESUMES: grids already in the
 .jsonl are skipped, so a killed 8h sweep does not re-pay for what it already settled.
 
-REPLACES `scratch_examples/hunt_n4n5.py` (untracked). Its output is
-`square/tests/fixtures/nstack_p4_hunt_results.jsonl` -- 35 rows, panels=4 only (the original burned
-its 8h budget before reaching panels=5) -- which is the ONLY oracle for n-stack and is pinned by
-square/tests/test_nstack.py. The row schema is therefore frozen; see square/nstack.py.
+This sweep produced `square/tests/fixtures/nstack_p4_hunt_results.jsonl` -- 35 rows, panels=4 only,
+because it burned its 8h budget before reaching panels=5. That file is the ONLY oracle for n-stack
+and is pinned by square/tests/test_nstack.py, so the row schema is frozen; see square/nstack.py.
 
 WHY A SUBPROCESS PER GRID, AND WHY THE KILL PATH LOOKS LIKE THIS. Cost scales brutally with panels:
 6x8 at panels=4 is only 48 cells and ran unbounded under a 45-min cap. So a grid must be killable.
@@ -19,12 +18,11 @@ the recovery communicate() that subprocess.run() does internally after a timeout
 both load-bearing, both preserved verbatim from the original:
   * redirect worker output to a FILE, never a PIPE  -> nothing to hold open, no hang
   * `taskkill /F /T` the whole tree, not proc.kill() -> no orphaned grandchildren
-Four stale 0-byte `_worker_*.tmp` files in scratch_examples/ are the receipts of this path firing.
+The same pattern guards the acceptance oracle (scripts/phystest/check.py).
 
-DIVERGENCE FROM THE ORIGINAL: `jobs` defaults to 1, not a hardcoded 20. Jobs cannot change the
-RESULT (search.run's parallel path is documented byte-identical to serial), only the wall-clock --
-but it changes it a LOT (4x8 at panels=4: 2.5s at jobs=20 vs 82s serial), so pass --jobs on a real
-sweep. The default is 1 so that an accidental run does not seize the machine.
+`jobs` defaults to 1 so an accidental run cannot seize the machine. Jobs cannot change the RESULT
+(search.run's parallel path is documented byte-identical to serial), only the wall-clock -- but it
+changes that a LOT (4x8 at panels=4: 2.5s at jobs=20 vs 82s serial), so pass --jobs on a real sweep.
 
 Run:
   python square/nstack_sweep.py --panels 4 --jobs 20
