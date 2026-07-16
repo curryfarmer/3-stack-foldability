@@ -46,7 +46,7 @@ def all_singleton_decomp_key(panels):
     decomposition. The public accessor for the engine's helper: tracked callers (this module,
     generate.py, nstack_sweep.py, the tests) must not reach for a leading-underscore engine private.
     I/O: (panels:int) -> str."""
-    return Search._all_singleton_decomp_key(panels)
+    return Search.all_singleton_decomp_key(panels)
 
 
 def build_opts(m, n, panels, *, allow_non_corner=True, dedup=True, jobs=None):

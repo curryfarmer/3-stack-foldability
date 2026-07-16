@@ -11,8 +11,8 @@
 > | S0 physical suite | **DONE** | `scripts/phystest/`, `smoketest/test_physical_suite.py` — now **tracked** |
 > | S1 oracle repair + fingerprint cache | **DONE** | `4ce39da`, `3aeb836`; the cache **exists** (`scripts/phystest/oracle_cache.py`, live under `results/.oracle_cache/`) |
 > | S2 test corpus + runner | **DONE** | `d0ce481`, `8ccf80f`, `c15b661`, `4904294`; `square/tests` + `triangle/tests` **tracked**, `scripts/run_tests.py` **exists** |
-> | S3 canonical_hash + migration | **DONE** | `d0083ed`, `0ab115d`, `3d55cb1`, `33c5f94`; acceptance gate (cold `phystest check`) **in flight** — 60/61 square records verified (all agree), 8x6 still searching, triangle 22/22 |
-> | S4 n-stack first-class | **DONE** (one edit deferred) | `a928cea`, `d9d05a3`, `905d50e`, `e0121b3`; `--stacks N` uncapped, `square/nstack.py` + sweep + tests. Deferred: promote `_all_singleton_decomp_key` → public (A2), blocked until the S3 gate finishes |
+> | S3 canonical_hash + migration | **DONE** | `d0083ed`, `0ab115d`, `3d55cb1`, `33c5f94`; acceptance gate **GREEN** — `phystest check: PASS (83/83 records agree)`, square 61/61 (8x6 searched cache-miss in 6534s → now cached), triangle 22/22 |
+> | S4 n-stack first-class | **DONE** | `a928cea`, `d9d05a3`, `905d50e`, `e0121b3`; `--stacks N` uncapped, `square/nstack.py` + sweep + tests. A2 (promote `_all_singleton_decomp_key` → public `all_singleton_decomp_key` in `square/engine/search.py`, private alias kept) **landed** after the S3 gate finished |
 >
 > **The working tree is now CLEAN** — the Pre-flight "dirty tree and the dirt is load-bearing" section is
 > historical; both efforts it lists landed. Any snapshot below claiming a file is *untracked*,

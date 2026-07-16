@@ -65,10 +65,16 @@ def enumerate_footprints(m, n, opts):
 
 # --- Stage 3: decomposition enumeration ---
 
-def _all_singleton_decomp_key(panels):
+def all_singleton_decomp_key(panels):
     """'1+1+1' at panels=3, '1+1+1+1' at panels=4, etc. — the CLI/opts key naming the
     all-singleton (N chains of 1 base cell each) decomposition for a given panel count."""
     return "+".join(["1"] * panels)
+
+
+# Back-compat alias: this was a leading-underscore private before n-stack made it a tracked contract
+# (nstack.py, generate.py, nstack_sweep.py, the tests all name it). Kept so any older in-tree caller
+# still resolves.
+_all_singleton_decomp_key = all_singleton_decomp_key
 
 
 def enumerate_decompositions(footprint, opts):
@@ -78,9 +84,9 @@ def enumerate_decompositions(footprint, opts):
 
     # All-singleton (1+1+1+...+1): one 1-chain per footprint cell. Generic over any panel
     # count and shape — byte-identical to the old hardcoded 3-cell 1+1+1 branches at panels=3.
-    if opts["decomps"].get(_all_singleton_decomp_key(panels)):
+    if opts["decomps"].get(all_singleton_decomp_key(panels)):
         out.append({
-            "decomp": _all_singleton_decomp_key(panels),
+            "decomp": all_singleton_decomp_key(panels),
             "chains": [{"kind": "1chain", "baseCells": [c]} for c in cells],
         })
 
