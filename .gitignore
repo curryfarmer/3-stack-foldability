@@ -15,19 +15,17 @@ report/node_modules/
 # Personal local Claude settings + runtime state + handoff notes (machine-specific, local-only)
 .claude/
 
-# Annotated learning copy (regenerable teaching snapshot; not source of truth)
-annotated-codebase/
-
 # Default sq-generate/tri-generate output (out/<uid>/ bundles) -- regenerable, not source of truth
 out/
 
 # sq-generate bundle dirs written to a custom --out instead of out/, plus the scratch dir the report
 # renderers use as a montage sink. Same idea as out/: regenerable, not source of truth. Kept on disk
-# rather than deleted because square/render/report_examples.py reads SPECIFIC uids out of the g_*
-# dirs for its figure captions, and regenerating them does NOT reproduce those uids -- a uid hashes
-# the canonical hash, which S3 rewrote for every non-square grid (g_2p1_6x4/e194f4a50fe6 ->
-# 0728f7a454d5). report_examples.py also RECREATES scratch_examples/ on every run (makedirs), so
-# deleting it is not enough to keep `git status` clean.
+# rather than deleted because square/render/report_examples.py hardcodes SPECIFIC uids out of the g_*
+# dirs for its figure captions (e.g. g_2p1_6x4/07dff02ba5c9 at report_examples.py:402), and
+# regenerating them does NOT reproduce those uids -- a uid hashes the canonical geometry, which S3
+# rewrote for non-square grids (the pre->post map is results/s3_uid_map.json). report_examples.py
+# also RECREATES scratch_examples/ on every run (makedirs), so deleting it is not enough to keep
+# `git status` clean.
 g_111_*/
 g_2p1_*/
 scratch2s/
@@ -37,10 +35,9 @@ scratch_examples/
 # run artifacts; the verdict that matters is recorded in docs/SESSIONS.md, not here.
 /oracle_run*
 
-# Local-only working dirs: kept on disk, untracked (git rm --cached'd). Notes, archived
-# research, the write-up and generated results (SQLite DB lives here) live locally and are not part
-# of the shared tree. (annotated-codebase/ above is the same idea.)
-deprecated/
+# Local-only working dirs: kept on disk, untracked (git rm --cached'd). Research notes, the
+# write-up and its figures, and generated results (incl. the physical-fold findings DB and the
+# oracle cache) live locally and are not part of the shared tree.
 report/
 results/
 
