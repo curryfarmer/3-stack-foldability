@@ -25,29 +25,84 @@ from lattice.reflect import reflect_point
 
 # ---------- grid graph ----------
 
-def _adjacency(m, n):
+def _adjacency(m, n, cells=None):
+    """4-neighbour grid graph. cells=None -> the full m x n rectangle (historic path, in the
+    original y-outer/x-inner order so circuit enumeration is byte-identical); cells=<frozenset
+    of (x,y)> -> only the drawn sheet's cells, so edges to off-sheet holes are dropped and an
+    HC over `cells` cannot cross a hole."""
     adj = defaultdict(list)
-    for y in range(n):
-        for x in range(m):
+    if cells is None:
+        for y in range(n):
+            for x in range(m):
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < m and 0 <= ny < n:
+                        adj[(x, y)].append((nx, ny))
+    else:
+        for (x, y) in sorted(cells):
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < m and 0 <= ny < n:
-                    adj[(x, y)].append((nx, ny))
+                nb = (x + dx, y + dy)
+                if nb in cells:
+                    adj[(x, y)].append(nb)
     return adj
 
 
-def enumerate_hc(m, n):
-    """All Hamiltonian circuits as ordered cell lists (each undirected cycle once).
+def _sheet_connected(sheet):
+    """4-connectivity of a drawn sheet (iterative flood-fill; ports search.py:_sheet_connected
+    so twostack stays self-contained -- it must NOT import the engine search closure)."""
+    it = iter(sheet)
+    start = next(it)
+    seen = {start}
+    stack = [start]
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb = (x + dx, y + dy)
+            if nb in sheet and nb not in seen:
+                seen.add(nb)
+                stack.append(nb)
+    return len(seen) == len(sheet)
 
-    Fix start = (0,0); count a cycle in the single direction where its second node has a
-    smaller linear index than its last node, so each undirected HC is emitted exactly once.
+
+def _validate_sheet(sheet):
+    """Structural guards for a drawn 2-stack sheet, same order + (return an error string, never
+    raise) convention as the 3-stack engine: empty -> origin-normalized -> 4-connected -> even
+    cell count (two EQUAL stacks need len(cells) even). Returns None when foldable-shaped."""
+    if not sheet:
+        return "sheet is empty"
+    xs = [c[0] for c in sheet]
+    ys = [c[1] for c in sheet]
+    if min(xs) != 0 or min(ys) != 0:
+        return "sheet must be normalized to the origin (min corner (0,0))"
+    if not _sheet_connected(sheet):
+        return "sheet is not 4-connected"
+    if len(sheet) % 2 != 0:
+        return "cell count must be even (2-stack folds into two equal stacks)"
+    return None
+
+
+def enumerate_hc(m, n, cells=None):
+    """All Hamiltonian circuits as ordered cell lists (each undirected cycle once), over the full
+    rectangle (cells=None) or the drawn sheet (cells given).
+
+    Fix a start node; count a cycle in the single direction where its second node has a smaller
+    order-index than its last node, so each undirected HC is emitted exactly once.
     """
-    N = m * n
-    if N % 2 != 0:
-        return []            # bipartite grid graph has no balanced HC when N is odd
-    adj = _adjacency(m, n)
-    start = (0, 0)
-    idx = lambda c: c[1] * m + c[0]
+    if cells is None:
+        N = m * n
+        if N % 2 != 0:
+            return []            # bipartite grid graph has no balanced HC when N is odd
+        adj = _adjacency(m, n)
+        start = (0, 0)
+        idx = lambda c: c[1] * m + c[0]
+    else:
+        N = len(cells)
+        if N % 2 != 0:
+            return []
+        adj = _adjacency(m, n, cells)
+        cell_order = {c: i for i, c in enumerate(sorted(cells))}
+        start = min(cells)       # a real sheet cell -- (0,0) may be a hole in an L-shape
+        idx = lambda c: cell_order[c]
     circuits = []
     path = [start]
     visited = {start}
@@ -177,19 +232,39 @@ def twist_value(circuit):
 
 # ---------- D4 + cyclic + reversal canonical key (dedup up to grid symmetry) ----------
 
-def _canonical(circuit, m, n):
-    def transforms(x, y):
-        # D2 (identity, flipH, flipV, rot180) always; add the 90deg/diagonal images only when
-        # m==n (otherwise they aren't symmetries of the grid and would wrongly merge HCs).
-        d2 = [(x, y), (m - 1 - x, y), (x, n - 1 - y), (m - 1 - x, n - 1 - y)]
-        if m != n:
-            return d2
-        return d2 + [(y, x), (n - 1 - y, x), (y, m - 1 - x), (n - 1 - y, m - 1 - x)]
+def _sym_transforms(m, n):
+    """Candidate symmetry maps of the m x n bounding box as (x,y)->(x,y) callables, in the
+    historic order: D2 (identity, flipH, flipV, rot180) always; the four 90deg/diagonal images
+    only when m==n (otherwise they map the box to n x m and aren't grid symmetries)."""
+    fns = [
+        lambda x, y: (x, y),
+        lambda x, y: (m - 1 - x, y),
+        lambda x, y: (x, n - 1 - y),
+        lambda x, y: (m - 1 - x, n - 1 - y),
+    ]
+    if m == n:
+        fns += [
+            lambda x, y: (y, x),
+            lambda x, y: (n - 1 - y, x),
+            lambda x, y: (y, m - 1 - x),
+            lambda x, y: (n - 1 - y, m - 1 - x),
+        ]
+    return fns
+
+
+def _canonical(circuit, m, n, cells=None):
+    """Canonical key for dedup up to grid symmetry (D4 on a square box, D2 otherwise) plus cyclic
+    rotation + reversal. When a drawn sheet is given, only the box symmetries that map the sheet
+    ONTO ITSELF (its stabilizer subgroup) are used -- a symmetry the sheet breaks would map cells
+    off-sheet and wrongly merge distinct folds (under-count -> hidden folds). For a full rectangle
+    the stabilizer is the whole box group, so this reproduces the historic key byte-identically."""
+    fns = _sym_transforms(m, n)
+    if cells is not None:
+        fns = [f for f in fns if frozenset(f(x, y) for (x, y) in cells) == cells]
     best = None
     K = len(circuit)
-    ntrans = 8 if m == n else 4
-    for t in range(ntrans):
-        pts = [transforms(c[0], c[1])[t] for c in circuit]
+    for f in fns:
+        pts = [f(c[0], c[1]) for c in circuit]
         # all rotations + reversal of the cyclic sequence
         for r in range(K):
             rot = pts[r:] + pts[:r]
@@ -200,13 +275,15 @@ def _canonical(circuit, m, n):
     return best
 
 
-def _uid(circuit, m, n):
+def _uid(circuit, m, n, cells=None):
     """Stable 12-hex content id: sha1 over (lattice, MxN, D4+cyclic+reversal canonical circuit).
     Same physical 2-stack fold -> same id across runs. Mirrors generate.py's 3-stack
     `make_uid(lattice_name, m, n, canonical_hash)` convention (and triangle's independent
     gen_testset.fold_uid()) -- 2-stack has no canonicalHash field, so _canonical()'s own return
-    (a JSON-serializable tuple of (x,y) tuples) stands in as the canonical-identity input."""
-    canon = _canonical(circuit, m, n)
+    (a JSON-serializable tuple of (x,y) tuples) stands in as the canonical-identity input. For a
+    drawn sheet the stabilizer-restricted canonical circuit (which visits exactly the sheet cells)
+    is the identity input, so distinct sheets never collide."""
+    canon = _canonical(circuit, m, n, cells)
     payload = "square2stack|%dx%d|%s" % (m, n, json.dumps(canon, sort_keys=True))
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
@@ -216,11 +293,19 @@ def _uid(circuit, m, n):
 def run(opts):
     m, n = opts["m"], opts["n"]
     ctx = {"hcCount": 0, "reflectionPass": 0, "twistPass": 0, "foldable": 0}
-    if (m * n) % 2 != 0:
+    # A grid-file supplies a drawn sheet as a JSON-able list of [x,y] (mirrors search.py:_sheet_set);
+    # None -> the historic full-rectangle path, byte-identical.
+    sheet = frozenset(map(tuple, opts["sheet"])) if opts.get("sheet") else None
+    if sheet is not None:
+        err = _validate_sheet(sheet)
+        if err:
+            return [], ctx, err
+        m, n = max(c[0] for c in sheet) + 1, max(c[1] for c in sheet) + 1   # tight bbox
+    elif (m * n) % 2 != 0:
         return [], ctx, "m*n must be even (no balanced Hamiltonian circuit otherwise)"
 
     lookup = _build_edge_lookup(m, n)
-    circuits = enumerate_hc(m, n)
+    circuits = enumerate_hc(m, n, sheet)
     ctx["hcCount"] = len(circuits)
 
     dedup = opts.get("dedup", True)
@@ -229,7 +314,7 @@ def run(opts):
     next_id = 1
     for circ in circuits:
         if dedup:
-            key = _canonical(circ, m, n)
+            key = _canonical(circ, m, n, sheet)
             if key in seen:
                 continue
             seen.add(key)
@@ -246,7 +331,7 @@ def run(opts):
             ctx["foldable"] += 1
         solutions.append({
             "id": next_id,
-            "uid": _uid(circ, m, n),
+            "uid": _uid(circ, m, n, sheet),
             "circuit": [[c[0], c[1]] for c in circ],
             "cutEdge": [[cut[0][0], cut[0][1]], [cut[1][0], cut[1][1]]] if cut else None,
             "verdict": {"reflection": refl_ok, "twist": twist_ok, "foldable": foldable},

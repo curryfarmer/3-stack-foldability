@@ -111,10 +111,12 @@ def build_opts(args):
     else:
         m, n, sheet = args.m, args.n, None
     if n_stacks == 2:
+        # 2-stack now ingests a drawn sheet too (twostack.run re-derives the bbox + guards the
+        # sheet); a rectangle keeps opts["sheet"] absent -> the byte-identical historic path.
+        opts = {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup}
         if sheet is not None:
-            raise ValueError("grid-file ingest is 3-stack/n-stack only; the 2-stack engine has no "
-                             "arbitrary-sheet path yet")
-        return {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup}
+            opts["sheet"] = sheet
+        return opts
     panels = n_stacks
     all_singleton_key = NStack.all_singleton_decomp_key(panels)
     default_decomps = f"2+1,{all_singleton_key}" if panels == 3 else all_singleton_key
