@@ -39,12 +39,19 @@ def initial_placement(base_cells):
     }
 
 
-def make_fold(active, direction, m, n):
-    """Fold `active` in `direction`; return new placement or None if it leaves the grid."""
+def make_fold(active, direction, m, n, sheet=None):
+    """Fold `active` in `direction`; return new placement or None if it leaves the grid.
+
+    sheet=None: reject a fold whose image leaves the m x n rectangle (historic behaviour). Pass a
+    frozenset of the sheet's cells for an arbitrary polyomino: the image must land on cells of S
+    (rejecting both out-of-bbox cells AND in-bbox holes)."""
     b = bounds(active["cells"])
     spec = fold_spec(direction, b)
     new_cells = reflect_cells(active["cells"], spec["axis"], spec["cBoundary"])
-    if not in_bounds(new_cells, m, n):
+    if sheet is not None:
+        if not all(c in sheet for c in new_cells):
+            return None
+    elif not in_bounds(new_cells, m, n):
         return None
     return {
         "cells": new_cells,

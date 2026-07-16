@@ -16,6 +16,32 @@ def _xy(c):
     return {"x": c[0], "y": c[1]}
 
 
+def _sheet_set(opts):
+    """Reconstitute opts['sheet'] (a list of [x,y], picklable / json-able across the worker + PyPy
+    boundaries) to a frozenset of (x,y) tuples. None when no sheet -> every caller falls back to the
+    historic m x n rectangle path, byte-identically. Call once per worker, not in the hot loop."""
+    s = opts.get("sheet")
+    if s is None:                     # key ABSENT -> historic rectangle path (byte-identical)
+        return None
+    return frozenset(map(tuple, s))   # present (even if empty) -> sheet path; run() rejects an empty one
+
+
+def _sheet_connected(sheet):
+    """True iff the sheet is a single 4-connected component. A disconnected sheet can't be one folded
+    stack, so run() rejects it up front."""
+    it = iter(sheet)
+    seen = {next(it)}
+    stack = list(seen)
+    while stack:
+        cx, cy = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb = (cx + dx, cy + dy)
+            if nb in sheet and nb not in seen:
+                seen.add(nb)
+                stack.append(nb)
+    return len(seen) == len(sheet)
+
+
 # --- Stage 2: footprint enumeration ---
 
 # L footprint templates now live on SquareLattice; re-exported for the enumerator below.
@@ -25,6 +51,13 @@ L_BASE = SquareLattice.L_BASE
 def enumerate_footprints(m, n, opts):
     out = []
     panels = opts.get("panels", 3)
+    # Arbitrary-sheet ingest: opts["sheet"] is a LIST (picklable / json-able) reconstituted to a
+    # frozenset once here. Absent -> S is None and every test below is the historic rectangle bounds.
+    S = _sheet_set(opts)
+    def _inside(cells):
+        if S is not None:
+            return all(c in S for c in cells)
+        return all(0 <= x < m and 0 <= y < n for (x, y) in cells)
     if opts["shapes"].get("L"):
         tpls = SquareLattice.l_template(panels)
         for rot in range(4):
@@ -32,8 +65,10 @@ def enumerate_footprints(m, n, opts):
             for ay in range(n):
                 for ax in range(m):
                     cells = [(x + ax, y + ay) for (x, y) in tpl]
-                    if all(0 <= x < m and 0 <= y < n for (x, y) in cells):
-                        if not opts.get("allowNonCorner"):
+                    if _inside(cells):
+                        # The corner special-case has no meaning on an arbitrary sheet (no canonical
+                        # corner), so it drops when a sheet is present regardless of allowNonCorner.
+                        if S is None and not opts.get("allowNonCorner"):
                             xs = [c[0] for c in cells]
                             ys = [c[1] for c in cells]
                             if min(xs) != 0 or min(ys) != 0:
@@ -51,8 +86,8 @@ def enumerate_footprints(m, n, opts):
             for ay in range(n):
                 for ax in range(m):
                     cells = [(x + ax, y + ay) for (x, y) in tpl]
-                    if all(0 <= x < m and 0 <= y < n for (x, y) in cells):
-                        if not opts.get("allowNonCorner"):
+                    if _inside(cells):
+                        if S is None and not opts.get("allowNonCorner"):
                             if ax != 0 or ay != 0:
                                 continue
                         out.append({
@@ -144,40 +179,44 @@ def can_partition(component_sizes, sizes):
     return recur(0, 0)
 
 
-def connectivity_ok(reserved, m, n, remaining_sizes):
+def connectivity_ok(reserved, m, n, remaining_sizes, sheet=None):
     component_sizes = []
     visited = set()
-    for y in range(n):
-        for x in range(m):
-            if (x, y) in reserved or (x, y) in visited:
+    # sheet=None: flood-fill the m x n rectangle (historic, byte-identical). sheet present: flood-fill
+    # S's own cells only, so a fold cannot reach through an off-sheet hole. sorted() keeps the walk
+    # deterministic (serial vs parallel byte-match) regardless of frozenset iteration order.
+    starts = ((x, y) for y in range(n) for x in range(m)) if sheet is None else sorted(sheet)
+    for cell in starts:
+        if cell in reserved or cell in visited:
+            continue
+        size = 0
+        stack = [cell]
+        while stack:
+            cur = stack.pop()
+            if cur in visited:
                 continue
-            size = 0
-            stack = [(x, y)]
-            while stack:
-                cur = stack.pop()
-                if cur in visited:
-                    continue
-                visited.add(cur)
-                size += 1
-                cx, cy = cur
-                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                    nb = (cx + dx, cy + dy)
-                    if 0 <= nb[0] < m and 0 <= nb[1] < n and nb not in reserved and nb not in visited:
-                        stack.append(nb)
-            component_sizes.append(size)
+            visited.add(cur)
+            size += 1
+            cx, cy = cur
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = (cx + dx, cy + dy)
+                in_region = (nb in sheet) if sheet is not None else (0 <= nb[0] < m and 0 <= nb[1] < n)
+                if in_region and nb not in reserved and nb not in visited:
+                    stack.append(nb)
+        component_sizes.append(size)
     return can_partition(component_sizes, remaining_sizes)
 
 
 # --- Stage 4 driver: DFS ---
 
-def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
+def search_decomposition(m, n, K, decomposition, on_candidate, ctx, sheet=None):
     chains = [{
         "kind": c["kind"],
         "baseCells": list(c["baseCells"]),
         "placements": [],
         "foldArrows": [],
     } for c in decomposition["chains"]]
-    total_cells = m * n
+    total_cells = len(sheet) if sheet is not None else m * n
 
     order = sorted(range(len(chains)),
                    key=lambda i: (-(len(chains[i]["baseCells"]) * K),
@@ -215,7 +254,7 @@ def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
             return
         if depth == K:
             remaining = [chain_size[order[i]] for i in range(order_idx + 1, len(chains))]
-            if not remaining or connectivity_ok(reserved, m, n, remaining):
+            if not remaining or connectivity_ok(reserved, m, n, remaining, sheet):
                 search_chains(order_idx + 1)
             return
         chain = chains[real_idx]
@@ -223,7 +262,7 @@ def search_decomposition(m, n, K, decomposition, on_candidate, ctx):
         for d in SquareLattice.fold_directions():
             if ctx.get("cancelled"):
                 return
-            np_ = Fold.make_fold(active, d, m, n)
+            np_ = Fold.make_fold(active, d, m, n, sheet)
             if np_ is None:
                 continue
             if any(c in reserved for c in np_["cells"]):
@@ -369,7 +408,7 @@ automorphisms = SquareLattice.automorphisms
 # verdict logic exists exactly once. _evaluate_candidate is pure and returns JSON-plain
 # data, so a worker process can produce candidates and the parent can replay dedup.
 
-def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False):
+def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False, sheet=None):
     """Run the per-candidate gates and build the solution record (no id, no dedup).
 
     Returns (gates_passed, sol). gates_passed in 0..3 mirrors the serial counter bumps
@@ -394,7 +433,7 @@ def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False):
     gates_passed = 3 if (ev and pa and rf) else 2 if (ev and pa) else 1 if ev else 0
 
     set_fold_counts(chains)          # ensure nH/nV on EVERY chain (parity_check may have bailed early)
-    h = canonical_hash(fp, chains, m, n)
+    h = canonical_hash(fp, chains, m, n, sheet)
     twist = twist_check(chains)
     if store_all:
         verdict = {
@@ -500,6 +539,7 @@ def _run_footprint_chunk(payload):
     """
     m, n, K, opts, ordinal, i_start, i_end = payload
     store_all = opts.get("storeAll", False)
+    sheet = _sheet_set(opts)          # reconstitute the frozenset ONCE per worker, not per candidate
     footprints = enumerate_footprints(m, n, opts)
     local_ctx = {k: 0 for k in _WORKER_CTX_KEYS}
     records = []
@@ -509,7 +549,7 @@ def _run_footprint_chunk(payload):
             local_ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all)
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
                 if gp >= 1:
                     local_ctx["exitPass"] += 1
                 if gp >= 2:
@@ -519,7 +559,7 @@ def _run_footprint_chunk(payload):
                 if sol is not None:
                     records.append(sol)
 
-            search_decomposition(m, n, K, decomp, on_candidate, local_ctx)
+            search_decomposition(m, n, K, decomp, on_candidate, local_ctx, sheet)
     return ordinal, records, local_ctx
 
 
@@ -548,6 +588,7 @@ def _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, nex
 
 def run(opts, on_solution=None, is_cancelled=None):
     m, n = opts["m"], opts["n"]
+    sheet = _sheet_set(opts)
     ctx = {k: 0 for k in ("nodeCount", "candidateCount", "coveredCount", "exitPass",
                           "parityPass", "reflPass", "afterDedup", "twistPass",
                           "footprintsTried", "footprintsTotal", "decompCount")}
@@ -556,13 +597,28 @@ def run(opts, on_solution=None, is_cancelled=None):
     dedup = {}
     next_id = [1]
 
+    # Arbitrary-sheet ingest: with a sheet present, m,n degrade to its bounding box (reflection math +
+    # the renderer still consume them) and the divisibility / connectivity guards run over S itself.
+    # Absent -> this block is skipped and everything below is the historic m x n rectangle path.
+    if sheet is not None:
+        if not sheet:
+            return solutions, ctx, "sheet is empty"
+        xs = [c[0] for c in sheet]
+        ys = [c[1] for c in sheet]
+        if min(xs) != 0 or min(ys) != 0:
+            return solutions, ctx, "sheet must be normalized to the origin (min corner (0,0))"
+        m, n = max(xs) + 1, max(ys) + 1
+        if not _sheet_connected(sheet):
+            return solutions, ctx, "sheet is not 4-connected"
+
     # TEST gates (relaxed): removed the mn-even/%6 requirement, the K-even gate,
-    # and the n>=4 gate so tiny/odd grids (e.g. 3x1) can be probed. Only mn%panels==0
-    # is kept — it is structural (K = mn/panels must be a positive integer to tile).
+    # and the n>=4 gate so tiny/odd grids (e.g. 3x1) can be probed. Only cellcount%panels==0
+    # is kept — it is structural (K = cells/panels must be a positive integer to tile).
     panels = opts.get("panels", 3)
-    if (m * n) % panels != 0:
-        return solutions, ctx, f"mn not divisible by {panels} (K must be integer)"
-    K = (m * n) // panels
+    total_cells = len(sheet) if sheet is not None else m * n
+    if total_cells % panels != 0:
+        return solutions, ctx, f"cell count not divisible by {panels} (K must be integer)"
+    K = total_cells // panels
     if K < 1:
         return solutions, ctx, "K < 1 (empty grid)"
 
@@ -591,7 +647,7 @@ def run(opts, on_solution=None, is_cancelled=None):
             ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all)
+                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
                 if gp >= 1:
                     ctx["exitPass"] += 1
                 if gp >= 2:
@@ -601,7 +657,7 @@ def run(opts, on_solution=None, is_cancelled=None):
                 if sol is not None:
                     _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id)
 
-            search_decomposition(m, n, K, decomp, on_candidate, ctx)
+            search_decomposition(m, n, K, decomp, on_candidate, ctx, sheet)
             if is_cancelled and is_cancelled():
                 ctx["cancelled"] = True
 

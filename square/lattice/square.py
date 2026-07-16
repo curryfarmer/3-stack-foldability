@@ -24,9 +24,14 @@ from lattice.base import Lattice
 
 class SquareLattice(Lattice):
     # ---- geometry (base hooks) ----
-    def __init__(self, m, n):
+    def __init__(self, m, n, cells=None):
+        # cells=None synthesizes the full m x n rectangle (byte-identical to the historic behaviour);
+        # pass an explicit cell list for an arbitrary connected polyomino (mirrors TriLattice). m, n
+        # are still stored as the bounding box either way -- reflection math + the renderer need them.
         self.m, self.n = m, n
-        super().__init__([(x, y) for y in range(n) for x in range(m)])
+        if cells is None:
+            cells = [(x, y) for y in range(n) for x in range(m)]
+        super().__init__(cells)
 
     def _tile_vertices(self, cell):
         x, y = cell
@@ -206,15 +211,19 @@ class SquareLattice(Lattice):
 
     @staticmethod
     @lru_cache(maxsize=None)
-    def automorphisms(m, n):
-        """The subgroup of D4 that maps the m x n sheet onto itself, as a tuple of transforms.
+    def automorphisms(m, n, cells=None):
+        """The subgroup of D4 that maps the sheet onto itself, as a tuple of transforms.
 
         Derived rather than special-cased: keep t iff t(S) == S over the sheet's own cell set.
-        Square -> all 8 (D4). Non-square -> the 4 with rot in {0, 2} (D2: identity, flipH, flipV,
-        rot180), because apply_transform's odd rotations land on the TRANSPOSED n x m sheet and so
-        are not symmetries of this one. Matches twostack._canonical, which has always done this.
+        cells=None => the full m x n rectangle (the historic behaviour): square -> all 8 (D4),
+        non-square -> the 4 with rot in {0, 2} (D2), because apply_transform's odd rotations land on
+        the TRANSPOSED n x m sheet and so are not symmetries of this one. Pass an explicit frozenset
+        for an arbitrary sheet: the SAME t(S)==S filter then yields the true Aut(S). This matters --
+        minimizing canonical_hash over a D4 element that is NOT a symmetry of an arbitrary S would
+        over-merge distinct folds and silently drop solutions. Matches twostack._canonical.
         Cached: canonical_hash calls this once per candidate (hundreds of thousands per search)."""
-        cells = frozenset((x, y) for x in range(m) for y in range(n))
+        if cells is None:
+            cells = frozenset((x, y) for x in range(m) for y in range(n))
         keep = []
         for rot in range(4):
             for flip in range(2):
@@ -245,8 +254,12 @@ class SquareLattice(Lattice):
         return best
 
     @staticmethod
-    def canonical_hash(footprint, chains, m, n):
+    def canonical_hash(footprint, chains, m, n, sheet=None):
         """Dedup key: the minimal signature over the sheet's automorphism subgroup.
+
+        sheet=None => the m x n rectangle's automorphisms (byte-identical historic behaviour). Pass an
+        explicit frozenset of cells for an arbitrary sheet so the group is the true Aut(S), not the
+        rectangle's -- otherwise dedup over-merges distinct folds and drops solutions (see automorphisms).
 
         Minimizing over all 8 of D4 (the historic behaviour) does NOT over-merge -- a 3-stack fold
         covers the whole m x n sheet, so a transposed image covers n x m and can never be a legal
@@ -256,4 +269,4 @@ class SquareLattice(Lattice):
         breaks any consumer that reads this string back as geometry on m x n. Restricting to the
         automorphisms keeps the same classes and makes the representative on-grid by construction."""
         return SquareLattice._hash_over(
-            SquareLattice.automorphisms(m, n), footprint, chains, m, n)
+            SquareLattice.automorphisms(m, n, sheet), footprint, chains, m, n)

@@ -28,6 +28,7 @@ import nstack as NStack            # noqa: E402  (decomp key naming only)
 import runner as Runner            # noqa: E402
 import twostack as TwoStack        # noqa: E402
 import render_bundle as RenderB    # noqa: E402
+import gridfile as GridFile        # noqa: E402  (fold-grid/1 ingest)
 
 LATTICE_3STACK = "square"
 LATTICE_2STACK = "square2stack"
@@ -35,8 +36,12 @@ LATTICE_2STACK = "square2stack"
 
 def parse_args(argv):
     p = argparse.ArgumentParser(description="square folding search -> out/<uid>/ JSON+PNG bundles")
-    p.add_argument("--m", type=int, help="columns")
-    p.add_argument("--n", type=int, help="rows")
+    p.add_argument("--m", type=int, help="columns (rectangle sheet; mutually exclusive with --grid-file)")
+    p.add_argument("--n", type=int, help="rows (rectangle sheet; mutually exclusive with --grid-file)")
+    p.add_argument("--grid-file", default=None,
+                   help="path to a fold-grid/1 JSON file describing an arbitrary connected polyomino "
+                        "sheet (see docs/schema/fold-grid-1.md); ingested to non-corner. Mutually "
+                        "exclusive with --m/--n.")
     # Both default to None (the "not given" sentinel), NOT to 3 -- resolve_stacks() below must be
     # able to tell `--panels 4` (alone) from an explicit `--stacks 3 --panels 4` (a contradiction).
     p.add_argument("--stacks", type=int, default=None,
@@ -99,22 +104,37 @@ def resolve_stacks(stacks, panels):
 
 def build_opts(args):
     n_stacks = resolve_stacks(args.stacks, args.panels)
+    # A grid-file supplies the sheet (a LIST) + its bounding box m,n; --m/--n supply a rectangle.
+    grid = GridFile.load_grid(args.grid_file) if args.grid_file else None
+    if grid is not None:
+        m, n, sheet = grid["m"], grid["n"], grid["sheet"]
+    else:
+        m, n, sheet = args.m, args.n, None
     if n_stacks == 2:
-        return {"m": args.m, "n": args.n, "stacks": 2, "dedup": not args.no_dedup}
+        if sheet is not None:
+            raise ValueError("grid-file ingest is 3-stack/n-stack only; the 2-stack engine has no "
+                             "arbitrary-sheet path yet")
+        return {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup}
     panels = n_stacks
     all_singleton_key = NStack.all_singleton_decomp_key(panels)
     default_decomps = f"2+1,{all_singleton_key}" if panels == 3 else all_singleton_key
     decomps_str = args.decomps if args.decomps is not None else default_decomps
     shapes = {s: (s in args.shapes.split(",")) for s in ("L", "Rect")}
     decomps = {d: (d in decomps_str.split(",")) for d in ("2+1", all_singleton_key)}
-    return {
-        "m": args.m, "n": args.n, "stacks": 3, "panels": panels,
+    opts = {
+        "m": m, "n": n, "stacks": 3, "panels": panels,
         "shapes": shapes, "decomps": decomps,
-        "allowNonCorner": args.allow_non_corner,
+        # An arbitrary sheet has no canonical corner, so it is always searched to non-corner (the engine
+        # drops the corner special-case whenever a sheet is present regardless of this flag; set here too
+        # so opts is self-describing). Memory: corner-only understates/hides foldability.
+        "allowNonCorner": args.allow_non_corner or (sheet is not None),
         "dedup": not args.no_dedup,
         "jobs": args.jobs,
         "storeAll": args.store_all,
     }
+    if sheet is not None:
+        opts["sheet"] = sheet
+    return opts
 
 
 def make_uid(lattice_name, m, n, canonical_hash):
@@ -158,13 +178,16 @@ def main(argv=None):
         _print_manifest(args.out)
         return 0
 
-    if args.m is None or args.n is None:
-        print("error: --m and --n required (or use --list)", file=sys.stderr)
+    if args.grid_file and (args.m is not None or args.n is not None):
+        print("error: --grid-file is mutually exclusive with --m/--n", file=sys.stderr)
+        return 2
+    if not args.grid_file and (args.m is None or args.n is None):
+        print("error: --m and --n required (or --grid-file, or --list)", file=sys.stderr)
         return 2
 
     try:
-        opts = build_opts(args)
-    except ValueError as exc:                  # a bad --stacks/--panels combination is a USAGE
+        opts = build_opts(args)                 # loads the grid-file too (a bad file raises ValueError)
+    except (ValueError, OSError) as exc:        # a bad --stacks/--panels combo or grid-file is a USAGE
         print(f"error: {exc}", file=sys.stderr)  # error, not a crash -- argparse used to catch this
         return 2                                 # itself via choices=(2, 3)
 
@@ -176,7 +199,7 @@ def main(argv=None):
         print(f"rejected: {err}", file=sys.stderr)
         return 1
 
-    m, n = args.m, args.n
+    m, n = opts["m"], opts["n"]      # bbox when a grid-file sheet was ingested; args.m/args.n otherwise
     for sol in solutions:
         sol["m"], sol["n"] = m, n
         if opts["stacks"] == 2:
