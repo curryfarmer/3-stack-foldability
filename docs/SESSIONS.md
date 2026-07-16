@@ -13,6 +13,9 @@
 > | S2 test corpus + runner | **DONE** | `d0ce481`, `8ccf80f`, `c15b661`, `4904294`; `square/tests` + `triangle/tests` **tracked**, `scripts/run_tests.py` **exists** |
 > | S3 canonical_hash + migration | **DONE** | `d0083ed`, `0ab115d`, `3d55cb1`, `33c5f94`; acceptance gate **GREEN** — `phystest check: PASS (83/83 records agree)`, square 61/61 (8x6 searched cache-miss in 6534s → now cached), triangle 22/22 |
 > | S4 n-stack first-class | **DONE** | `a928cea`, `d9d05a3`, `905d50e`, `e0121b3`; `--stacks N` uncapped, `square/nstack.py` + sweep + tests. A2 (promote `_all_singleton_decomp_key` → public `all_singleton_decomp_key` in `square/engine/search.py`, private alias kept) **landed** after the S3 gate finished |
+> | S5 arbitrary-sheet ingest (square) | **DONE** | `57877f8`; `cells=` lattice + `--grid-file` worker, rectangle round-trip ≡ parameterized (goldens byte-frozen) |
+> | S6 arbitrary-sheet ingest (triangle) | **DONE** | `6a80f63`; `foldgrid_tri.py` — all 4 tilings, physical reflection-closure gate, `--grid-file`/`--first`/`--render` worker; triangle oracle 22/22 |
+> | S7 orchestrator + grid-file contract | **DONE** | `c4a48d4`; `scripts/fold_grid.py` (imports no engine, killtree reap) → `fold-bundle/1` with a `proven` boolean + `sheetCells`; 2-stack drawn-sheet ingest baked into `twostack.py`. Square 61/61 fingerprint untouched, `run_tests` green, zero orphans |
 >
 > **The working tree is now CLEAN** — the Pre-flight "dirty tree and the dirt is load-bearing" section is
 > historical; both efforts it lists landed. Any snapshot below claiming a file is *untracked*,
@@ -535,7 +538,7 @@ green; zero orphans.
 
 ---
 
-# S5 — Arbitrary-sheet ingest (square)
+# S5 — Arbitrary-sheet ingest (square) — **DONE (2026-07-16, `57877f8`)**
 
 **Goal.** The headline feature: the engine ingests an exact drawn grid.
 
@@ -623,7 +626,7 @@ standing gate green.
 
 ---
 
-# S6 — Arbitrary-sheet ingest (triangle)
+# S6 — Arbitrary-sheet ingest (triangle) — **DONE (2026-07-17, `6a80f63`)**
 
 **Goal.** Ingest parity for the four triangle tilings, 3-stack / 1+1+1 only.
 
@@ -686,7 +689,7 @@ disconnected / `%3 != 0`); `triangle/tests` green.
 
 ---
 
-# S7 — Orchestrator + grid-file contract
+# S7 — Orchestrator + grid-file contract — **DONE (2026-07-17, `c4a48d4`)**
 
 **Goal.** One entry point: grid-file in, aggregated bundle out, across both engines.
 
