@@ -1,0 +1,35 @@
+{"m": 4, "n": 4, "panels": 4, "err": null, "coveredCount": 12, "exitPass": 4, "parityPass": 2, "survivors": 1, "fold": 1, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 0.4}
+{"m": 4, "n": 5, "panels": 4, "err": null, "coveredCount": 184, "exitPass": 6, "parityPass": 0, "survivors": 0, "fold": 0, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 0.3}
+{"m": 4, "n": 6, "panels": 4, "err": null, "coveredCount": 242, "exitPass": 8, "parityPass": 2, "survivors": 1, "fold": 1, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 0.4}
+{"m": 4, "n": 7, "panels": 4, "err": null, "coveredCount": 1438, "exitPass": 10, "parityPass": 0, "survivors": 0, "fold": 0, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 0.8}
+{"m": 4, "n": 8, "panels": 4, "err": null, "coveredCount": 2344, "exitPass": 12, "parityPass": 2, "survivors": 1, "fold": 1, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 2.5}
+{"m": 6, "n": 6, "panels": 4, "err": null, "coveredCount": 20332, "exitPass": 56, "parityPass": 0, "survivors": 0, "fold": 0, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 20.3}
+{"m": 4, "n": 9, "panels": 4, "err": null, "coveredCount": 11370, "exitPass": 14, "parityPass": 0, "survivors": 0, "fold": 0, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 9.2}
+{"m": 5, "n": 8, "panels": 4, "err": null, "coveredCount": 44332, "exitPass": 40, "parityPass": 6, "survivors": 2, "fold": 2, "jam": 0, "bentFoldCount": 2, "bentExamples": [{"hash": "{\"fp\":[[0,1],[0,2],[0,3],[1,1]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"D\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"U\"]},{\"kind\":\"1chain\",\"base\":[[0,2]],\"arrows\":[\"L\",\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\",\"L\"]},{\"kind\":\"1chain\",\"base\":[[0,3]],\"arrows\":[\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\"]},{\"kind\":\"1chain\",\"base\":[[1,1]],\"arrows\":[\"L\",\"U\",\"L\",\"D\",\"L\",\"U\",\"L\",\"D\",\"L\"]}]}", "arrows": [["R", "D", "D", "D", "D", "D", "D", "D", "L"], ["L", "D", "D", "D", "D", "D", "D", "D", "R"], ["D", "L", "D", "D", "D", "D", "D", "R", "D"], ["D", "L", "D", "R", "D", "L", "D", "R", "D"]]}, {"hash": "{\"fp\":[[0,0],[0,1],[0,2],[0,3]],\"chains\":[{\"kind\":\"1chain\",\"base\":[[0,0]],\"arrows\":[\"L\",\"L\",\"L\",\"U\",\"L\",\"D\",\"L\",\"L\",\"L\"]},{\"kind\":\"1chain\",\"base\":[[0,1]],\"arrows\":[\"L\",\"L\",\"U\",\"L\",\"L\",\"L\",\"D\",\"L\",\"L\"]},{\"kind\":\"1chain\",\"base\":[[0,2]],\"arrows\":[\"L\",\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\",\"L\"]},{\"kind\":\"1chain\",\"base\":[[0,3]],\"arrows\":[\"U\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"L\",\"D\"]}]}", "arrows": [["D", "D", "D", "R", "D", "L", "D", "D", "D"], ["D", "D", "R", "D", "D", "D", "L", "D", "D"], ["D", "R", "D", "D", "D", "D", "D", "L", "D"], ["R", "D", "D", "D", "D", "D", "D", "D", "L"]]}], "seconds": 85.8}
+{"m": 4, "n": 10, "panels": 4, "err": null, "coveredCount": 25100, "exitPass": 16, "parityPass": 2, "survivors": 1, "fold": 1, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 40.8}
+{"m": 4, "n": 11, "panels": 4, "err": null, "coveredCount": 74058, "exitPass": 18, "parityPass": 0, "survivors": 0, "fold": 0, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 138.9}
+{"m": 6, "n": 8, "panels": 4, "err": "timeout", "seconds": 900.7}
+{"m": 4, "n": 12, "panels": 4, "err": null, "coveredCount": 184540, "exitPass": 20, "parityPass": 2, "survivors": 1, "fold": 1, "jam": 0, "bentFoldCount": 0, "bentExamples": [], "seconds": 726.3}
+{"m": 4, "n": 13, "panels": 4, "err": "timeout", "seconds": 1088.7}
+{"m": 7, "n": 8, "panels": 4, "err": "timeout", "seconds": 900.6}
+{"m": 4, "n": 14, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 6, "n": 10, "panels": 4, "err": "timeout", "seconds": 1181.6}
+{"m": 5, "n": 12, "panels": 4, "err": "timeout", "seconds": 900.8}
+{"m": 4, "n": 15, "panels": 4, "err": "timeout", "seconds": 900.9}
+{"m": 8, "n": 8, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 4, "n": 16, "panels": 4, "err": "timeout", "seconds": 900.5}
+{"m": 4, "n": 17, "panels": 4, "err": "timeout", "seconds": 900.5}
+{"m": 8, "n": 9, "panels": 4, "err": "timeout", "seconds": 4787.0}
+{"m": 6, "n": 12, "panels": 4, "err": "timeout", "seconds": 900.6}
+{"m": 4, "n": 18, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 4, "n": 19, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 8, "n": 10, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 5, "n": 16, "panels": 4, "err": "timeout", "seconds": 900.4}
+{"m": 4, "n": 20, "panels": 4, "err": "timeout", "seconds": 900.8}
+{"m": 7, "n": 12, "panels": 4, "err": "timeout", "seconds": 902.2}
+{"m": 6, "n": 14, "panels": 4, "err": "timeout", "seconds": 902.1}
+{"m": 4, "n": 21, "panels": 4, "err": "timeout", "seconds": 901.9}
+{"m": 8, "n": 11, "panels": 4, "err": "timeout", "seconds": 900.9}
+{"m": 4, "n": 22, "panels": 4, "err": "timeout", "seconds": 901.2}
+{"m": 4, "n": 23, "panels": 4, "err": "timeout", "seconds": 900.9}
+{"m": 8, "n": 12, "panels": 4, "err": "timeout", "seconds": 900.6}
