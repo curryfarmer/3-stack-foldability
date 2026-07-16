@@ -1,5 +1,29 @@
 # Grid-Ingest Foldability Engine + Desktop GUI + Cleanup — 11 Session Handoffs
 
+> ## STATUS (2026-07-16) — S0–S4 have LANDED; read this before the plan below
+>
+> Each session's **"State of the world (verified)"** block is a *pre-session snapshot* taken at planning
+> time (2026-07-15). Wherever a session has since shipped, its snapshot is **historical** — it describes
+> the world *before* the work, not now. Current truth:
+>
+> | Session | Status | Shipped / evidence |
+> |---|---|---|
+> | S0 physical suite | **DONE** | `scripts/phystest/`, `smoketest/test_physical_suite.py` — now **tracked** |
+> | S1 oracle repair + fingerprint cache | **DONE** | `4ce39da`, `3aeb836`; the cache **exists** (`scripts/phystest/oracle_cache.py`, live under `results/.oracle_cache/`) |
+> | S2 test corpus + runner | **DONE** | `d0ce481`, `8ccf80f`, `c15b661`, `4904294`; `square/tests` + `triangle/tests` **tracked**, `scripts/run_tests.py` **exists** |
+> | S3 canonical_hash + migration | **DONE** | `d0083ed`, `0ab115d`, `3d55cb1`, `33c5f94`; acceptance gate (cold `phystest check`) **in flight** — 60/61 square records verified (all agree), 8x6 still searching, triangle 22/22 |
+> | S4 n-stack first-class | **DONE** (one edit deferred) | `a928cea`, `d9d05a3`, `905d50e`, `e0121b3`; `--stacks N` uncapped, `square/nstack.py` + sweep + tests. Deferred: promote `_all_singleton_decomp_key` → public (A2), blocked until the S3 gate finishes |
+>
+> **The working tree is now CLEAN** — the Pre-flight "dirty tree and the dirt is load-bearing" section is
+> historical; both efforts it lists landed. Any snapshot below claiming a file is *untracked*,
+> *uncommitted*, or *does not exist* — or that **no cache** / **no `run_tests.py`** exists — describes the
+> pre-session world. Verify against `git log` and the tree; never act on it.
+>
+> **Cold-run gate caveat (correct every "~4.5h cold → PASS" gate below):** a fully-cold `phystest check`
+> needs **two** invocations. 6x8 (~2.6h) + 8x6 (~2h) exceeds the 4h default timeout, so a cold run dies as
+> **`ERROR`** (nothing proven), not `FAIL`. The per-grid cache survives a kill — just re-run; the second
+> invocation cache-hits everything already done and finishes the rest.
+
 > ## TODO: fuse back to `main`
 >
 > This work lives on the **`grid-ingest`** branch, cut from `main` at `5a00df9`. All 11 sessions land
@@ -145,7 +169,10 @@ Gates are cumulative and permanent. A session is not done until its own gate **a
 
 ---
 
-# S1 — Oracle repair + fingerprint cache
+# S1 — Oracle repair + fingerprint cache — **DONE (2026-07-16, `4ce39da` + `3aeb836`)**
+
+> The snapshot below is the pre-S1 world. The oracle is now bounded, splits `ERROR` from `FAIL`, and is
+> fingerprint-cached (`scripts/phystest/oracle_cache.py`).
 
 **Goal.** Turn the physical-ground-truth oracle into a gate that is correct, fast, and orphan-free, so
 every later session can lean on it.
@@ -197,8 +224,10 @@ Ground truth: `results/foldfindings.json`, 45,277 bytes — **70 records, 61 mat
 `6x4: 8, 6x5: 9, 6x6: 40, 6x7: 2, 6x8: 1, 8x6: 1`. `canonicalHash` is a serialized canonical *form*, not a
 digest. Triangle: 133 `report/tri/**/folds/*.json`, narrowed to 22 by `actual.folded is not None`.
 
-**No caching or source-fingerprint utility exists anywhere** — repo-wide greps for
-`cache`/`lru_cache`/`fingerprint`/`sha256`/`md5` return zero. `results/.oracle_cache/` does not exist.
+**[SUPERSEDED by S1 — pre-session snapshot; the cache now exists.]** At planning time no caching or
+source-fingerprint utility existed (greps for `cache`/`lru_cache`/`fingerprint`/`sha256`/`md5` returned
+zero, and `results/.oracle_cache/` did not exist). S1 built exactly this: `scripts/phystest/oracle_cache.py`,
+with the live cache under `results/.oracle_cache/`. Do not re-implement it.
 
 ### Root cause (diagnosed — not a physical disagreement)
 
@@ -259,7 +288,10 @@ stored hash to be enumerable. If any is not, S3 is blocked until that is underst
 
 ---
 
-# S2 — Test corpus resurrection + isolated runner
+# S2 — Test corpus resurrection + isolated runner — **DONE (2026-07-16, `d0ce481`·`8ccf80f`·`c15b661`·`4904294`)**
+
+> The snapshot below is the pre-S2 world. `square/tests` + `triangle/tests` are now tracked, `/tests/` is
+> anchored in `.gitignore`, and `scripts/run_tests.py` dispatches all three suites one interpreter each.
 
 **Goal.** A real, tracked regression gate that survives a fresh clone.
 
@@ -278,7 +310,8 @@ Support files: `enginelib.py` (facade: `run_3stack`, `run_2stack`, `closing_cand
 `find_closing_by_hash`, `predicted_trace`, `solution_digest`), `gen_golden.py`, `js_shim/run_engine.mjs`.
 
 `smoketest/` — `test_packaging.py` (**tracked**), `test_physical_suite.py` (untracked, not ignored).
-`scripts/run_tests.py` **does not exist**. `pytest.ini` has `testpaths = smoketest`.
+**[SUPERSEDED by S2]** `scripts/run_tests.py` now exists and dispatches all three suites, one interpreter
+each. `pytest.ini` still scopes a bare `pytest` to the smoketest suite only.
 
 ### Changes
 
@@ -401,7 +434,12 @@ everywhere else. 17 uids changed; `results/s3_uid_map.json` (`scripts/s3_uid_map
 
 ---
 
-# S4 — n-stack first-class
+# S4 — n-stack first-class — **DONE (2026-07-16, `a928cea`·`d9d05a3`·`905d50e`·`e0121b3`; A2 deferred)**
+
+> Shipped: `--stacks N` uncapped (was `choices=(2,3)`), `square/nstack.py` front door + `nstack_sweep.py`
+> ladder, `square/tests/test_nstack.py` against the tracked oracle jsonl. **Deferred (A2):** promote
+> `_all_singleton_decomp_key` → public in `square/engine/search.py`; it is the only S4 edit touching engine
+> source, so it waits until the S3 acceptance gate finishes (editing engine source burns the oracle cache).
 
 **Goal.** Promote n-stack from an untracked scratch script to a tested, tracked, CLI-first capability.
 
@@ -857,11 +895,12 @@ test/doc churn.
 
 ### State of the world (verified)
 
-`.gitignore` (32 lines) — `__pycache__/` (`:5`), `*.pyc` (`:6`), `.venv/` (`:7`), `.pytest_cache/` (`:8`),
-`*.egg-info/` (`:9`), `node_modules/` (`:12-13`), `.claude/` (`:16`), `annotated-codebase/` (`:19`), `out/`
-(`:22`), then the "local-only working dirs" block: `deprecated/` (`:27`), **`docs/` (`:28`)**, `report/`
-(`:29`), `results/` (`:30`), `tests/` (`:31`), `experimental/` (`:32`). **Neither `scratch_examples/` nor
-`scratch2s/` is ignored** — both show as `??`. Nor are the root `g_111_*`/`g_2p1_*` dirs.
+`.gitignore` (**55 lines as of 2026-07-16 — part of the S11 gitignore work is already done, see `63cc952`**)
+— `__pycache__/`, `*.pyc`, `.venv/`, `.pytest_cache/`, `*.egg-info/`, `node_modules/`, `.claude/`, `out/`,
+the regenerable bundle dirs `g_111_*/` `g_2p1_*/` `scratch2s/` `scratch_examples/`, `/oracle_run*`, then the
+local-only working dirs `report/`, `results/`, the **anchored** `/tests/` (leading slash so it does not
+swallow the tracked `square/tests`/`triangle/tests`), and `docs/*` + `!docs/SESSIONS.md`. The
+`annotated-codebase/`, `deprecated/`, and `experimental/` rules are **gone** — those dirs were deleted.
 
 `pyproject.toml` (25 lines) verbatim scripts + find:
 ```toml
