@@ -6,6 +6,7 @@ Examples:
   python3 generate.py --m 6 --n 6
   python3 generate.py --m 6 --n 5 --decomps 2+1 --allow-non-corner
   python3 generate.py --stacks 2 --m 6 --n 5     # RSPA 2-stack (Hamiltonian circuits)
+  python3 generate.py --stacks 4 --m 4 --n 8     # 4-stack (all-singleton 1+1+1+1)
   python3 generate.py --m 6 --n 6 --out scratch/  # write bundles under scratch/ instead of out/
   python3 generate.py --list                      # print a summary of --out's bundles
 
@@ -23,8 +24,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # square/ on path
 import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 
+import nstack as NStack            # noqa: E402  (decomp key naming only)
 import runner as Runner            # noqa: E402
-import search as Search            # noqa: E402  (decomp key naming only)
 import twostack as TwoStack        # noqa: E402
 import render_bundle as RenderB    # noqa: E402
 
@@ -36,12 +37,15 @@ def parse_args(argv):
     p = argparse.ArgumentParser(description="square folding search -> out/<uid>/ JSON+PNG bundles")
     p.add_argument("--m", type=int, help="columns")
     p.add_argument("--n", type=int, help="rows")
-    p.add_argument("--stacks", type=int, default=3, choices=(2, 3),
-                   help="2 = RSPA Hamiltonian-circuit 2-stack; 3 = footprint/decomp engine (default)")
-    p.add_argument("--panels", type=int, default=3,
-                   help="footprint panel count / chain count for the 3-stack-family engine "
-                        "(default 3; use e.g. 4 or 5 for an all-singleton 1+1+1+...+1 n-stack). "
-                        "--decomps '2+1' is only defined at --panels 3.")
+    # Both default to None (the "not given" sentinel), NOT to 3 -- resolve_stacks() below must be
+    # able to tell `--panels 4` (alone) from an explicit `--stacks 3 --panels 4` (a contradiction).
+    p.add_argument("--stacks", type=int, default=None,
+                   help="chain/stack count. 2 = RSPA Hamiltonian-circuit 2-stack; N>=3 = "
+                        "footprint/decomp engine with N chains (default 3). N>3 is an n-stack: "
+                        "the all-singleton 1+1+...+1 decomposition.")
+    p.add_argument("--panels", type=int, default=None,
+                   help="DEPRECATED back-compat alias for --stacks at N>=3. Prefer --stacks. "
+                        "Giving both is an error unless they agree.")
     p.add_argument("--shapes", default="L,Rect", help="comma list: L,Rect (3-stack-family only)")
     p.add_argument("--decomps", default=None,
                    help="comma list, e.g. 2+1,1+1+1 (default: '2+1,1+1+1' at --panels 3, else "
@@ -63,18 +67,48 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
+def resolve_stacks(stacks, panels):
+    """Reconcile --stacks with its deprecated alias --panels -> the chain count N.
+
+    --stacks USED to be capped at choices=(2, 3), so n-stack was only reachable through the separate
+    --panels knob; --stacks is now the one knob and --panels is kept working for existing callers.
+    Precedence (both None means "not given"):
+        neither          -> 3         (the historical default)
+        --panels P only  -> P         (back-compat: `--panels 4` alone must keep working)
+        --stacks S only  -> S
+        both, S == P     -> S
+        both, S != P     -> error     (a contradiction; refuse rather than silently pick one)
+    2-stack is a different engine with no panel concept, so --panels alongside --stacks 2 is an
+    error too. I/O: (stacks|None, panels|None) -> int N. Raises ValueError."""
+    if stacks == 2:
+        if panels is not None:
+            raise ValueError("--panels is meaningless with --stacks 2 (the 2-stack engine has no "
+                             "panel decomposition); drop --panels")
+        return 2
+    if stacks is not None and panels is not None and stacks != panels:
+        raise ValueError(f"--stacks {stacks} contradicts --panels {panels} (--panels is a "
+                         f"deprecated alias for --stacks); pass only --stacks")
+    n = stacks if stacks is not None else (panels if panels is not None else 3)
+    if n < 3:
+        # stacks==2 already returned above, so a 2 here came from `--panels 2`: the 2-stack engine
+        # is a different code path, not a 2-panel decomposition.
+        raise ValueError(f"invalid stack count {n}: use --stacks 2 for the RSPA 2-stack engine, "
+                         f"or --stacks N with N >= 3 for the decomposition engine")
+    return n
+
+
 def build_opts(args):
-    if args.stacks == 2:
+    n_stacks = resolve_stacks(args.stacks, args.panels)
+    if n_stacks == 2:
         return {"m": args.m, "n": args.n, "stacks": 2, "dedup": not args.no_dedup}
-    if args.panels < 3:
-        raise ValueError(f"--panels must be >= 3 (got {args.panels})")
-    all_singleton_key = Search._all_singleton_decomp_key(args.panels)
-    default_decomps = f"2+1,{all_singleton_key}" if args.panels == 3 else all_singleton_key
+    panels = n_stacks
+    all_singleton_key = NStack.all_singleton_decomp_key(panels)
+    default_decomps = f"2+1,{all_singleton_key}" if panels == 3 else all_singleton_key
     decomps_str = args.decomps if args.decomps is not None else default_decomps
     shapes = {s: (s in args.shapes.split(",")) for s in ("L", "Rect")}
     decomps = {d: (d in decomps_str.split(",")) for d in ("2+1", all_singleton_key)}
     return {
-        "m": args.m, "n": args.n, "stacks": 3, "panels": args.panels,
+        "m": args.m, "n": args.n, "stacks": 3, "panels": panels,
         "shapes": shapes, "decomps": decomps,
         "allowNonCorner": args.allow_non_corner,
         "dedup": not args.no_dedup,
@@ -128,7 +162,11 @@ def main(argv=None):
         print("error: --m and --n required (or use --list)", file=sys.stderr)
         return 2
 
-    opts = build_opts(args)
+    try:
+        opts = build_opts(args)
+    except ValueError as exc:                  # a bad --stacks/--panels combination is a USAGE
+        print(f"error: {exc}", file=sys.stderr)  # error, not a crash -- argparse used to catch this
+        return 2                                 # itself via choices=(2, 3)
 
     if opts["stacks"] == 2:
         solutions, ctx, err = TwoStack.run(opts)
