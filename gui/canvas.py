@@ -1,11 +1,14 @@
-"""canvas.py — hit-test half of the drawing canvas (the FigureCanvasTkAgg render half is S9).
+"""canvas.py — the drawing canvas: hit-test (S8) + the embedded render view (S9).
 
-hit_test maps a click point to the index of the tile whose dumped polygon contains it -- ONE code
-path for all five geometries, since it only ever sees the polygons the engine dumped (no tiling has
-its inverse coordinate map re-implemented here). Works in the dump's native coordinate space; the S9
-event handler converts screen coords to native (respecting gui.tilings.orientation) before calling.
+hit_test (top of file) stays backend-free: it imports only matplotlib.path, so gui.canvas can be
+imported for hit-testing (and the S8 no-co-import guard) without pulling a GUI backend. CanvasView
+(the render half) lazy-imports Figure + FigureCanvasTkAgg + Polygon INSIDE __init__, so only actually
+constructing a view commits a backend. It uses matplotlib.figure.Figure (NOT pyplot), so there is no
+"set backend before pyplot" trap and no pyplot global state.
 
-Importing matplotlib.path is fine -- it pulls no pyplot and forces no backend; that is an S9 concern.
+One code path for all five geometries: CanvasView fills the engine-dumped polygons and hit-tests
+clicks against them (via hit_test), inverting y only for square (+y-down); triangle draws native
++y-up. Selection validity is the S8 connectivity check on the dumped adjacency.
 """
 from matplotlib.path import Path
 
@@ -18,3 +21,99 @@ def hit_test(point, polys):
         if Path(poly).contains_point(point):
             return k
     return None
+
+
+class CanvasView:
+    """An embedded matplotlib canvas that draws a Geometry and lets you toggle tiles by clicking.
+
+    `parent` is a tk widget; `geometry` is a gui.geometry_client.Geometry; `tiling` selects the y
+    orientation. `on_change()` (optional) fires after every selection change. `.widget` is the tk
+    widget to pack. I/O: constructed once per (tiling, bounds)."""
+
+    def __init__(self, parent, geometry, tiling, on_change=None):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        from matplotlib.patches import Polygon
+
+        from gui import config, connectivity, tilings
+
+        self._Polygon = Polygon
+        self._connectivity = connectivity
+        self._cfg = config
+        self.geometry = geometry
+        self.tiling = tiling
+        self.on_change = on_change
+        self.selected = set()            # tile indices into geometry.ids / .polys
+
+        self.fig = Figure(figsize=(5.5, 5.5))
+        self.ax = self.fig.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
+        self.widget = self.canvas.get_tk_widget()
+
+        self._patches = []
+        self._draw_all(tilings.orientation(tiling))
+        self.canvas.mpl_connect("button_press_event", self._on_click)
+        self.canvas.draw()
+
+    # ---- drawing ----
+    def _draw_all(self, orientation):
+        polys = self.geometry.polys
+        self.ax.clear()
+        self.ax.set_aspect("equal")
+        self.ax.axis("off")
+        self._patches = []
+        for poly in polys:
+            patch = self._Polygon(poly, closed=True, facecolor=self._cfg.CELL_FILL,
+                                  edgecolor=self._cfg.GRID_EDGE, lw=0.8, zorder=1)
+            self.ax.add_patch(patch)
+            self._patches.append(patch)
+        xs = [x for poly in polys for (x, _y) in poly]
+        ys = [y for poly in polys for (_x, y) in poly]
+        pad = 0.3
+        self.ax.set_xlim(min(xs) - pad, max(xs) + pad)
+        if orientation == "down":                        # square: origin top-left, +y down
+            self.ax.set_ylim(max(ys) + pad, min(ys) - pad)
+        else:                                            # triangle: native +y up
+            self.ax.set_ylim(min(ys) - pad, max(ys) + pad)
+
+    def _recolor(self):
+        valid = self.is_valid_sheet()
+        for k, patch in enumerate(self._patches):
+            if k in self.selected:
+                patch.set_facecolor(self._cfg.SELECTED_FILL)
+                patch.set_edgecolor(self._cfg.SELECTED_EDGE if valid else self._cfg.INVALID_EDGE)
+                patch.set_linewidth(2.2)
+            else:
+                patch.set_facecolor(self._cfg.CELL_FILL)
+                patch.set_edgecolor(self._cfg.GRID_EDGE)
+                patch.set_linewidth(0.8)
+        self.canvas.draw_idle()
+        if self.on_change:
+            self.on_change()
+
+    # ---- interaction ----
+    def _on_click(self, event):
+        if event.inaxes is not self.ax or event.xdata is None:
+            return
+        idx = hit_test((event.xdata, event.ydata), self.geometry.polys)
+        if idx is not None:
+            self.toggle(idx)
+
+    def toggle(self, idx):
+        """Flip tile `idx`'s selection and recolor. I/O: (int) -> None."""
+        self.selected.symmetric_difference_update({idx})
+        self._recolor()
+
+    def set_selection(self, indices):
+        """Replace the selection with `indices` and recolor. I/O: (iterable[int]) -> None."""
+        self.selected = set(indices)
+        self._recolor()
+
+    def selected_cells(self):
+        """The selected tiles as native fold-grid/1 cells, sorted. I/O: () -> list[list]."""
+        return [self.geometry.ids[k] for k in sorted(self.selected)]
+
+    def is_valid_sheet(self):
+        """True iff the selection is a non-empty connected sheet (S8 connectivity on dumped adj).
+        I/O: () -> bool."""
+        return self._connectivity.is_connected(self.selected, self.geometry.adj)

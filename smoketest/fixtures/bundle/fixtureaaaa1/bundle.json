@@ -1,0 +1,68 @@
+{
+ "schema": "fold-bundle/1",
+ "gridUid": "fixtureaaaa1",
+ "tiling": "mixed-fixture",
+ "sheetCells": [
+  [
+   0,
+   0
+  ]
+ ],
+ "stacks": [
+  3
+ ],
+ "configs": [
+  {
+   "stacks": 3,
+   "status": "ok",
+   "reason": null,
+   "nRecords": 3
+  }
+ ],
+ "gateValidityUnproven": true,
+ "records": [
+  {
+   "uid": "sq11aa22bb33",
+   "stacks": 3,
+   "proven": true,
+   "foldable": true,
+   "verdict": {
+    "twist": true
+   },
+   "dir": "sq11aa22bb33",
+   "files": {
+    "json": "sq11aa22bb33.json",
+    "foldsheet": "foldsheet_sq11aa22bb33.png"
+   }
+  },
+  {
+   "uid": "hx44cc55dd66",
+   "stacks": 3,
+   "proven": false,
+   "foldable": false,
+   "verdict": "PREDICTED TO JAM",
+   "dir": "hx44cc55dd66",
+   "files": {
+    "json": "hx44cc55dd66.json",
+    "overlay": "overlay_hx44cc55dd66.png",
+    "foldsheet": "foldsheet_hx44cc55dd66.png",
+    "twist": "twist_hx44cc55dd66.png",
+    "reflect": "reflect_hx44cc55dd66.png"
+   }
+  },
+  {
+   "uid": "eq77ee88ff99",
+   "stacks": 3,
+   "proven": true,
+   "foldable": false,
+   "verdict": "PREDICTED TO JAM",
+   "dir": "eq77ee88ff99",
+   "files": {
+    "json": "eq77ee88ff99.json",
+    "overlay": "overlay_eq77ee88ff99.png",
+    "foldsheet": "foldsheet_eq77ee88ff99.png",
+    "twist": "twist_eq77ee88ff99.png"
+   }
+  }
+ ]
+}

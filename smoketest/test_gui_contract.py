@@ -49,6 +49,7 @@ _NO_ENGINE_PROBE = '''
 import sys
 sys.path.insert(0, sys.argv[1])
 import gui.geometry_client, gui.canvas, gui.connectivity, gui.tilings, gui.config
+import gui.dispatch, gui.results, gui.thumbs, gui.app
 ENGINE_MODS = ("lattice", "search", "twostack", "runner", "find_example", "foldgrid_tri",
                "gen_testset", "_bootstrap", "trisearch", "trilattice", "righttri", "scalene",
                "hexlattice")
