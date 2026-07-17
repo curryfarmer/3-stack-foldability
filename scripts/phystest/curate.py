@@ -21,10 +21,37 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 import records as R
 
 _SQUARE_GENERATE = os.path.join(R.repo_root(), "square", "generate.py")
+
+_DEFAULT_TIMEOUT = 4 * 60 * 60      # 4h. The engine's cold run is dominated by big grids and can run
+                                    # for hours; this bounds a genuine hang, not a perf expectation.
+
+# On POSIX, put the child in its OWN session so _killtree can killpg the whole group and reap
+# ProcessPoolExecutor grandchildren. Windows reaps the tree with `taskkill /F /T`, so needs no flag.
+_CHILD_KW = {} if os.name == "nt" else {"start_new_session": True}
+
+
+def _killtree(pid):
+    """Kill pid AND its whole descendant tree. I/O: (int) -> None.
+
+    A plain proc.kill() reaps only the direct child, orphaning multiprocessing grandchildren (jobs=N
+    spawns N of them). Windows: `taskkill /F /T` reaps the whole tree. POSIX: the child is in its own
+    session (see _CHILD_KW), so one killpg on its process group takes out the child AND grandchildren."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                       capture_output=True, text=True)      # tiny, bounded output: PIPE is fine here
+    else:
+        try:
+            os.killpg(os.getpgid(pid), 9)                   # 9 = SIGKILL to the whole process group
+        except OSError:
+            try:
+                os.kill(pid, 9)                             # group lookup failed: at least the child
+            except OSError:
+                pass
 
 _POLICIES = {
     "all": lambda p: True,
@@ -34,20 +61,48 @@ _POLICIES = {
 }
 
 
-def _run_generate(m, n, decomps, allow_non_corner, jobs, raw_dir):
-    argv = [sys.executable, _SQUARE_GENERATE, "--m", str(m), "--n", str(n),
+def _run_generate(m, n, decomps, allow_non_corner, jobs, raw_dir, timeout=_DEFAULT_TIMEOUT):
+    """Run square/generate.py bounded + orphan-free. I/O: (m,n,decomps,bool,jobs,dir,secs) -> stdout str.
+
+    Popen->FILE (never subprocess.run+PIPE) so a wedged ProcessPoolExecutor worker (jobs>1) can't
+    hold a pipe open and hang us forever; on timeout _killtree reaps the whole tree. Raises
+    RuntimeError on launch failure, nonzero exit, or timeout."""
+    argv = [sys.executable, "-u", _SQUARE_GENERATE, "--m", str(m), "--n", str(n),
             "--decomps", decomps, "--jobs", str(jobs), "--out", raw_dir]
     if allow_non_corner:
         argv.append("--allow-non-corner")
-    proc = subprocess.run(argv, capture_output=True, text=True)
+    fd, out_path = tempfile.mkstemp(prefix="curate_generate_", suffix=".out")
+    os.close(fd)
+    try:
+        # stdout AND stderr to a FILE (never PIPE) so no grandchild can hold a pipe open.
+        with open(out_path, "w", encoding="utf-8") as fw:
+            try:
+                proc = subprocess.Popen(argv, stdout=fw, stderr=subprocess.STDOUT, **_CHILD_KW)
+            except OSError as exc:
+                raise RuntimeError("could not start generate.py: %s" % exc)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _killtree(proc.pid)
+                try:
+                    proc.wait(timeout=30)                   # after the killtree, not instead of it
+                except subprocess.TimeoutExpired:
+                    pass
+                raise RuntimeError("generate.py exceeded %ss (killed, tree reaped)" % timeout)
+        with open(out_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()                              # a killed worker can truncate a multi-byte
+    finally:                                                # sequence -> errors="replace"
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
     if proc.returncode != 0:
-        raise RuntimeError("generate.py failed (%d):\n%s" % (proc.returncode,
-                           (proc.stderr or proc.stdout)[-1500:]))
-    return proc.stdout
+        raise RuntimeError("generate.py failed (%d):\n%s" % (proc.returncode, content[-1500:]))
+    return content
 
 
 def curate_square(m, n, decomps="2+1,1+1+1", out_dir=None, policy="all",
-                  allow_non_corner=True, jobs=1):
+                  allow_non_corner=True, jobs=1, timeout=_DEFAULT_TIMEOUT):
     """Build a to-test batch for a square m x n grid. Returns the manifest dict."""
     if policy not in _POLICIES:
         raise ValueError("policy must be one of %s" % sorted(_POLICIES))
@@ -56,7 +111,7 @@ def curate_square(m, n, decomps="2+1,1+1+1", out_dir=None, policy="all",
     raw_dir = os.path.join(out_dir, "raw")
     os.makedirs(raw_dir, exist_ok=True)
 
-    gen_stdout = _run_generate(m, n, decomps, allow_non_corner, jobs, raw_dir)
+    gen_stdout = _run_generate(m, n, decomps, allow_non_corner, jobs, raw_dir, timeout=timeout)
 
     already = R.tested_square_index()
     keep = _POLICIES[policy]
@@ -106,12 +161,14 @@ def main(argv):
                     help="which candidates to queue for folding (default: all untested)")
     ap.add_argument("--no-allow-non-corner", dest="allow_non_corner", action="store_false")
     ap.add_argument("--jobs", type=int, default=1, help="engine parallelism (1 = safe, no orphans)")
+    ap.add_argument("--timeout", type=int, default=_DEFAULT_TIMEOUT,
+                    help="wall-clock bound (s) on the generate subprocess (default 4h)")
     ap.add_argument("--out", default=None, help="batch directory (default out/batch_MxN)")
     args = ap.parse_args(argv)
 
     manifest, out_dir, _ = curate_square(
         args.m, args.n, decomps=args.decomps, out_dir=args.out, policy=args.policy,
-        allow_non_corner=args.allow_non_corner, jobs=args.jobs)
+        allow_non_corner=args.allow_non_corner, jobs=args.jobs, timeout=args.timeout)
     c = manifest["counts"]
     print("curated %s  grid=%s  policy=%s" % (out_dir, manifest["grid"], manifest["policy"]))
     print("  generated=%d  already-tested=%d  policy-filtered=%d  QUEUED=%d"

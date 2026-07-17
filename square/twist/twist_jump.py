@@ -10,7 +10,7 @@ non-diagonal -- cosmetic, Tw is idx-independent, but pinned so the labelling is 
 This is the validated Model B (originally prototyped in the retired experimental/ hypothesis
 scaffolding, now the sole shipped implementation), promoted into the shipped engine so
 search.twist_check DECIDES 2+1 instead of returning NULL. The math: float atan2 doubled-turn
-angles, sigma = (-1)^i along the loop, and the sum rounded to 6 dp ONLY (never per term).
+angles, sigma = (-1)^(i+1) along the loop, and the sum rounded to 6 dp ONLY (never per term).
 
 twist_2plus1_from_chains(chains) is the live-engine entry (reads each chain's in-memory `placements`).
 twist_2plus1_from_sol(sol, m, n) re-replays a stored blob (no placements) for the same computation.
@@ -48,8 +48,8 @@ def loop_terms(pts):
 
 
 def tw_of(terms):
-    """Tw = sum sigma_i * term_i, sigma = (-1)^i along the loop (odd -> +, even -> -). Round the SUM
-    only (per-term rounding would diverge from the JS twin)."""
+    """Tw = sum sigma_i * term_i, sigma = (-1)^(i+1) along the loop (odd -> +, even -> -). Round the
+    SUM only (per-term rounding would diverge from the JS twin)."""
     t = 0.0
     for i, x in enumerate(terms):
         t += (1 if i % 2 else -1) * x
@@ -64,28 +64,24 @@ def is0(x):
     return abs(x) < 1e-6
 
 
-def _classify_step(p, q):
-    """Step shape between consecutive loop points (used only for the cosmetic canon-idx pick)."""
+def _is_diag(p, q):
+    """True iff the step between consecutive loop points is a diagonal -- the only distinction the
+    cosmetic canon-idx pick consumes. I/O: (p, q) points -> bool."""
     dx, dy = abs(q[0] - p[0]), abs(q[1] - p[1])
-    if dx + dy == 1:
-        return "unit"
-    if dx == 1 and dy == 1:
-        return "DIAG"
-    if (dx == 0 and dy == 2) or (dx == 2 and dy == 0):
-        return "2JMP"
-    return "far"
+    return dx == 1 and dy == 1
 
 
 def pick_canon_idx(placements2, path1):
     """Canonical strand = the domino cell whose two hub seams (loop-closure edges) are non-diagonal.
-    Cosmetic (Tw is idx-independent) but pinned so JS and Python label the same strand."""
+    Cosmetic (Tw is idx-independent) but pinned so JS and Python label the same strand. I/O:
+    (placements2, path1) -> idx in {0, 1}; falls back to 0 when both strands have a diagonal seam."""
     for idx in (0, 1):
         sp = strand_path(placements2, idx)
         k = len(sp)
         loop = sp + list(reversed(path1))
-        s1 = _classify_step(loop[k - 1], loop[k])
-        s2 = _classify_step(loop[2 * k - 1], loop[0])
-        if "DIAG" not in (s1, s2):
+        seam_hub = _is_diag(loop[k - 1], loop[k])      # 2-chain end -> 1-chain end
+        seam_close = _is_diag(loop[-1], loop[0])       # 1-chain start -> 2-chain start (length-agnostic)
+        if not (seam_hub or seam_close):
             return idx
     return 0
 
@@ -124,7 +120,7 @@ def twist_2plus1_from_chains(chains):
 
 def replay(base_cells, fold_arrows, m, n):
     """Standalone replay (base + one placement per fold) for a stored chain blob whose baseCells are
-    {"x":, "y":} dicts. Mirrors experimental/common.replay; used by twist_2plus1_from_sol for tests."""
+    {"x":, "y":} dicts. Used by twist_2plus1_from_sol to re-replay a stored blob (no placements)."""
     base = [(c["x"], c["y"]) for c in base_cells]
     pl = Fold.initial_placement(base)
     placements = [pl]

@@ -1,6 +1,6 @@
 """render_twist.py — twist-enumeration diagram from a common engine fold record (tri-fold/1 JSON).
 
-The triangle analog of experimental/enumerate_twist.py (square 2+1). Ingests a folds/<uid>.json,
+The triangle analog of square/render/render_twist_2plus1.py (square 2+1). Ingests a folds/<uid>.json,
 reconstructs the twist LOOP(s), scores each with tritwist.loop_twist under the LOOP-INDEX sigma
 (path_sigma — the invariant the engine uses, see docs/research/nonsquare_construction.md), and draws
 the loop on tile centroids with per-vertex sigma*gamma contributions, the running total, and the
@@ -28,16 +28,24 @@ from matplotlib.patches import Polygon, FancyArrowPatch  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tritwist as TW                                    # noqa: E402  loop_twist / path_sigma
+from tristyle import (POS, NEG, INK, FOOTPRINT_EDGE, TILE_FILL, TILE_EDGE,   # noqa: E402
+                      FOLD_BADGE, JAM_BADGE, pi_label, save)
 
 REPORT_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "report", "tri")
-POS, NEG, INK = "#1a7f37", "#c0392b", "#222222"          # +contribution / -contribution / ink
-LOOP_COL, TILE_FILL, TILE_EDGE = "#6f4fb0", "#f2f3f7", "#d7d9e0"
-FOLD_BADGE, JAM_BADGE = "#1a7f48", "#c0392b"
 
 
 def _tk(t):
     """Record geometry key for a tile id (matches gen_testset._tk)."""
     return json.dumps(list(t), separators=(",", ":"))
+
+
+def _cent(cents, t, uid):
+    """cents[_tk(t)] with a clear tile+uid message instead of a bare KeyError on incomplete geometry."""
+    key = _tk(t)
+    if key not in cents:
+        raise KeyError("render_twist: uid %s has no geometry for tile %s (incomplete record)"
+                       % (uid, list(t)))
+    return cents[key]
 
 
 def _centroid_map(rec):
@@ -57,10 +65,31 @@ def _loops(rec):
     return [(nm, list(chains[i]) + list(reversed(chains[j]))) for nm, (i, j) in zip(names, pairs)]
 
 
-def _score(loop, cents):
-    """tritwist.loop_twist under the loop-index sigma, with a geometry-derived centroid callable."""
+def twist_summary(results):
+    """JSON-able per-loop + per-vertex twist enumeration (the numeric justification that used to be a
+    stdout table). results = [(name, loop, res)] from render_twist. I/O: (results) -> dict."""
+    loops = []
+    for nm, loop, res in results:
+        loops.append({
+            "name": nm,
+            "len": len(loop),
+            "Tw": round(res["Tw"]),
+            "Tw_index": round(res["Tw_index"]),
+            "alternates": res["alternates"],
+            "vertices": [
+                {"k": k, "tile": list(loop[k]), "gamma": res["gammas"][k],
+                 "sigma": res["sigmas"][k], "sig_gamma": res["sigmas"][k] * res["gammas"][k]}
+                for k in range(len(loop))
+            ],
+        })
+    return {"loops": loops, "twist_gate": "FOLD" if all(l["Tw"] == 0 for l in loops) else "JAM"}
+
+
+def _score(loop, cents, uid):
+    """tritwist.loop_twist under the loop-index sigma, with a geometry-derived centroid callable.
+    `uid` only feeds the missing-geometry message (see _cent)."""
     def cent(t):
-        return cents[_tk(t)]
+        return _cent(cents, t, uid)
     return TW.loop_twist(loop, cent=cent, sigma=TW.path_sigma(len(loop)))
 
 
@@ -70,12 +99,12 @@ def _draw_loop(ax, rec, cents, name, loop, res):
     for k, poly in rec["geometry"].items():                 # faint context: all region tiles
         ax.add_patch(Polygon(poly, closed=True, facecolor=TILE_FILL, edgecolor=TILE_EDGE,
                              lw=0.5, zorder=1))
-    pts = [cents[_tk(t)] for t in loop]
+    pts = [_cent(cents, t, rec["uid"]) for t in loop]
     n = len(pts)
     for k in range(n):                                      # arrowed loop edges (closed)
         p, q = pts[k], pts[(k + 1) % n]
         ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=11,
-                                     lw=1.6, color=LOOP_COL, zorder=4,
+                                     lw=1.6, color=FOOTPRINT_EDGE, zorder=4,
                                      shrinkA=6, shrinkB=6, alpha=0.9))
     cum = 0.0
     gammas, sigs = res["gammas"], res["sigmas"]
@@ -86,13 +115,13 @@ def _draw_loop(ax, rec, cents, name, loop, res):
         col = POS if contrib > 0 else (NEG if contrib < 0 else INK)
         ax.plot([cx], [cy], "o", ms=5, color=col, zorder=5)
         if abs(contrib) > 1e-9:                             # label only turning vertices (gamma!=0)
-            ax.text(cx, cy, "%+d" % round(contrib), ha="center", va="center", fontsize=7.5,
+            ax.text(cx, cy, pi_label(contrib), ha="center", va="center", fontsize=7.5,
                     color="white", fontweight="bold", zorder=6,
                     bbox=dict(boxstyle="round,pad=0.14", fc=col, ec="none", alpha=0.95))
     Tw = round(res["Tw"])
     badge_c = FOLD_BADGE if Tw == 0 else JAM_BADGE
-    verdict = "Tw=0 FOLD" if Tw == 0 else "Tw=%+d JAM" % Tw
-    ax.set_title("%s   loop len %d\nTw = %+d deg  (%s)" % (name, n, Tw, verdict),
+    verdict = "Tw=%s %s" % (pi_label(Tw), "FOLD" if Tw == 0 else "JAM")
+    ax.set_title("%s   loop len %d\nTw = %s  (%s)" % (name, n, pi_label(Tw), verdict),
                  fontsize=9, color=badge_c, fontweight="bold")
     pxs = [p[0] for p in pts]; pys = [p[1] for p in pts]
     for k, poly in rec["geometry"].items():
@@ -110,38 +139,41 @@ def render_twist(json_path, out_sub=None):
     uid, tiling, decomp, K = rec["uid"], rec["tiling"], rec["decomp"], rec["K"]
     cents = _centroid_map(rec)
     loops = _loops(rec)
-    results = [(nm, loop, _score(loop, cents)) for nm, loop in loops]
+    results = [(nm, loop, _score(loop, cents, uid)) for nm, loop in loops]
 
     fig, axes = plt.subplots(1, len(loops), figsize=(5.4 * len(loops), 5.6), squeeze=False)
     for ax, (nm, loop, res) in zip(axes[0], results):
         _draw_loop(ax, rec, cents, nm, loop, res)
     tws = [round(r["Tw"]) for _, _, r in results]
-    foldable = all(t == 0 for t in tws)
-    fig.suptitle("TWIST — %s %s K=%d  [%s]   engine: %s   (loop-index sigma)"
-                 % (tiling, "1+1+1" if decomp == "1plus1plus1" else "2+1", K, uid[:8],
-                    "FOLD (all Tw=0)" if foldable else "JAM (Tw!=0)"),
+    twist_fold = all(t == 0 for t in tws)
+    # The twist is only ONE gate; rec['foldable'] is the post-seam ENGINE verdict (seam_filter.apply
+    # demotes a Tw=0 mirror/off-cell arrival to JAM). Label the twist result as such, then colour +
+    # tag by the engine verdict when the record carries it, so a seam-demoted JAM isn't mistitled FOLD.
+    engine_fold = rec.get("foldable", twist_fold)
+    label = "twist gate: %s" % ("FOLD (all Tw=0)" if twist_fold else "JAM (Tw!=0)")
+    if "foldable" in rec:
+        label += "   engine: %s" % ("FOLD" if engine_fold else "JAM")
+        if twist_fold and not engine_fold and rec.get("seam_note"):
+            label += " (%s)" % rec["seam_note"]
+    fig.suptitle("TWIST — %s %s K=%d  [%s]   %s   (loop-index sigma)"
+                 % (tiling, "1+1+1" if decomp == "1plus1plus1" else "2+1", K, uid[:8], label),
                  fontsize=11, fontweight="bold",
-                 color=FOLD_BADGE if foldable else JAM_BADGE, y=0.99)
+                 color=FOLD_BADGE if engine_fold else JAM_BADGE, y=0.99)
     out_sub = out_sub or os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(json_path))))
     out_dir = os.path.join(REPORT_BASE, out_sub)
     os.makedirs(out_dir, exist_ok=True)
     png = os.path.join(out_dir, "twist_%s.png" % uid)
-    fig.savefig(png, dpi=160, bbox_inches="tight")
-    plt.close(fig)
+    save(fig, png)
 
-    # stdout: per-vertex table for each loop (the numeric justification)
+    # non-image output is JSON: the full per-vertex enumeration is emitted as data by the bundle
+    # (<uid>_analysis.json via twist_summary); stdout carries only a one-line-per-loop summary.
     print("TWIST %s %s K=%d  uid=%s" % (tiling, decomp, K, uid))
     for nm, loop, res in results:
-        print("  loop %s (len %d):  Tw=%+d  Tw_index=%+d  sigma-alternates=%s"
+        print("  loop %-18s len %2d  Tw=%+d  index=%+d  alt=%s"
               % (nm, len(loop), round(res["Tw"]), round(res["Tw_index"]), res["alternates"]))
-        print("    %3s %-16s %8s %4s %8s %8s" % ("k", "tile", "gamma", "sig", "sig*g", "cum"))
-        cum = 0.0
-        for k, t in enumerate(loop):
-            contrib = res["sigmas"][k] * res["gammas"][k]
-            cum += contrib
-            print("    %3d %-16s %8.1f %+4d %8.1f %8.1f"
-                  % (k, str(t), res["gammas"][k], res["sigmas"][k], contrib, cum))
-    print("  verdict: %s" % ("FOLD (all Tw=0)" if foldable else "JAM (Tw!=0)"))
+    print("  twist gate: %s%s" % (
+        "FOLD (all Tw=0)" if twist_fold else "JAM (Tw!=0)",
+        ("   engine: %s" % ("FOLD" if engine_fold else "JAM")) if "foldable" in rec else ""))
     return png, results
 
 

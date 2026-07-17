@@ -32,9 +32,10 @@ def load():
         return json.load(fh)["cells"]
 
 
-def density(cells, md=False):
+def density(cells):
+    """cells -> markdown density tables (one per decomp): closing candidates / flat folds (Tw=0) per
+    (tiling, K), with truncated cells flagged as lower bounds."""
     out = []
-    bar = "|" if md else " "
     for d in DECOMPS:
         out.append("\n### %s — closing / flat (Tw=0)\n" % d)
         ks = sorted({c["K"] for c in cells if c["decomp"] == d})

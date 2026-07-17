@@ -1,22 +1,20 @@
 """render.py — tri-render CLI: turn a tri-fold/1 record (or a directory of them) into a self-
-contained image bundle under <out>/<uid>/.
+contained TWO-image bundle under <out>/<uid>/ (the standardised output shape, matching the square
+track: one folding schematic + one twist diagram; everything non-image is JSON).
 
 For each input record this produces:
-  <out>/<uid>/<uid>.json           the record, content-preserved
-  <out>/<uid>/overlay_<uid>.png    chain overlay              (render_fold.render_fold)
-  <out>/<uid>/foldsheet_<uid>.png  printable foldsheet         (render_fold.render_fold)
-  <out>/<uid>/twist_<uid>.png      twist-enumeration diagram   (render_twist.render_twist)
-  <out>/<uid>/reflect_<uid>.png    vector-reflection diagram   (render_reflection.render_reflection)
-                                   — SKIPPED for equilateral 1+1+1 records (no chain-footprint
-                                   geometry to fold; render_reflection raises SystemExit for that
-                                   shape by design, see its module docstring).
+  <out>/<uid>/<uid>.json            the record, content-preserved
+  <out>/<uid>/schematic_<uid>.png   folding schematic: creases + footprints + foldpath (render_fold)
+  <out>/<uid>/twist_<uid>.png       twist-enumeration diagram                       (render_twist)
+  <out>/<uid>/<uid>_analysis.json   per-loop twist enumeration + seam/reflection verdict (the old
+                                    stdout tables + the retired reflect_ image, now data)
 
   python render.py <record.json>            # single record -> out/<uid>/
   python render.py <dir-of-json>            # every *.json in the dir -> out/<uid>/ each
   python render.py <record.json> --out DIR  # write under DIR/<uid>/ instead of out/<uid>/
 
 generate.py (tri-generate) reuses `render_record_json` below so a freshly-searched fold gets the
-exact same 4-image bundle as re-rendering an existing record through this CLI.
+exact same 2-image bundle as re-rendering an existing record through this CLI.
 """
 import argparse
 import glob
@@ -26,34 +24,43 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import render_fold        # noqa: E402  overlay_<uid>.png + foldsheet_<uid>.png
-import render_twist       # noqa: E402  twist_<uid>.png
-import render_reflection  # noqa: E402  reflect_<uid>.png (raises SystemExit if not applicable)
+import render_fold        # noqa: E402  schematic_<uid>.png (creases + footprints + foldpath)
+import render_twist       # noqa: E402  twist_<uid>.png + twist_summary (JSON)
+
+
+def _analysis(json_path, uid, results):
+    """Consolidated non-image analysis: the per-loop twist enumeration (render_twist.twist_summary)
+    plus the seam/reflection verdict pulled from the record (the seam gate's source of truth). This
+    replaces both the reflect_ image and the old per-vertex stdout tables. I/O: (path, uid, results)."""
+    with open(json_path) as f:
+        rec = json.load(f)
+    seam = {"foldable": rec.get("foldable"), "tw": rec.get("tw"), "tw_desc": rec.get("tw_desc")}
+    for k in ("seam_ok", "seam_note", "seam_detail"):
+        if rec.get(k) is not None:
+            seam[k] = rec[k]
+    return {"uid": uid, "tiling": rec.get("tiling"), "decomp": rec.get("decomp"),
+            "K": rec.get("K"), "twist": render_twist.twist_summary(results), "seam": seam}
 
 
 def render_record_json(json_path, uid, out_root):
-    """Render the 4-image bundle for an ALREADY-ON-DISK <uid>.json into <out_root>/<uid>/.
-    Returns {'overlay':path,'foldsheet':path,'twist':path,'reflect':path-or-None}."""
+    """Render the 2-image bundle for an ALREADY-ON-DISK <uid>.json into <out_root>/<uid>/.
+    Returns {'schematic':path, 'twist':path, 'analysis':path}."""
     uid_dir = os.path.abspath(os.path.join(out_root, uid))
     written = {}
-    over, sheet, _verdict = render_fold.render_fold(json_path, out_sub=uid_dir)
-    written["overlay"], written["foldsheet"] = over, sheet
-    twist_png, _results = render_twist.render_twist(json_path, out_sub=uid_dir)
+    _over, sheet, _verdict = render_fold.render_fold(json_path, out_sub=uid_dir, schematic_only=True)
+    written["schematic"] = sheet
+    twist_png, results = render_twist.render_twist(json_path, out_sub=uid_dir)
     written["twist"] = twist_png
-    try:
-        reflect_png, _chir = render_reflection.render_reflection(json_path, out_sub=uid_dir)
-        written["reflect"] = reflect_png
-    except SystemExit:
-        # expected for equilateral 1+1+1 records: they carry a solver `rec`, not chain/footprint
-        # geometry, so there is nothing for the vector-reflection diagram to fold.
-        print("skipped reflect_%s.png: no chain-footprint geometry for this record" % uid)
-        written["reflect"] = None
+    apath = os.path.join(uid_dir, "%s_analysis.json" % uid)
+    with open(apath, "w", encoding="utf-8") as f:
+        json.dump(_analysis(json_path, uid, results), f, indent=2)
+    written["analysis"] = apath
     return written
 
 
 def _summary_line(uid, written):
     parts = []
-    for name in ("overlay", "foldsheet", "twist", "reflect"):
+    for name in ("schematic", "twist", "analysis"):
         parts.append("%s=%s" % (name, "ok" if written.get(name) else "skipped"))
     return "%s: %s" % (uid, "  ".join(parts))
 

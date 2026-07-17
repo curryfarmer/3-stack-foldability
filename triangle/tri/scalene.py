@@ -108,15 +108,6 @@ def build_ambient_scalene(K, hub="omitVM"):
     return lat, S, back
 
 
-def pair_tw(chains):
-    import tritwist as TW
-    names, pairs, res = ["AB", "BC", "AC"], [(0, 1), (1, 2), (0, 2)], {}
-    for nm, (i, j) in zip(names, pairs):
-        loop = list(chains[i]) + list(reversed(chains[j]))
-        res[nm] = TW.loop_twist(loop, cent=centroid, sigma=sigma)
-    return res
-
-
 def scan_existence(Kmax=12):
     import prove_obstruction as PO
     print("\n30-60-90 (scalene) existence scan, 3 hub types:")

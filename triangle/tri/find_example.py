@@ -237,7 +237,7 @@ def gen_eq(decomp, K, stats=None, budget=None, t0=None):
                     stats["closure_pass"] += 1
                 rec = SF.record_111(lat, pa, pm, pc, K)
                 yield {"decomp": decomp, "rec": rec, "region": set(pa) | set(pm) | set(pc),
-                       "foldable": rec["foldable"],
+                       "tw": rec["tw"], "foldable": rec["foldable"],
                        "tw_desc": "Tw AB=%+d BC=%+d AC=%+d" % tuple(rec["tw"])}
         return lat, it()
     # 2+1: unified onto the general domino model (the legacy rhombus enum_21 used an incompatible
@@ -272,11 +272,11 @@ def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget, stats=No
     fallback = None
     for K in range(K0, kcap + 1, step):
         if tiling == "equilateral":
-            lat, gen = gen_eq(decomp, K, stats=stats)
+            lat, gen = gen_eq(decomp, K, stats=stats, budget=budget, t0=t0)
         elif decomp == "1plus1plus1":
-            lat, gen = gen_111(tiling, K, hub, stats=stats)
+            lat, gen = gen_111(tiling, K, hub, stats=stats, budget=budget, t0=t0)
         else:
-            lat, gen = gen_21(tiling, K, stats=stats)
+            lat, gen = gen_21(tiling, K, stats=stats, budget=budget, t0=t0)
         for cand in gen:
             SFILT.apply(lat, cand)          # STRICT START<->END seam gate: demote a mirror/off-cell FOLD to JAM
             hc = len(HF.holes(lat, cand["region"], interior_deg))
@@ -312,20 +312,24 @@ def verdict_text(cand):
     return "PREDICTED TO JAM (%s) - fold to verify" % cand["tw_desc"]
 
 
-def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=None):
+def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=None,
+                schematic_only=False):
     # name_stem overrides the descriptive tag so the sheets can be keyed by a stable fold uid
     # (overlay_<uid>.png / foldsheet_<uid>.png) — see gen_testset --quadrants + render_fold.py.
+    # schematic_only=True: the per-fold bundle wants ONE folding schematic (the foldsheet, now carrying
+    # the chain-walk foldpath) + no separate overlay; the sheet is named schematic_<stem>.png.
     stem = name_stem or ("%s_%s_%s%s" % (tiling, "1plus1" if decomp == "1plus1plus1" else "2plus1",
                                          holes_mode, suffix))
-    over_name, sheet_name = "overlay_%s.png" % stem, "foldsheet_%s.png" % stem
+    over_name = "overlay_%s.png" % stem
+    sheet_name = "%s_%s.png" % ("schematic" if schematic_only else "foldsheet", stem)
     verdict = verdict_text(cand)
     holes_lab = "NO HOLES" if cand["holes"] == 0 else "%d hole(s)" % cand["holes"]
 
     if tiling == "equilateral" and decomp == "1plus1plus1":   # 1+1+1 keeps the validated SF renderer
         rec = cand["rec"]
-        over, sheet = SF.render_111(rec, 1)
-        over = _rename(over, over_name)
+        over, sheet = SF.render_111(rec, 1, schematic_only=schematic_only)
         sheet = _rename(sheet, sheet_name)
+        over = _rename(over, over_name) if over else None
         return over, sheet, verdict
 
     g = GEN[tiling]                                            # general path (incl. equilateral 2+1)
@@ -350,13 +354,14 @@ def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=N
     # per-END-tile return orientation (proper/mirror/off-cell + whole-footprint class), single source
     # of truth = the seam gate. Drives the orientation-aware END colouring on BOTH the overlay + sheet.
     end_chir = SFILT.tile_chirality(lat, cand)
-    over = RG.render(g["mod"], cand["chains"], footprint, title, over_name, note=note,
-                     end_footprint=end_footprint, region=cand["region"], partners=partners,
-                     end_chirality=end_chir)
+    over = None if schematic_only else RG.render(
+        g["mod"], cand["chains"], footprint, title, over_name, note=note,
+        end_footprint=end_footprint, region=cand["region"], partners=partners,
+        end_chirality=end_chir)
     sheet = FS.make_sheet(g["LatClass"], g["vcart"], g["tile_cart"], g["sigma"],
                           sheet_chains, footprint, title, sheet_name, K,
                           verdict_note=verdict, crease_override=crease, end_footprint=end_footprint,
-                          rigid_override=rigid_ov, end_chirality=end_chir)
+                          rigid_override=rigid_ov, end_chirality=end_chir, walk_chains=cand["chains"])
     return over, sheet, verdict
 
 

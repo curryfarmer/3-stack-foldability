@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """render_cli.py — sq-render CLI: render a generate.py/twostack.py record (JSON) into its full
-out/<uid>/ bundle (JSON + foldsheet PNG [+ twist PNG for 3-stack 2+1]) without re-running the
-search. Schema-sniffs "circuit" (2-stack) vs "chains"+"footprint" (3-stack).
+out/<uid>/ bundle (JSON + schematic PNG + twist PNG) without re-running the search. Schema-sniffs
+"circuit" (2-stack) vs "chains"+"footprint" (3-stack).
 
 Usage:
   python square/render_cli.py <record.json> [--out DIR]
@@ -28,11 +28,15 @@ import render_bundle as RenderB  # noqa: E402
 
 
 def _iter_records(target):
-    """Yield (path, rec_dict) for a single JSON file or every *.json in a directory."""
+    """Yield (path, rec_dict) for a single JSON file or every *.json in a directory.
+    I/O: (target path) -> iterator of (path, record dict). Raises ValueError on a missing target and
+    ValueError/OSError on an unreadable/unparseable JSON file -- main() maps those to a clean exit 2."""
     if os.path.isdir(target):
         paths = sorted(glob.glob(os.path.join(target, "*.json")))
-    else:
+    elif os.path.isfile(target):
         paths = [target]
+    else:
+        raise ValueError(f"no such file or directory: {target}")
     for path in paths:
         with open(path, encoding="utf-8") as f:
             yield path, json.load(f)
@@ -44,15 +48,22 @@ def main(argv=None):
     p.add_argument("--out", default="out", help="output directory for <uid>/ bundles (default: out/)")
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
 
+    try:                                        # validate target + parse every JSON up front so a
+        records = list(_iter_records(args.target))  # bad path / malformed file is a clean exit 2,
+    except (ValueError, OSError) as exc:         # not a FileNotFound/JSONDecodeError traceback (exit
+        print(f"error: {exc}", file=sys.stderr)  # 1); matches generate.py's return-2 usage-error path
+        return 2
+
     n_ok = 0
-    for path, rec in _iter_records(args.target):
+    for path, rec in records:
         uid = rec.get("uid")
         if not uid:
-            raise SystemExit(f"error: {path} has no 'uid' -- records must be pre-stamped by "
-                              f"generate.py/twostack.py (refusing to silently recompute one)")
+            print(f"error: {path} has no 'uid' -- records must be pre-stamped by "
+                  f"generate.py/twostack.py (refusing to silently recompute one)", file=sys.stderr)
+            return 2
         produced = RenderB.render_record(rec, args.out)
         kind = "3-stack" if RenderB.is_3stack(rec) else "2-stack"
-        print(f"  [{uid}] {kind}  {path} -> {produced.get('foldsheet', produced['json'])}")
+        print(f"  [{uid}] {kind}  {path} -> {produced.get('schematic', produced['json'])}")
         n_ok += 1
     print(f"rendered {n_ok} record(s) -> {args.out}/")
     return 0

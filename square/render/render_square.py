@@ -27,7 +27,12 @@ def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
     """Render one fold pattern (the detail_json sol dict) on an m×n grid to out_path (PNG/PDF by
     extension). Returns out_path. I/O: (detail, m, n, out_path, ...) -> path."""
     fig, ax = fs.new_grid_axes(m, n, extra_w=2.2, ticklabels=False)   # foldsheet: cells locate position
-    fs.draw_grid_cells(ax, m, n)
+    # Arbitrary drawn sheets carry a `sheetCells` mask (origin-normalized S region, stamped at
+    # generation); draw only S, not the whole m×n bounding rectangle. Absent (rectangle sheet) -> None
+    # -> the full grid, byte-identical to before.
+    sc = detail.get("sheetCells")
+    mask = {tuple(c) for c in sc} if sc else None
+    fs.draw_grid_cells(ax, m, n, mask=mask)
     fs.draw_footprint(ax, (detail.get("footprint") or {}).get("cells", []))
 
     # chains: fill + letter the base cells, draw each chain's real replayed fold path
@@ -57,7 +62,8 @@ def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
     for pair in refl["pairs"]:
         seed = Fold._crease_segment(pair["Pi"], pair["Pj"])
         segs = [(fs.chain_color(pair["i"]), pair["segI"]), (fs.chain_color(pair["j"]), pair["segJ"])]
-        fs.draw_reflection(ax, seed, segs, pair["pass"])
+        # each chain's base cell -> its seed arrow sits on its own side of the crease (not swapped)
+        fs.draw_reflection(ax, seed, segs, pair["pass"], cells=[pair["Pi"], pair["Pj"]])
 
     ax.set_title(title or "", color=fs.INK)
 

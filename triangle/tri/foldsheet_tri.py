@@ -14,68 +14,28 @@ Mountain/Valley: accordion alternation tied to sigma (global, so consistent acro
 M<->V is a global symmetry, so if it doesn't collapse flat, flip them all.
 """
 import os
+import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt          # noqa: E402
 from matplotlib.patches import Polygon   # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tri/ on path for tristyle
+# Palette / dpi / save / the shared start+end footprint drawer all come from tristyle, the triangle
+# track's single source of truth (the analog of the square track's figstyle). draw_footprints lived
+# here historically; it now lives in tristyle so every renderer draws footprints identically.
+from tristyle import (draw_footprints, draw_walk_arrows, save, DPI, TINT, MNT, VLY, CUT, RIGID,  # noqa: E402,F401
+                      START_FILL, FOOTPRINT_EDGE, GRID_EDGE, INK, MUTED, CHAIN,
+                      CHIR_COLOR, CHIR_TAG)
+
+
+def _cent_of(poly):
+    """Centroid (vertex mean) of a tile polygon — for the chain-walk foldpath overlay."""
+    return (sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly))
+
+# OUT is mutated externally by the engine (find_example.set_outdir sets FS.OUT to redirect a campaign's
+# output dir), so it MUST stay a module attribute here — do not migrate it into tristyle.
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "report", "tri")
-TINT = ["#eaf3fb", "#fdeeee", "#eafaef"]   # faint per-chain
-MNT, VLY, CUT = "#d83232", "#3399cc", "#2a8"
-RIGID = "#b0b0b0"   # faint grey: keep-attached, flat (the rigid hub trapezoids — NOT a cut)
-# Two footprints: the START hub (where the chains begin) and the unfolded chain-END tiles. They are
-# distinct regions on the flat sheet (chain ends are K steps from the hub); the END trapezoid folds
-# onto the START hub, so comparing the two makes the edge-type (long/short seam) relationship visible.
-START_OUTLINE, START_FILL = "#1b9e9e", "#e3f4f4"   # teal: start hub, filled
-END_OUTLINE = "#6f4fb0"                            # purple: unfolded chain-end tiles, dashed (no fill)
-# Orientation-aware END colouring (the actual fix): each END tile is painted by how it returns onto its
-# START cell, from seam_filter.tile_chirality (single source of truth = the gate). This replaces the
-# orientation-BLIND S/L seam-length tags, which read "match" on a real mirror because length is a
-# reflection invariant. proper=aligned (a->a, b->b sides map through), mirror=sides swapped (short seam
-# onto long), off-cell=landed wrong. Tag glyph next to A/B/C makes the per-tile verdict readable.
-CHIR_COLOR = {"proper": "#2ca02c", "uniform": "#2ca02c", "mirror": "#e8820c", "off-cell": "#d83232"}
-CHIR_TAG = {"proper": "rot", "uniform": "=", "mirror": "flip", "off-cell": "off"}
-
-
-def draw_footprints(ax, tile_cart, start_fp, end_fp=None, z0=8.4, labelsize=11, end_chirality=None):
-    """Highlight the START footprint (teal, filled) and the unfolded END footprint with A/B/C labels in
-    chain order (A=chain0, B=mid, C=chain2 in BOTH). Either may be None. Generic over n-gons.
-    end_chirality (seam_filter.tile_chirality dict) recolours each END tile by its return orientation:
-    green=proper(rotation)/uniform, amber=mirror(flipped/sides-swapped), red=off-cell. When None, the
-    END is drawn neutral purple (no orientation claim)."""
-    per = (end_chirality or {}).get("per_tile") or []
-
-    def _one(fp, fill, outline, dashes, zf, zo, zt, nudge, chir=None):
-        if not fp:
-            return
-        for ci, t in enumerate(fp):
-            pc = tile_cart(t)
-            n = len(pc)
-            cx = sum(p[0] for p in pc) / n
-            cy = sum(p[1] for p in pc) / n
-            klass = chir[ci]["klass"] if (chir and ci < len(chir)) else None
-            oc = CHIR_COLOR.get(klass, outline)
-            if fill is not None:
-                ax.add_patch(Polygon(pc, closed=True, facecolor=fill, edgecolor="none", zorder=zf))
-            kw = dict(facecolor="none", edgecolor=oc, lw=2.6, zorder=zo)
-            if dashes is not None:
-                kw["linestyle"] = (0, dashes)
-            ax.add_patch(Polygon(pc, closed=True, **kw))
-            vx, vy = pc[0]                       # nudge the label toward vertex0 so start/end don't collide
-            # Scale the nudge by 3/n: tuned for triangles (n=3); on rounder n-gons (e.g. hexagons,
-            # n=6) the same fraction of a single vertex's pull reads as visibly off-centre, since
-            # there are more, closer-together vertices to pull toward.
-            nf = nudge * min(1.0, 3.0 / n)
-            ax.text(cx + nf * (vx - cx), cy + nf * (vy - cy), "ABC"[ci % 3], ha="center",
-                    va="center", color=oc, fontsize=labelsize, fontweight="bold", zorder=zt,
-                    bbox=dict(boxstyle="circle,pad=0.12", fc="white", ec=oc, lw=0.8, alpha=0.85))
-            if klass:                            # orientation tag beside the END label (the seam verdict)
-                ax.text(cx - nf * (vx - cx), cy - nf * (vy - cy), CHIR_TAG.get(klass, "?"),
-                        ha="center", va="center", color=oc, fontsize=labelsize - 4, fontweight="bold",
-                        zorder=zt, bbox=dict(boxstyle="round,pad=0.1", fc="white", ec=oc, lw=0.7,
-                                             alpha=0.9))
-    _one(start_fp, START_FILL, START_OUTLINE, None,     z0,       z0 + 0.2, z0 + 0.3, -0.16)
-    _one(end_fp,   None,       END_OUTLINE,   (4, 2.4), z0 + 0.5, z0 + 0.7, z0 + 0.9, +0.16, chir=per)
 
 
 def _len_class_map(tile_cart, fp):
@@ -120,29 +80,28 @@ def _draw_seam_tags(ax, sub, vcart, fp, lmap, color, z):
 
 # whole-footprint rigid-motion class -> compact physical caption for the side panel (seam_filter.klass).
 # SEAM-axis captions only. seam OK is NECESSARY-not-sufficient (the twist has the final FOLD/JAM say,
-# shown in the title/verdict); seam BAD is AUTHORITATIVE (a mirror/rearrangement JAMs regardless of Tw).
-# Kept to two short lines so they fit the narrow legend panel without overflowing.
+# shown in the title/verdict). Chirality is COSMETIC: only an OFF-CELL arrival jams on the seam axis
+# (all-mirror/mixed returns seat flat -> their live OK captions live in _draw_class_caption). Kept to
+# two short lines so they fit the narrow legend panel without overflowing.
 _CLASS_CAPTION = {
-    "all-proper": ("#2ca02c", "SEAM: whole footprint ROTATED\n(one rigid motion) -> OK iff Tw=0"),
-    "uniform":    ("#2ca02c", "SEAM: uniform tile, mirror\ninvisible -> OK iff Tw=0"),
-    "all-mirror": ("#e8820c", "SEAM: 3 tiles FLIPPED about\ndifferent axes -> JAM (rearrange)"),
-    "mixed":      ("#d83232", "SEAM: MIXED flips, tiles\nrearranged -> JAM"),
-    "off-cell":   ("#d83232", "SEAM: an END tile landed OFF\nits START cell -> JAM"),
-    "n/a":        ("#777777", "SEAM: n/a (no footprint geom)"),
+    "all-proper": (CHIR_COLOR["proper"], "SEAM: whole footprint ROTATED\n(one rigid motion) -> OK iff Tw=0"),
+    "uniform":    (CHIR_COLOR["proper"], "SEAM: uniform tile, mirror\ninvisible -> OK iff Tw=0"),
+    "off-cell":   (CHIR_COLOR["off-cell"], "SEAM: an END tile landed OFF\nits START cell -> JAM"),
+    "n/a":        (MUTED, "SEAM: n/a (no footprint geom)"),
 }
 
 
 def _draw_class_caption(ax, lx, y, chir):
     """Draw the whole-footprint seam-class caption on the side panel at axes-fraction (lx, y); return
     the next free y. (Two-line captions -> reserve ~2 line heights.)
-    all-mirror splits on the gate verdict: EXEMPT tiles (asymmetric/scalene: mirror seats the
-    mirror-partner cell) read OK; ENFORCED tiles (isosceles/righttri: equal sides swap) read JAM —
-    the 2026-07-02 physical fold of the righttri single-reflection case confirmed the mismatch."""
+    Chirality is COSMETIC (confirmed 2026-07-05): all-mirror AND mixed arrivals seat flat with the
+    printed START/END seam merely flipped, so both read OK — only an OFF-CELL arrival jams (see
+    seam_filter._verdict). The final FOLD/JAM is the twist's (Tw=0), shown in the title/verdict."""
     klass = chir.get("klass", "n/a")
-    if klass == "all-mirror" and chir.get("ok"):
-        col, txt = "#2ca02c", "SEAM: mirror return seats the\nmirror-partner cells -> OK iff Tw=0"
-    elif klass == "all-mirror" and chir.get("single_motion"):
-        col, txt = "#e8820c", "SEAM: whole footprint REFLECTED\n(single mirror): equal sides swap -> JAM"
+    if klass == "all-mirror":
+        col, txt = CHIR_COLOR["proper"], "SEAM: mirror return seats the\nmirror-partner cells -> OK iff Tw=0"
+    elif klass == "mixed":
+        col, txt = CHIR_COLOR["proper"], "SEAM: mixed flips seat flat\n(printed seam flipped) -> OK iff Tw=0"
     else:
         col, txt = _CLASS_CAPTION.get(klass, _CLASS_CAPTION["n/a"])
     ax.text(lx, y - 0.008, txt, ha="left", va="top", fontsize=7.4, color=col, fontweight="bold")
@@ -169,12 +128,12 @@ def _legend_row(ax, lx, y, col, ls, lab):
         if ls == "dash":
             kw["dashes"] = (3, 2.2)
         ax.plot([lx, lx + sw], [y, y], **kw)
-    ax.text(lx + sw + gap, y, lab, ha="left", va="center", fontsize=8.0, color="#222")
+    ax.text(lx + sw + gap, y, lab, ha="left", va="center", fontsize=8.0, color=INK)
 
 
 def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_name, K,
                verdict_note=None, crease_override=None, end_footprint=None, rigid_override=None,
-               end_chirality=None):
+               end_chirality=None, walk_chains=None):
     region = sorted(set().union(*[set(c) for c in chains]))
     sub = LatClass(cells=region)
     if crease_override is not None:              # caller supplies the fold-edge set directly
@@ -218,12 +177,12 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
     axL.set_xlim(0, 1); axL.set_ylim(0, 1); axL.axis("off")
     for t in region:
         ax.add_patch(Polygon(tile_cart(t), closed=True, facecolor=TINT[cell_chain[t] % 3],
-                             edgecolor="#dddddd", lw=0.5, zorder=1))
+                             edgecolor=GRID_EDGE, lw=0.5, zorder=1))
     for e, owners in edge_owners.items():
         (p, q) = [vcart(v) for v in e]
         xs, ys = [p[0], q[0]], [p[1], q[1]]
         if len(owners) == 1:                     # outer boundary -> cut around
-            ax.plot(xs, ys, color="#222", lw=2.4, solid_capstyle="round", zorder=6)
+            ax.plot(xs, ys, color=INK, lw=2.4, solid_capstyle="round", zorder=6)
         elif e in crease:                        # fold line (mountain/valley by COLOR)
             valley = crease[e] > 0
             mv = VLY if valley else MNT
@@ -232,7 +191,22 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
             ax.plot(xs, ys, color=RIGID, lw=1.4, solid_capstyle="round", zorder=5)
         else:                                    # interior slit -> cut
             ax.plot(xs, ys, color=CUT, lw=2.4, dashes=(3, 2.2), solid_capstyle="round", zorder=8)
-    # START hub (teal, filled) + unfolded chain-END tiles, A/B/C in chain order. END tiles are
+    # fold path: each chain's centroid walk (the order its tiles are visited) with per-step arrowheads
+    # and step numbers — the "with foldpath" half of the unified schematic (analog of the square
+    # foldsheet's draw_fold_path). walk_chains carries the ORDERED walks (the sheet `chains` may be a
+    # sorted set, e.g. the 2+1 domino); drawn only when supplied so a bare crease sheet is unchanged.
+    if walk_chains is not None:
+        for ci, w in enumerate(walk_chains):
+            cents = [_cent_of(tile_cart(t)) for t in w]
+            if not cents:
+                continue
+            xs, ys = zip(*cents)
+            ax.plot(xs, ys, "-", color=CHAIN[ci % 3], lw=1.8, solid_capstyle="round", zorder=6, alpha=0.9)
+            ax.plot(xs, ys, "o", color=CHAIN[ci % 3], ms=3, zorder=6.1)
+            draw_walk_arrows(ax, cents, CHAIN[ci % 3], z=6.2)
+            for k, (x, y) in enumerate(cents):
+                ax.text(x, y, str(k), ha="center", va="center", color="white", fontsize=5, zorder=7)
+    # START hub (purple, faint fill) + unfolded chain-END tiles, A/B/C in chain order. END tiles are
     # recoloured by return orientation (green=proper/rotation, amber=mirror, red=off-cell) from
     # end_chirality — the orientation-aware replacement for the old S/L END length tags.
     draw_footprints(ax, tile_cart, footprint, end_footprint, z0=8.4, labelsize=11,
@@ -241,7 +215,7 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
     # The END tags are DROPPED: length is a reflection invariant, so an END length tag reads "match"
     # even on a real mirror — the END orientation colour (above) is the correct START<->END signal.
     lmap = _len_class_map(tile_cart, footprint)
-    _draw_seam_tags(ax, sub, vcart, footprint, lmap, START_OUTLINE, 9.2)
+    _draw_seam_tags(ax, sub, vcart, footprint, lmap, FOOTPRINT_EDGE, 9.2)
 
     # tight region limits: the pattern now fills its own axis instead of sharing it with the legend.
     pts = [p for t in region for p in tile_cart(t)]
@@ -251,7 +225,7 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
 
     # title spans the full sheet width; legend + notes live on the side panel (axL, figure-relative).
-    fig.text(0.5, 0.985, title, ha="center", va="top", fontsize=13, fontweight="bold", color="#222")
+    fig.text(0.5, 0.985, title, ha="center", va="top", fontsize=13, fontweight="bold", color=INK)
     lx, y, lh = 0.02, 0.985, 0.040
     legend = [
         (VLY, "solid", "FOLD — valley (toward you)"),
@@ -259,17 +233,17 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
         (CUT, "dash", "SLIT — cut (interior)"),
         ("#222", "solid", "cut around outer boundary"),
         (RIGID, "solid", "rigid — keep attached, flat (hub)"),
-        (START_OUTLINE, "fill", "START footprint A/B/C (the hub)"),
+        (FOOTPRINT_EDGE, "fill", "START footprint A/B/C (the hub)"),
     ]
     if end_chirality:
         legend += [
-            ("#2ca02c", "endcol", "END aligned: proper rotation = FOLD"),
-            ("#e8820c", "endcol", "END mirror: sides swapped = JAM"),
-            ("#d83232", "endcol", "END off-cell: wrong cell = JAM"),
+            (CHIR_COLOR["proper"], "endcol", "END aligned: proper rotation = FOLD"),
+            (CHIR_COLOR["mirror"], "endcol", "END mirror: sides swapped = JAM"),
+            (CHIR_COLOR["off-cell"], "endcol", "END off-cell: wrong cell = JAM"),
         ]
     else:
-        legend.append((END_OUTLINE, "endfp", "END footprint A/B/C (fold onto hub)"))
-    legend.append(("#222", "text", "S L = START hub seam side-length"))
+        legend.append((FOOTPRINT_EDGE, "endfp", "END footprint A/B/C (fold onto hub)"))
+    legend.append((INK, "text", "S L = START hub seam side-length"))
     for col, ls, lab in legend:
         _legend_row(axL, lx, y, col, ls, lab)
         y -= lh
@@ -280,13 +254,9 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
              "K=%d, %d tiles. Cut the outer boundary + green slits\n"
              "(leave grey hub seams attached); fold every red/blue\n"
              "crease (red=mountain, blue=valley); the chains accordion\n"
-             "so the END footprint lands on the START hub (teal) as a\n"
+             "so the END footprint lands on the START hub (purple) as a\n"
              "3-stack (%s). If it won't seat, flip ALL\n"
              "mountain<->valley (a global symmetry) and retry."
-             % (K, len(region), verdict), ha="left", va="top", fontsize=7.5, color="#555")
+             % (K, len(region), verdict), ha="left", va="top", fontsize=7.5, color=MUTED)
 
-    os.makedirs(OUT, exist_ok=True)
-    path = os.path.join(OUT, out_name)
-    fig.savefig(path, dpi=170, bbox_inches="tight")
-    plt.close(fig)
-    return path
+    return save(fig, os.path.join(OUT, out_name))

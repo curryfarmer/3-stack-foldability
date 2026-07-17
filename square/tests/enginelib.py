@@ -87,7 +87,7 @@ def closing_candidates(
             ctx = {"nodeCount": 0, "candidateCount": 0, "coveredCount": 0, "cancelled": False}
 
             def on_candidate(chains: list[dict], _fp: dict = footprint, _dc: dict = decomp) -> None:
-                if not Search.exit_footprint_check(chains, _fp["shape"]):
+                if not Search.exit_footprint_check(chains, _fp["shape"], _fp.get("panels", 3)):
                     return
                 par = Search.parity_check(chains)
                 ref = Search.reflection_check(chains)

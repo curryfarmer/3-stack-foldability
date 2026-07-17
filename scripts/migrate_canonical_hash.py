@@ -35,7 +35,6 @@ Usage:
 """
 from __future__ import annotations
 
-import io
 import json
 import os
 import sys
@@ -166,21 +165,32 @@ def _load(path):
         return json.load(f)
 
 
+def _detect_newline(path):
+    """Sniff a file's line-ending style from its raw bytes. I/O: (path) -> '\\r\\n' or '\\n'."""
+    with open(path, "rb") as f:
+        return "\r\n" if b"\r\n" in f.read() else "\n"
+
+
 def _dump(path, obj):
-    """Write in the files' existing on-disk format: indent=2, no trailing newline, and CRLF via
-    text-mode translation. _assert_format_fidelity proves this reproduces each target byte-for-byte
-    before we touch it, so the only diff this migration produces is the hashes it actually changed."""
-    with open(path, "w") as f:
-        json.dump(obj, f, indent=2)
+    """Write in the file's existing on-disk format: indent=2, no trailing newline, and the file's
+    OWN line endings preserved (platform default for a not-yet-existing output file, matching the
+    old text-mode behaviour). _assert_format_fidelity proves this reproduces each target
+    byte-for-byte before we touch it, so the only diff this migration produces is the hashes it
+    actually changed. I/O: (path, obj) -> None."""
+    newline = _detect_newline(path) if os.path.exists(path) else os.linesep
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(obj, indent=2).replace("\n", newline))
 
 
 def _assert_format_fidelity(path):
-    """Load->dump must be a byte-identical no-op before we trust _dump with the ground truth."""
+    """Load->dump must be a byte-identical no-op before we trust _dump with the ground truth.
+    Checks against the file's ACTUAL line endings (never an assumed CRLF), so an LF checkout is
+    validated instead of being permanently refused. I/O: (path) -> None (raises Stop on any reformat)."""
     with open(path, "rb") as f:
         original = f.read()
-    buf = io.StringIO()
-    json.dump(json.load(io.StringIO(original.decode())), buf, indent=2)
-    if buf.getvalue().replace("\n", "\r\n").encode() != original:
+    newline = "\r\n" if b"\r\n" in original else "\n"
+    reserialized = json.dumps(json.loads(original.decode("utf-8")), indent=2).replace("\n", newline)
+    if reserialized.encode("utf-8") != original:
         raise Stop(f"{os.path.relpath(path, _ROOT)}: re-serializing would reformat the file; "
                    f"refusing to rewrite it")
 

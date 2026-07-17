@@ -97,12 +97,6 @@ def _edge_key(seg):
     return tuple(sorted((a, b)))
 
 
-def reflect_seg(seg, mirror):
-    """Reflect a 2-point segment across the line `mirror` = (p1, p2)."""
-    a, b = mirror
-    return (reflect_point(seg[0], a, b), reflect_point(seg[1], a, b))
-
-
 # --------------------------------------------------------------------------- self-check
 def _selfcheck():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tri"))
@@ -130,7 +124,7 @@ def _selfcheck():
     if d in lat2.adj[u]:
         parent, f2 = tree_fold(lat2, [u, d], root=u)
         e = lat2.shared_edge(u, d)
-        seg_u = reflect_seg(e, lat2.shared_edge(u, d)) if False else e  # u-frame: identity
+        seg_u = e  # u-frame: identity (u is the root, so its shared edge is unreflected)
         seg_d = (f2(e[0], d), f2(e[1], d))
         print("tree-fold rhombus shared edge coincides:", _edge_key(seg_u) == _edge_key(seg_d))
 

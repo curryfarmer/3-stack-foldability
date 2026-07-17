@@ -44,6 +44,11 @@ def holes(lat, region, interior_deg=3):
 
 
 def hunt(K, budget):
+    """LEGACY demo hunt (no tracked consumer; only holes() above is imported elsewhere). Twist is now
+    scored via TS.pairwise_twists, which defaults to the loop-INDEX (path) sigma -- so a "foldable"
+    hit is Tw=0 under the correct authority, not the bipartite spurious-zero. The shipped 1+1+1 oracle
+    is solve_foldable.enum_111 + foldclose.reflection_closes_111. I/O: (K, budget) -> (hits, closing,
+    holefree, twhist, iters)."""
     assert K % 2 == 0, "use even K (odd K has the -240 seam artifact)"
     lat, S, back = PO.build_ambient(K)
     arm1, m, arm2 = S

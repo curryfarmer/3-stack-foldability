@@ -102,12 +102,19 @@ def export_cell(path, args, rows):
             if not line.strip():
                 continue
             r = json.loads(line)
-            want = (r["foldable"] and not args.jams) or (not r["foldable"] and (args.jams or args.all))
-            if not (want or (args.all and r["foldable"])):
+            # A raw JAM can never become a FOLD (SFILT.apply only ever DEMOTES fold->jam), so when we
+            # only want folds we can drop it here without paying to build+seam it -- the cheap guard
+            # that keeps the default export from materialising every one of the census's ~2.5M jams.
+            if not r["foldable"] and not (args.jams or args.all):
                 continue
-
             cand = cand_from_record(lat, tiling, decomp, K, r)
             SFILT.apply(lat, cand)                       # seam gate — can demote a Tw=0 FOLD to a JAM
+            # Filter on the POST-seam verdict, not the raw census flag: a seam-demoted fold is a JAM,
+            # so it must not be written into the folds/ folder (N48).
+            foldable = bool(cand["foldable"])
+            want = (foldable and not args.jams) or (not foldable and (args.jams or args.all))
+            if not want:
+                continue
             cand["holes"] = len(HF.holes(lat, cand["region"], interior_deg))
             uid = GT.fold_uid(tiling, decomp, cand)
             try:
@@ -136,7 +143,8 @@ def write_index(out):
     root = os.path.dirname(out)
     rows = []
     for p in glob.glob(os.path.join(root, "*", "folds", "*.json")):
-        d = json.load(open(p))
+        with open(p) as fh:
+            d = json.load(fh)
         rows.append({"uid": d["uid"], "tiling": d["tiling"], "decomp": d["decomp"], "K": d["K"],
                      "tw": d.get("tw"), "foldable": bool(d["foldable"]),
                      "seam_class": d.get("seam_class"), "verdict": d.get("verdict"),

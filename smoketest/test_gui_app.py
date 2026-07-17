@@ -20,7 +20,10 @@ from gui.app import App   # noqa: E402
 @pytest.fixture
 def app(tmp_path):
     import tkinter as tk
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display / Tk unavailable")
     root.withdraw()
     a = App(root, out_dir=str(tmp_path / "out"))
     yield a

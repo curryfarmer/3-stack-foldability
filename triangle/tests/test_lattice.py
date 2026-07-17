@@ -18,21 +18,36 @@ copies in sync by hand -- an invariant added here belongs in the square copy too
 The square copy additionally carries square-only D4 / parity / exit-shape pins, which have no
 triangle counterpart. Before the split the triangle lattices had NO standalone tests at all -- they
 were exercised only through the shared fixture, which is exactly what this file preserves.
+
+HEXLATTICE (triangle-only, no square counterpart) rides the GEOMETRY invariants via geom_case, but
+NOT test_sigma_bipartite: the honeycomb dual is the triangular lattice, which has odd 3-cycles, so it
+is non-bipartite and sigma() is only a +1 placeholder (foldability there uses the loop-index
+path_sigma, not a global 2-coloring). Adding it to the geometry set is what pins its novel
+vertex-key/centroid geometry (corner = frozenset of 3 axial ids; centroid = mean of 6 corner keys).
 """
 import pytest  # noqa: E402
 
 import trilattice as TL          # noqa: E402  (sys.path set in conftest.py)
 import righttri as RT            # noqa: E402
 import scalene as SC             # noqa: E402
+import hexlattice as HX          # noqa: E402  non-bipartite -> geometry invariants only
 
 
 # (id, lattice factory, reflection tolerance)
 def _lattices():
+    """Lattices valid for ALL five invariants, INCLUDING the bipartite sigma 2-coloring."""
     return [
         ("tri", TL.TriLattice(2, 3), 1e-7),
         ("righttri", RT.RightTriLattice(3, 3), 1e-7),
         ("scalene", SC.ScaleneLattice(faces=TL.triangle_cells(4)), 1e-5),
     ]
+
+
+def _geom_lattices():
+    """_lattices() + HexLattice, which is NON-bipartite (odd dual 3-cycles) so it is excluded from
+    test_sigma_bipartite but valid for every geometry invariant (reflection lands on the neighbour,
+    centroid = vertex mean, shared_edge symmetric, trapezoids well-formed)."""
+    return _lattices() + [("hex", HX.HexLattice(R=2), 1e-7)]
 
 
 def _pointset_equal(A, B, tol):
@@ -48,9 +63,15 @@ def lat_case(request):
     return request.param
 
 
-def test_reflection_lands_on_neighbour(lat_case):
+@pytest.fixture(params=_geom_lattices(), ids=lambda p: p[0])
+def geom_case(request):
+    """The geometry invariants (everything except the bipartite sigma) run over the hex lattice too."""
+    return request.param
+
+
+def test_reflection_lands_on_neighbour(geom_case):
     """Reflecting a tile's vertices across a shared crease reproduces the neighbour's vertices."""
-    _id, lat, tol = lat_case
+    _id, lat, tol = geom_case
     seen = 0
     for a in lat.tiles:
         for b in lat.neighbors(a):
@@ -67,9 +88,9 @@ def test_sigma_bipartite(lat_case):
     assert not bad, f"{_id}: {bad[:3]}"
 
 
-def test_centroid_is_vertex_mean(lat_case):
+def test_centroid_is_vertex_mean(geom_case):
     """Centroid equals the mean of the tile's Cartesian vertices."""
-    _id, lat, _tol = lat_case
+    _id, lat, _tol = geom_case
     for t in lat.tiles:
         vs = lat.vertices_cart(t)
         mx = sum(p[0] for p in vs) / len(vs)
@@ -78,9 +99,9 @@ def test_centroid_is_vertex_mean(lat_case):
         assert abs(cx - mx) < 1e-9 and abs(cy - my) < 1e-9, f"{_id}: {t}"
 
 
-def test_shared_edge_symmetric(lat_case):
+def test_shared_edge_symmetric(geom_case):
     """shared_edge(a,b) and shared_edge(b,a) are the same crease (unordered)."""
-    _id, lat, _tol = lat_case
+    _id, lat, _tol = geom_case
     for a in lat.tiles:
         for b in lat.neighbors(a):
             e_ab = {tuple(round(c, 6) for c in p) for p in lat.shared_edge(a, b)}
@@ -88,9 +109,9 @@ def test_shared_edge_symmetric(lat_case):
             assert e_ab == e_ba, f"{_id}: {a},{b}"
 
 
-def test_all_trapezoids_valid(lat_case):
+def test_all_trapezoids_valid(geom_case):
     """Every trapezoid footprint is [arm, mid, arm] with mid adjacent to both arms, arms not."""
-    _id, lat, _tol = lat_case
+    _id, lat, _tol = geom_case
     traps = lat.all_trapezoids()
     assert traps, f"{_id}: no trapezoids"
     for arm1, mid, arm2 in traps:

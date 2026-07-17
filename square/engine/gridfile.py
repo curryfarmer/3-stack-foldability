@@ -53,6 +53,8 @@ def parse_grid(spec):
 
     bbox = spec.get("bbox")
     if bbox is not None:
+        if not isinstance(bbox, dict):
+            raise ValueError("fold-grid: bbox must be an object with m,n")
         bm, bn = bbox.get("m"), bbox.get("n")
         if (bm, bn) != (m, n):
             raise ValueError(f"fold-grid: bbox {{{bm},{bn}}} disagrees with the cells' extent "

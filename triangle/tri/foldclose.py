@@ -56,46 +56,11 @@ def reflection_closes_111(lat, chains):
 # folds at K=12). The only legitimate edge-type assertion would be "end->start landing == identity
 # vertex permutation up to the tile's symmetry group", which reflection_closes_111 already guarantees.
 
+# NB (2026-07-17): the former reflection_closes_21 + _root_of lived here but had ZERO live callers and
+# were wrong post-refactor — the 2+1 closure authority is now foldsim.valid_21 (simulate the printed
+# sheet: land on {a,mid,b}, uniform K layers, single-valued), which superseded them (see domino21.py).
+# They were deleted rather than kept as dead code.
 
-def _root_of(lat, two, b):
-    """The 2-chain tile glued to b at the START (= the trapezoid middle = global fold anchor)."""
-    bind = [t for t in two if b in lat.adj[t]]
-    return bind[0] if bind else None
-
-
-def reflection_closes_21(lat, two_tiles, one_chain, S, end_pair=None):
-    """two_tiles = rigid 2-chain tile set; one_chain = 1-chain walk; S = [a, mid, b] start trapezoid
-    (b = 1-chain base). end_pair = (strand[-1], partners[-1]) end domino, if known.
-
-    PASS iff (i) the 1-chain accordions its end back onto b, and (ii) the END binding crease coincides
-    between the rigid 2-chain side and the 1-chain side (frames identified directly — the 1-chain
-    layer stacks on the binding tile)."""
-    two = set(two_tiles)
-    b = S[2]
-    end1 = one_chain[-1]
-    root = _root_of(lat, two, b)
-    if root is None:
-        return False
-
-    # (i) 1-chain folds home onto b
-    fold1 = FW.fold_transform(lat, one_chain)
-    if FW._poly_key(FW.folded_polygon(lat, fold1, end1)) != FW._poly_key(lat.vertices_cart(b)):
-        return False
-
-    # (ii) END binding crease coincides (prefer the known end domino, else any touching 2-chain tile)
-    cands = [t for t in (end_pair or ()) if t in two and end1 in lat.adj[t]]
-    if not cands:
-        cands = [t for t in two if end1 in lat.adj[t]]
-    if not cands:
-        return False
-    _, fold2 = FW.tree_fold(lat, two, root)
-    for e2 in cands:
-        crease = lat.shared_edge(e2, end1)
-        seg2 = (fold2(crease[0], e2), fold2(crease[1], e2))      # 2-chain side, anchor = binding tile
-        seg1 = (fold1(crease[0]), fold1(crease[1]))              # 1-chain side, anchor = b (== binding)
-        if FW._edge_key(seg2) == FW._edge_key(seg1):
-            return True
-    return False
 
 # NB: a closing fold returns each chain's end onto its start, so the closed 3-stack lands on the
 # START trapezoid. The renderers therefore highlight the start footprint tiles (real landing, with

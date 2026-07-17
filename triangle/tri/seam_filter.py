@@ -1,61 +1,52 @@
-"""seam_filter.py — STRICT post-emission START<->END footprint gate for fold candidates.
+"""seam_filter.py — post-emission START<->END correspondence gate + chirality read-out for candidates.
 
-USER GROUND TRUTH (the rule this file enforces). A candidate is a real FOLD only if each labelled
-END tile returns onto its own START cell (A->A, B->B, C->C, no permutation) AND the arrival does not
-produce a user-visible seam flip. Which arrivals flip is a property of the TILE SHAPE:
-  * uniform tile (all edges equal: equilateral, regular hexagon) — a mirror arrival is geometrically
-    invisible and physically harmless ("mirroring is fine for shapes that all have the same sides").
-  * isosceles-but-not-uniform tile (45-45-90 righttri) — the tile shape is its own mirror image, so
-    a MIRROR arrival re-seats the SAME cell with the two equal legs SWAPPED: lengths still match
-    (length is a reflection invariant) but the labelled sides come back exchanged — exactly the
-    physical seam mismatch the user sees on righttri. ENFORCED: mirror arrival -> JAM.
-  * asymmetric tile (30-60-90 scalene) — the tile has no mirror axis, so a mirror arrival can be
-    on-cell ONLY when the START cell is the tile's mirror-partner slot (the fold map is a tiling
-    symmetry; an odd reflection count flips sigma). There every edge ROLE (V-M / M-G / V-G) still
-    lands on its own kind, all sides match — the user's verified-good scalene seating. EXEMPT.
+USER GROUND TRUTH (the rule this file enforces). A candidate is a real FOLD iff each labelled END tile
+returns onto its OWN START cell (A->A, B->B, C->C, no permutation). The one and only correspondence
+failure that demotes a predicted FOLD to JAM is an OFF-CELL arrival: a folded END tile that missed its
+START cell. Everything else about the arrival seats flat.
 
-CHIRALITY IS COMPUTED CONVENTION-FREE (bug fixed 2026-07-02). `lat.vertices_cart` list order is a
-per-tile-TYPE convention and is NOT winding-uniform (righttri: S,E wind CCW / N,W wind CW;
-equilateral: U vs D; scalene: winding == sigma). The old gate compared signed areas of the START
-cell's canonical list vs the folded END list — two DIFFERENT tiles — so the verdict absorbed the
-convention mismatch and INVERTED whenever the two types wound oppositely: the mirror-image pair
-9c7a328f55fb / 327ca6c4fc99 (same physical fold on a reflected sheet) got opposite classes. The
-fixed check compares the folded END list against the SAME tile's canonical list; the convention
-cancels and the sign equals the crease-reflection parity of the fold map itself (proper rotation
-= even number of crease reflections).
+CHIRALITY IS COSMETIC (physically confirmed 2026-07-05 — this REPLACES the earlier mirror->JAM thesis
+and the K-parity "seam law", both now RETIRED). Whether an on-cell END tile lands as a proper rotation
+or a MIRROR of its START cell is a printed-seam appearance only, not a foldability fact:
+  * uniform tile (all edges equal: equilateral, regular hexagon) — a mirror is geometrically invisible.
+  * isosceles-but-not-uniform tile (45-45-90 righttri) — a mirror re-seats the same cell with the two
+    equal legs swapped; the sheet still folds flat, the printed START/END seam simply reads flipped.
+    (The mirror-image twins 327ca6c4fc99 / 9c7a328f55fb both fold — they refute the old mirror->JAM
+    enforcement outright.) Righttri 1+1+1 JAMs are TWIST jams, caught upstream by the loop-index-sigma
+    twist fix in find_example.gen_111, NOT by this gate.
+  * asymmetric tile (30-60-90 scalene) — a mirror can be on-cell only at the tile's mirror-partner slot;
+    every edge role (V-M / M-G / V-G) still lands on its own kind, so it seats flat too.
+So mirror vs proper is exported for RENDERING (tile_chirality) but never demotes; only off-cell does.
 
-K-PARITY LAW (2026-07-02 census). Chains alternate the bipartite sigma and every crease flips it,
-so an ON-CELL arrival's chirality is fixed by the chain length: sigma(end) = sigma(start) *
-(-1)^(K-1), hence K EVEN -> reflection (mirror), K ODD -> proper rotation. Confirmed 651/651
-even-K arrivals mirror and 62/62 odd-K arrivals proper (righttri + scalene, both decomps). All the
-old matrix's righttri exemplars were even-K, so its "seam-ok" quadrant was convention noise;
-genuinely seam-clean righttri folds live at ODD K only.
+CHIRALITY IS COMPUTED CONVENTION-FREE (bug fixed 2026-07-02) — still true, now feeding the read-out
+rather than a gate. `lat.vertices_cart` list order is a per-tile-TYPE convention and is NOT winding-
+uniform (righttri: S,E wind CCW / N,W wind CW; equilateral: U vs D; scalene: winding == sigma). The
+parity is read by comparing the folded END list against the SAME tile's canonical list, so the winding
+convention cancels and the sign equals the crease-reflection parity of the fold map itself (proper
+rotation = even number of crease reflections). Comparing against the START cell's canonical list (two
+DIFFERENT tiles) inverted whenever the two types wound oppositely — e.g. the twins above got opposite
+classes; that bug is fixed.
 
-WHY THE ENGINE ISN'T ENOUGH.
-  * gen_21 labels FOLD/JAM by the strand-twist (abs(Tw)<eps) and discards foldsim's `corr`. A
-    Tw=0-but-corr=False fold ships as a "FOLD" whose END trapezoid is permuted/flipped.
-  * foldsim's `corr` is a vertex-SET (poly_key) coincidence: it cannot see a flipped arrival.
-  So the strict gate = corr (same cell, label order) PLUS the convention-free chirality read-out,
-  enforced per the tile-shape rules above.
+WHY THE ENGINE ISN'T ENOUGH. gen_21 / gen_111 label FOLD/JAM by the strand-twist and can ship a
+Tw=0 fold whose END footprint is PERMUTED off its start cells; foldsim's closure check is a vertex-SET
+(poly_key) coincidence blind to which END tile landed where. This gate adds the ordered A->A/B->B/C->C
+correspondence and demotes an off-cell arrival.
 
-HOW (pure geometry, NO engine-math edit).
-  We reuse foldsim's reflection composition READ-ONLY (import its module-level `_uf_components` /
-  `_apply` and rebuild the same crease-path BFS) to obtain the FOLDED vertices of each END-footprint
-  tile, then require, per i:
-     (1) folded END tile i occupies START cell i  (vertex sets coincide)  -> corr / correspondence;
-     (2) on an isosceles-not-uniform tile, the fold map is a proper rotation (uniform + asymmetric
-         tiles exempt per the shape rules above).
-  foldsim / domino21 / tritwist / foldclose are untouched. Consumers (find_example, gen_testset)
-  call `apply` / `strict_fold_ok` to DEMOTE a predicted FOLD to JAM when the gate fails.
+HOW (pure geometry, NO engine-math edit). We obtain the FOLDED vertices of each END-footprint tile
+from foldsim's shared fold pass (foldsim.folded_vertices — the exact reflection composition
+foldsim.simulate runs, returning raw coordinates that poly_key landings discard) and require, per i,
+that folded END tile i occupies START cell i (vertex sets coincide). The per-tile mirror/proper parity
+is additionally read off for the renderer. domino21 / tritwist / foldclose are untouched. Consumers
+(find_example, gen_testset) call `apply` / `strict_fold_ok` to DEMOTE a predicted FOLD to JAM on an
+off-cell arrival.
 
 `seam_type` / `_is_trapezoid` remain for human-readable sheet annotation (S/L/H tags), not the gate.
 """
 import os
 import sys
-from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import foldsim as FSIM   # noqa: E402  READ-ONLY reuse of the reflection composition (no edit to it)
+import foldsim as FSIM   # noqa: E402  reuse of the shared reflection composition (foldsim.folded_vertices)
 
 TOL = 1e-6
 UNIFORM = ("equilateral", "hex")   # all edges same length -> seam TYPE carries no info (annotation only)
@@ -161,42 +152,11 @@ def _proper_rotation_onto(start_cell_vs, folded_end_vs, end_canon_vs):
 
 # --------------------------------------------------------------------- read-only fold (reuse foldsim)
 def _fold_tiles(lat, region, crease, rigid, anchor, tiles):
-    """READ-ONLY reuse of foldsim's reflection composition. Returns {tile: folded [(x,y),...]} for the
-    requested `tiles`. This is NOT an edit to engine math: it imports foldsim's module-level helpers
-    and rebuilds the SAME crease-path BFS foldsim.simulate uses, purely to read folded coordinates
-    (simulate itself returns only poly_key landings, from which winding cannot be recovered)."""
-    region = [tuple(t) for t in region]
-    rset = set(region)
-    crease = {frozenset(map(tuple, fs)) for fs in crease}
-    rigid = {frozenset(map(tuple, fs)) for fs in rigid}
-    comp = FSIM._uf_components(region, rigid)
-
-    cadj = {}
-    for fs in crease:
-        u, v = tuple(fs)
-        if u not in rset or v not in rset or (u, v) not in lat.shared:
-            continue
-        cu, cv = comp[u], comp[v]
-        e = lat.shared_edge(u, v)
-        cadj.setdefault(cu, []).append((cv, e))
-        cadj.setdefault(cv, []).append((cu, e))
-
-    ac = comp[tuple(anchor)]
-    cmirror = {ac: []}
-    q = deque([ac])
-    while q:
-        c = q.popleft()
-        for (d, e) in cadj.get(c, ()):
-            if d not in cmirror:
-                cmirror[d] = [e] + cmirror[c]
-                q.append(d)
-
-    out = {}
-    for t in tiles:
-        t = tuple(t)
-        if comp.get(t) in cmirror:
-            out[t] = FSIM._apply(lat.vertices_cart(t), cmirror[comp[t]])
-    return out
+    """{tile: folded [(x,y),...]} for `tiles`, via foldsim's SHARED fold pass (foldsim.folded_vertices)
+    — the exact reflection composition foldsim.simulate runs, so this can no longer silently diverge
+    from it. We keep this read-out because winding (needed for the chirality class) is lost in
+    simulate's poly_key landings; foldsim.folded_vertices returns the raw folded coordinates instead."""
+    return FSIM.folded_vertices(lat, region, crease, rigid, anchor, tiles)
 
 
 def _region_edges(lat, cand):

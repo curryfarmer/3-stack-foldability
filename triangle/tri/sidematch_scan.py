@@ -33,6 +33,10 @@ if __name__ == '__main__':
                 if not PO.is_trapezoid(lat, [pa[-1], pm[-1], pc[-1]]):
                     continue
                 ch = [list(pa), list(pm), list(pc)]
+                # RT.pair_tw scores with loop-index (path) sigma, so `foldable` here correctly labels
+                # the K=12 tetrakis JAMs (the bipartite sigma read a spurious Tw=0 -> false foldable).
+                # NB: the committed results/tri_K12_hl_all.json snapshot predates this fix; test_tri
+                # _reference.py locks that FROZEN snapshot, so a rerun here will diverge from it.
                 L = RT.pair_tw(ch)
                 tw = tuple(round(L[k]['Tw']) for k in ('AB','BC','AC'))
                 sm, info = side_info(ch)

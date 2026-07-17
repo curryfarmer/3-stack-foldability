@@ -10,16 +10,16 @@ independent engines that each put a bare-named `lattice` on sys.path (square/_bo
 triangle/_bootstrap.py, both `sys.path.insert(0, <own pkg>)`). Collecting both suites in one
 interpreter races whichever bootstrap ran second: `from lattice.square import SquareLattice` would
 resolve against triangle/lattice/ (which has no square.py), and `lattice.reflect` / `generate`
-collide the same way. So the suites NEVER share a process. The isolation idea is borrowed from
-scripts/validate.py; its I/O deliberately is NOT (see below).
+collide the same way. So the suites NEVER share a process. This is a sibling dispatcher to
+scripts/validate.py over the same two engines.
 
-WINDOWS ORPHAN TRAP (why this uses Popen + a file, never subprocess.run + PIPE). scripts/validate.py
-:24 is `subprocess.run(..., capture_output=True, text=True)` -- PIPE, and no timeout at all. That
-cannot bound a child which spawns a ProcessPoolExecutor: kill() reaps only the direct child, the
-grandchildren inherited the stdout pipe write handles, and the post-kill communicate() blocks until
-they finish naturally. That is both the multi-hour hang and the orphaned workers. Redirecting to a
-FILE means there is no pipe to hold open, and `taskkill /F /T` reaps the whole tree. Pattern lifted
-verbatim from scripts/phystest/check.py, which is the tested reference.
+WINDOWS ORPHAN TRAP (why this uses Popen + a file, never subprocess.run + PIPE). A plain
+`subprocess.run(..., capture_output=True, text=True)` with no timeout cannot bound a child which
+spawns a ProcessPoolExecutor: kill() reaps only the direct child, the grandchildren inherited the
+stdout pipe write handles, and the post-kill communicate() blocks until they finish naturally. That
+is both the multi-hour hang and the orphaned workers. Redirecting to a FILE means there is no pipe
+to hold open, and `taskkill /F /T` reaps the whole tree. Pattern lifted verbatim from
+scripts/phystest/check.py, which is the tested reference.
 
 The suites inherit pytest.ini's `addopts = -ra -q -m "not slow"`, so expensive engine sweeps stay
 deselected. Passing a suite path on the command line overrides `testpaths = smoketest` while leaving
@@ -46,22 +46,30 @@ _DEFAULT_TIMEOUT = 30 * 60      # Bounds a genuine hang; not a performance expec
                                 # default gate runs in ~1 minute.
 _POLL_SECONDS = 1
 
+# On POSIX, put the child in its OWN session/process group so _killtree can killpg the whole group
+# on timeout and reap ProcessPoolExecutor grandchildren (`pkill -P` catches only direct children).
+# Windows reaps the tree with `taskkill /F /T`, so it needs no extra spawn flag.
+_CHILD_KW = {} if os.name == "nt" else {"start_new_session": True}
+
 
 def _killtree(pid):
-    """Kill pid AND its whole descendant tree.
+    """Kill pid AND its whole descendant tree. I/O: (int) -> None.
 
-    A plain proc.kill() only kills the direct child, orphaning any multiprocessing grandchildren
-    (jobs=N spawns N of them), which then keep running forever. On Windows taskkill /T is the only
-    reliable way to reap them."""
+    A plain proc.kill() (or `pkill -P`, which reaps only DIRECT children) leaves multiprocessing
+    grandchildren (jobs=N spawns N of them) orphaned, so they run forever. Windows: `taskkill /F /T`
+    reaps the whole tree. POSIX: the child is launched in its own session (see _CHILD_KW), so a
+    single killpg on its process group takes out the child AND every inherited grandchild at once."""
     if os.name == "nt":
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                        capture_output=True, text=True)      # tiny, bounded output: PIPE is fine here
     else:
-        subprocess.run(["pkill", "-9", "-P", str(pid)], capture_output=True, text=True)
         try:
-            os.kill(pid, 9)
+            os.killpg(os.getpgid(pid), 9)                   # 9 = SIGKILL to the whole process group
         except OSError:
-            pass
+            try:
+                os.kill(pid, 9)                             # group lookup failed: at least the child
+            except OSError:
+                pass
 
 
 def _run_suite(name, path, timeout, extra):
@@ -78,9 +86,17 @@ def _run_suite(name, path, timeout, extra):
         # stdout AND stderr to a FILE (never PIPE) so no grandchild can hold a pipe open; -u so the
         # file has content even if we have to kill the tree.
         with open(out_path, "w", encoding="utf-8") as fw:
-            proc = subprocess.Popen(
-                [sys.executable, "-u", "-m", "pytest", path, "-p", "no:cacheprovider", *extra],
-                cwd=_REPO_ROOT, stdout=fw, stderr=subprocess.STDOUT)
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-u", "-m", "pytest", path, "-p", "no:cacheprovider", *extra],
+                    cwd=_REPO_ROOT, stdout=fw, stderr=subprocess.STDOUT, **_CHILD_KW)
+            except OSError as exc:
+                # Couldn't even launch the interpreter (missing exe, EMFILE, ...). Report it as a
+                # failed suite instead of letting it abort the whole aggregating run.
+                print(f"\n{name}: could not start ({exc})", flush=True)
+                return {"suite": name, "returncode": -1, "timedOut": False,
+                        "seconds": round(time.time() - t0, 1),
+                        "summary": f"failed to start: {exc}"}
             # Separate read handle tails the same file, so a long run reports progress live instead
             # of going silent and then dumping everything at the end.
             with open(out_path, "r", encoding="utf-8", errors="replace") as fr:
@@ -124,6 +140,15 @@ def _run_suite(name, path, timeout, extra):
             "summary": lines[-1] if lines else "(no output)"}
 
 
+def _timeout_secs(val):
+    """Parse a --timeout value to int seconds, or exit with a usage error. I/O: (str) -> int."""
+    try:
+        return int(val)
+    except ValueError:
+        raise SystemExit(
+            f"run_tests: --timeout wants an integer number of seconds, got {val!r}")
+
+
 def _parse_argv(argv):
     """Split argv into (suite names, timeout, pytest passthrough). I/O: ([str]) -> (list, int, list).
 
@@ -138,9 +163,9 @@ def _parse_argv(argv):
     while i < len(argv):
         a = argv[i]
         if a == "--timeout" and i + 1 < len(argv):
-            timeout = int(argv[i + 1]); i += 2; continue
+            timeout = _timeout_secs(argv[i + 1]); i += 2; continue
         if a.startswith("--timeout="):
-            timeout = int(a.split("=", 1)[1]); i += 1; continue
+            timeout = _timeout_secs(a.split("=", 1)[1]); i += 1; continue
         names.append(a); i += 1
     unknown = [n for n in names if n not in _SUITES]
     if unknown:

@@ -8,8 +8,6 @@ is exercised against a hidden Tk root.
 import os
 import sys
 
-import pytest
-
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
@@ -54,10 +52,4 @@ def test_results_view_populates(tk_root):
     assert view.badge_visible is False
 
 
-@pytest.fixture
-def tk_root():
-    import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()
-    yield root
-    root.destroy()
+# tk_root is the shared, Tk-unavailable-skipping fixture from smoketest/conftest.py.

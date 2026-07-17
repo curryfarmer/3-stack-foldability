@@ -32,10 +32,17 @@ import twist_jump as tj        # noqa: E402  (Model B geometry: replay/strand_pa
 # ------------------------------------------------------------- loop assembly --
 
 def build_loop(sol, m, n):
-    """Replay both chains, pick the canonical strand, return everything render_plot needs.
-    I/O: (sol, m, n) -> dict(body, path1, loop, K, idx, terms, tw)."""
-    two = next(c for c in sol["chains"] if len(c["baseCells"]) == 2)
-    one = next(c for c in sol["chains"] if len(c["baseCells"]) == 1)
+    """Replay both chains, pick the canonical strand, return everything render_plot needs. Raises
+    ValueError on a non-2+1 record (no domino+monomino chain pair).
+    I/O: (2+1 sol, m, n) -> dict(body, path1, loop, K, idx, terms, tw)."""
+    two = next((c for c in sol["chains"] if len(c["baseCells"]) == 2), None)
+    one = next((c for c in sol["chains"] if len(c["baseCells"]) == 1), None)
+    if two is None or one is None:
+        name = sol.get("uid") or sol.get("canonicalHash") or "<unnamed>"
+        raise ValueError(
+            f"build_loop expects a 2+1 record (one 2-cell domino + one 1-cell monomino chain); "
+            f"record {name} decomposition={sol.get('decomposition')!r} has chain base sizes "
+            f"{[len(c['baseCells']) for c in sol['chains']]}")
     pls2 = tj.replay(two["baseCells"], two["foldArrows"], m, n)
     pls1 = tj.replay(one["baseCells"], one["foldArrows"], m, n)
     path1 = tj.strand_path(pls1, 0)                           # 1-chain strand, K points

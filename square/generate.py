@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """generate.py — CLI to run the square 3-stack/2-stack search and write each result as a
-self-contained on-disk bundle: <out>/<uid>/{<uid>.json, foldsheet_<uid>.png[, twist_<uid>.png]}.
+self-contained on-disk bundle: <out>/<uid>/{<uid>.json, schematic_<uid>.png, twist_<uid>.png}.
 
 Examples:
   python3 generate.py --m 6 --n 6
@@ -24,7 +24,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # square/ on path
 import _bootstrap  # noqa: E402,F401  (puts square/{engine,twist,render} on sys.path)
 
-import nstack as NStack            # noqa: E402  (decomp key naming only)
+import nstack as NStack            # noqa: E402  (build_opts delegation + decomp key naming)
 import runner as Runner            # noqa: E402
 import twostack as TwoStack        # noqa: E402
 import render_bundle as RenderB    # noqa: E402
@@ -102,10 +102,40 @@ def resolve_stacks(stacks, panels):
     return n
 
 
+def _grid_stacks_hint(raw):
+    """Interpret a fold-grid/1 'stacks' hint -> a single chain count, or None to defer to the default.
+
+    Accepts "auto"/absent (-> None), a bare int, or the schema's list form ([N] -> N). A multi-count
+    hint like [2, 3] can't be resolved to a single run, and a malformed value is rejected outright.
+    I/O: (raw hint) -> int | None. Raises ValueError on an unresolvable/ill-typed hint."""
+    if raw is None or raw == "auto":
+        return None
+    if isinstance(raw, bool):
+        raise ValueError(f"fold-grid: 'stacks' hint must be a count or list of counts, got {raw!r}")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, list):
+        ints = [v for v in raw if isinstance(v, int) and not isinstance(v, bool)]
+        if len(raw) == 1 and len(ints) == 1:
+            return ints[0]
+        raise ValueError(f"fold-grid: 'stacks' hint {raw!r} does not name a single count -- pass "
+                         f"--stacks explicitly to pick one")
+    raise ValueError(f"fold-grid: 'stacks' hint must be a count, list of counts, or \"auto\", "
+                     f"got {raw!r}")
+
+
 def build_opts(args):
-    n_stacks = resolve_stacks(args.stacks, args.panels)
+    """Map parsed CLI args (+ an optional --grid-file) -> the opts dict the search/2-stack engines take.
+    I/O: (argparse.Namespace) -> dict. Loads --grid-file (a malformed file raises ValueError)."""
     # A grid-file supplies the sheet (a LIST) + its bounding box m,n; --m/--n supply a rectangle.
     grid = GridFile.load_grid(args.grid_file) if args.grid_file else None
+    # Stack count: an explicit CLI --stacks/--panels always wins; otherwise a grid-file's 'stacks'
+    # hint is consumed (a drawn grid can request e.g. a 4-stack with no CLI flag). "auto"/absent =>
+    # the historical 3-stack default.
+    stacks_arg = args.stacks
+    if stacks_arg is None and args.panels is None and grid is not None:
+        stacks_arg = _grid_stacks_hint(grid.get("stacks"))
+    n_stacks = resolve_stacks(stacks_arg, args.panels)
     if grid is not None:
         m, n, sheet = grid["m"], grid["n"], grid["sheet"]
     else:
@@ -113,6 +143,13 @@ def build_opts(args):
     if n_stacks == 2:
         # 2-stack now ingests a drawn sheet too (twostack.run re-derives the bbox + guards the
         # sheet); a rectangle keeps opts["sheet"] absent -> the byte-identical historic path.
+        ignored = [f for f, given in (("--store-all", args.store_all),
+                                      ("--shapes", args.shapes != "L,Rect"),
+                                      ("--decomps", args.decomps is not None),
+                                      ("--jobs", args.jobs is not None)) if given]
+        if ignored:
+            print(f"warning: --stacks 2 ignores {', '.join(ignored)} (the RSPA 2-stack engine has no "
+                  f"footprint/decomposition/store-all/parallel phase)", file=sys.stderr)
         opts = {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup}
         if sheet is not None:
             opts["sheet"] = sheet
@@ -123,17 +160,22 @@ def build_opts(args):
     decomps_str = args.decomps if args.decomps is not None else default_decomps
     shapes = {s: (s in args.shapes.split(",")) for s in ("L", "Rect")}
     decomps = {d: (d in decomps_str.split(",")) for d in ("2+1", all_singleton_key)}
-    opts = {
-        "m": m, "n": n, "stacks": 3, "panels": panels,
-        "shapes": shapes, "decomps": decomps,
-        # An arbitrary sheet has no canonical corner, so it is always searched to non-corner (the engine
-        # drops the corner special-case whenever a sheet is present regardless of this flag; set here too
-        # so opts is self-describing). Memory: corner-only understates/hides foldability.
-        "allowNonCorner": args.allow_non_corner or (sheet is not None),
-        "dedup": not args.no_dedup,
-        "jobs": args.jobs,
-        "storeAll": args.store_all,
-    }
+    # The m/n/panels/allowNonCorner/dedup/jobs skeleton is identical to the n-stack front door;
+    # delegate it to nstack.build_opts (single source of truth) so the two can't drift, then layer
+    # the generate-specific extras on top. An arbitrary sheet has no canonical corner, so it is
+    # always searched to non-corner (the engine drops the corner special-case whenever a sheet is
+    # present regardless of this flag; passed here too so opts is self-describing -- corner-only
+    # understates/hides foldability).
+    opts = NStack.build_opts(m, n, panels,
+                             allow_non_corner=args.allow_non_corner or (sheet is not None),
+                             dedup=not args.no_dedup,
+                             jobs=args.jobs)
+    # generate configures shapes/decomps from the CLI (nstack fixes them to the frozen-oracle
+    # values); override those two, then add the engine keys nstack's row schema deliberately omits.
+    opts["shapes"] = shapes
+    opts["decomps"] = decomps
+    opts["stacks"] = 3
+    opts["storeAll"] = args.store_all
     if sheet is not None:
         opts["sheet"] = sheet
     return opts
@@ -204,6 +246,10 @@ def main(argv=None):
     m, n = opts["m"], opts["n"]      # bbox when a grid-file sheet was ingested; args.m/args.n otherwise
     for sol in solutions:
         sol["m"], sol["n"] = m, n
+        if opts.get("sheet") is not None:
+            # arbitrary drawn region S (origin-normalized, same frame as the renderer + bundle
+            # sheetCells) -> render_square masks the grid to S. Absent for rectangle sheets.
+            sol["sheetCells"] = opts["sheet"]
         if opts["stacks"] == 2:
             sol["lattice"] = LATTICE_2STACK
             sol["stacks"] = 2
@@ -213,7 +259,7 @@ def main(argv=None):
             sol["stacks"] = opts.get("panels", 3)
             sol["uid"] = make_uid(LATTICE_3STACK, m, n, sol["canonicalHash"])
         produced = RenderB.render_record(sol, args.out)
-        print(f"  [{sol['uid']}] -> {produced.get('foldsheet', produced['json'])}")
+        print(f"  [{sol['uid']}] -> {produced.get('schematic', produced['json'])}")
 
     if opts["stacks"] == 2:
         print(f"search: {ctx['hcCount']} Hamiltonian circuit(s) -> reflection {ctx['reflectionPass']}, "

@@ -147,6 +147,79 @@ def test_canonical_hash_d4_invariant_under_manual_flip():
     assert Search.canonical_hash(fp2, chains2, 6, 6) == Search.canonical_hash(fp, chains, 6, 6)
 
 
+# ---------- canonical_hash vs transform_arrow replay-equivariance (all 8 D4 elements) ----------
+# The real contract, pinned so nobody "fixes" transform_arrow into false replay-equivariance:
+#  * canonical_hash (the dedup KEY) is invariant under EVERY D4 element on a square sheet -- it
+#    minimizes over the sheet's automorphism subgroup, which is all 8 of D4 when m == n. Odd rotations
+#    included. This is why the transform_arrow non-equivariance never moves a count or a verdict.
+#  * transform_arrow is replay-equivariant with apply_transform ONLY on the even-rotation elements
+#    (the flip subgroup + rot0/rot2); on the odd rotations it is not (by design -- see
+#    square.py transform_arrow and test_physical_deciders.py:9-11). So full-D4 arrow *replay*
+#    invariance is false: the "NOT invariant under odd rotations" caveat is about replaying the
+#    representative back as geometry, NOT about the hash.
+
+# A small ASYMMETRIC fold on an 8x8 (square) sheet, placed centrally so a replay stays on-grid.
+_SQ_M = _SQ_N = 8
+_SQ_FP = {"shape": "L", "cells": [(3, 3), (4, 3), (3, 4)]}
+_SQ_CHAINS = [{"kind": "1chain", "baseCells": [(3, 3)], "foldArrows": ["R", "D"]},
+              {"kind": "1chain", "baseCells": [(4, 3)], "foldArrows": ["R", "U"]},
+              {"kind": "1chain", "baseCells": [(3, 4)], "foldArrows": ["U", "L"]}]
+
+
+def _transform_fold(t):
+    """Apply D4 element t to _SQ_FP/_SQ_CHAINS via the engine's own apply_transform (cells) +
+    transform_arrow (arrows). I/O: (t) -> (fp, chains)."""
+    fp = {"shape": _SQ_FP["shape"],
+          "cells": [Search.apply_transform(t, c[0], c[1], _SQ_M, _SQ_N) for c in _SQ_FP["cells"]]}
+    chains = [{"kind": c["kind"],
+               "baseCells": [Search.apply_transform(t, b[0], b[1], _SQ_M, _SQ_N) for b in c["baseCells"]],
+               "foldArrows": [Search.transform_arrow(t, a) for a in c["foldArrows"]]}
+              for c in _SQ_CHAINS]
+    return fp, chains
+
+
+def _replay_final(base_cell, arrows, m, n):
+    """Replay a 1-chain from `base_cell` following `arrows`; sorted final cells, or None if a fold
+    leaves the grid. I/O: ((x,y), [dir], m, n) -> [(x,y), ...] | None."""
+    p = Fold.initial_placement([base_cell])
+    for a in arrows:
+        p = Fold.make_fold(p, a, m, n)
+        if p is None:
+            return None
+    return sorted(p["cells"])
+
+
+def test_canonical_hash_invariant_under_all_of_d4_on_square_sheet():
+    """Dedup key is invariant under ALL 8 D4 elements on a square sheet (odd rotations included),
+    because canonical_hash minimizes over the automorphism subgroup = all of D4 when m == n."""
+    base = Search.canonical_hash(_SQ_FP, _SQ_CHAINS, _SQ_M, _SQ_N)
+    for rot in range(4):
+        for flip in range(2):
+            fp, chains = _transform_fold({"rot": rot, "flip": flip})
+            assert Search.canonical_hash(fp, chains, _SQ_M, _SQ_N) == base, \
+                f"canonical_hash moved under rot={rot} flip={flip}"
+
+
+def test_transform_arrow_replay_equivariant_only_on_even_rotations():
+    """transform_arrow is replay-equivariant with apply_transform ONLY for the even-rotation elements
+    (flip subgroup + rot0/rot2); the odd rotations (rot1/rot3) are NOT -- full-D4 arrow replay
+    invariance is false by design. (The dedup key stays invariant regardless -- see the test above.)"""
+    bc, arrows = (3, 3), ["R", "D"]
+    orig = _replay_final(bc, arrows, _SQ_M, _SQ_N)
+    assert orig is not None
+    for rot in range(4):
+        for flip in range(2):
+            t = {"rot": rot, "flip": flip}
+            b2 = Search.apply_transform(t, bc[0], bc[1], _SQ_M, _SQ_N)
+            a2 = [Search.transform_arrow(t, a) for a in arrows]
+            replayed = _replay_final(b2, a2, _SQ_M, _SQ_N)
+            expected = sorted(Search.apply_transform(t, x, y, _SQ_M, _SQ_N) for (x, y) in orig)
+            if rot in (0, 2):     # even rotation: replay reproduces the transformed geometry
+                assert replayed == expected, f"even element rot={rot} flip={flip} broke replay"
+            else:                 # odd rotation: replay does NOT reproduce it (by design)
+                assert replayed != expected, f"odd element rot={rot} flip={flip} unexpectedly replayed"
+
+
 # ---------- twist sign (1+1+1 pairwise loop) ----------
 
 def test_twist_decided_for_2plus1():

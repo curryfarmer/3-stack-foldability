@@ -105,12 +105,16 @@ def build_ambient_right(K, hub="LL"):
 
 
 def pair_tw(chains):
-    """Three theta pairwise-loop twists, using this lattice's centroid/sigma."""
+    """Three theta pairwise-loop twists on this lattice's centroids, scored with the loop-INDEX
+    (path) sigma. A spliced pairwise loop chainA + reversed(chainB) is not one proper walk, so the
+    bipartite `sigma` fails to alternate round it and reads a spurious Tw=0 (mislabelling a physically
+    TWISTED fold as foldable); path_sigma is the YYR authority (see tritwist docstring). I/O:
+    chains[3] -> {AB,BC,AC: loop_twist dict}."""
     import tritwist as TW
     names, pairs, res = ["AB", "BC", "AC"], [(0, 1), (1, 2), (0, 2)], {}
     for nm, (i, j) in zip(names, pairs):
         loop = list(chains[i]) + list(reversed(chains[j]))
-        res[nm] = TW.loop_twist(loop, cent=centroid, sigma=sigma)
+        res[nm] = TW.loop_twist(loop, cent=centroid, sigma=TW.path_sigma(len(loop)))
     return res
 
 

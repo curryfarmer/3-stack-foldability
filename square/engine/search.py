@@ -8,7 +8,7 @@ import os
 
 import fold as Fold
 import twist_jump
-from lattice.square import SquareLattice
+from lattice.square import SquareLattice, sheet_connected
 
 # ---- helpers ----
 
@@ -26,27 +26,7 @@ def _sheet_set(opts):
     return frozenset(map(tuple, s))   # present (even if empty) -> sheet path; run() rejects an empty one
 
 
-def _sheet_connected(sheet):
-    """True iff the sheet is a single 4-connected component. A disconnected sheet can't be one folded
-    stack, so run() rejects it up front."""
-    it = iter(sheet)
-    seen = {next(it)}
-    stack = list(seen)
-    while stack:
-        cx, cy = stack.pop()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nb = (cx + dx, cy + dy)
-            if nb in sheet and nb not in seen:
-                seen.add(nb)
-                stack.append(nb)
-    return len(seen) == len(sheet)
-
-
 # --- Stage 2: footprint enumeration ---
-
-# L footprint templates now live on SquareLattice; re-exported for the enumerator below.
-L_BASE = SquareLattice.L_BASE
-
 
 def enumerate_footprints(m, n, opts):
     out = []
@@ -308,10 +288,13 @@ def exit_footprint_check(chains, start_shape, panels=3):
         return False
     if len(set(cells)) != panels:
         return False
+    # exit_shape is a bbox PRE-FILTER (cheap reject). At panels>=4 the L bbox also admits
+    # non-congruent (S-tetromino) and disconnected sets, so confirm true D4-congruence to the start
+    # template + 4-connectivity. panels==3 is byte-identical: bbox<->shape is a bijection there.
     shape = SquareLattice.exit_shape(cells, panels)
-    if shape is None:
+    if shape is None or shape != start_shape:
         return False
-    return shape == start_shape
+    return SquareLattice.exit_congruent(cells, start_shape, panels)
 
 
 # --- Stage 6: reflection ---
@@ -564,8 +547,15 @@ def _run_footprint_chunk(payload):
 
 
 def _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id):
-    """Fan the per-footprint enumeration across processes, then replay dedup + id in the
-    parent over the footprint-ordered candidate stream (byte-identical to serial)."""
+    """Fan the per-footprint enumeration across processes, then replay dedup + id in the parent over
+    the footprint-ordered candidate stream (byte-identical to serial). Returns None on success, or an
+    err string if a worker died or raised.
+
+    A wedged / OOM-killed worker surfaces as BrokenProcessPool out of ex.map (and a worker exception
+    is re-raised there too). That MUST NOT escape: letting it propagate would break run()'s documented
+    (solutions, ctx, err) contract, and the `with ...` context manager's implicit shutdown(wait=True)
+    would hang the parent forever on the dead worker. So we drive the pool manually and, on any
+    failure, tear it down non-blocking (cancel_futures) and hand the caller an err string instead."""
     from concurrent.futures import ProcessPoolExecutor
 
     n_fp = len(footprints)
@@ -574,14 +564,49 @@ def _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, nex
                 for ordinal, (lo, hi) in enumerate(_chunk_bounds(n_fp, n_chunks))]
     results = [None] * len(payloads)
     workers = min(jobs, len(payloads), os.cpu_count() or 1)  # never oversubscribe cores
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        for ordinal, records, local_ctx in ex.map(_run_footprint_chunk, payloads):
-            results[ordinal] = (records, local_ctx)  # index by ordinal => order-proof
+
+    # Broken-pool stderr-noise guard. When the pool breaks, the call-queue's daemon feeder thread
+    # tries to push the shutdown sentinels down an already-closed pipe and prints a benign
+    # "OSError: handle is closed" traceback to stderr. It is emitted FROM the feeder thread (often at
+    # interpreter exit), so a try/except around shutdown() cannot catch it. Instead swap the queue's
+    # feeder-error handler for one that swallows ONLY that benign non-_CallItem closed-handle OSError
+    # and delegates every other error (real worker failures, _CallItem future results) to the stock
+    # handler. The swap must precede ex.map (the feeder captures the handler at thread-start, so it
+    # survives the finally restore); the restore keeps the process-global untouched afterward.
+    # Best-effort: a no-op if these CPython internals ever move, so it can never break the search.
+    try:
+        from concurrent.futures.process import _SafeQueue, _CallItem
+        _orig_feeder_err = _SafeQueue._on_queue_feeder_error
+    except (ImportError, AttributeError):
+        _SafeQueue = _orig_feeder_err = None
+
+    if _orig_feeder_err is not None:
+        def _quiet_feeder_err(self, exc, obj):
+            if (not isinstance(obj, _CallItem)
+                    and isinstance(exc, OSError) and "handle is closed" in str(exc)):
+                return
+            return _orig_feeder_err(self, exc, obj)
+        _SafeQueue._on_queue_feeder_error = _quiet_feeder_err
+
+    ex = ProcessPoolExecutor(max_workers=workers)
+    try:
+        try:
+            for ordinal, records, local_ctx in ex.map(_run_footprint_chunk, payloads):
+                results[ordinal] = (records, local_ctx)  # index by ordinal => order-proof
+        except Exception as e:
+            ex.shutdown(wait=False, cancel_futures=True)  # never block on a wedged / dead worker
+            return f"parallel engine failed: {type(e).__name__}: {e}"
+        ex.shutdown()
+    finally:
+        if _orig_feeder_err is not None:
+            _SafeQueue._on_queue_feeder_error = _orig_feeder_err
+
     for records, local_ctx in results:
         for key in _WORKER_CTX_KEYS:
             ctx[key] += local_ctx[key]
         for sol in records:
             _admit(sol, solutions, dedup, ctx, opts, None, next_id)
+    return None
 
 
 # --- Top-level runner ---
@@ -608,7 +633,7 @@ def run(opts, on_solution=None, is_cancelled=None):
         if min(xs) != 0 or min(ys) != 0:
             return solutions, ctx, "sheet must be normalized to the origin (min corner (0,0))"
         m, n = max(xs) + 1, max(ys) + 1
-        if not _sheet_connected(sheet):
+        if not sheet_connected(sheet):
             return solutions, ctx, "sheet is not 4-connected"
 
     # TEST gates (relaxed): removed the mn-even/%6 requirement, the K-even gate,
@@ -634,8 +659,8 @@ def run(opts, on_solution=None, is_cancelled=None):
     jobs = _resolve_jobs(opts)
     if (jobs > 1 and len(footprints) >= 2
             and on_solution is None and is_cancelled is None):
-        _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id)
-        return solutions, ctx, None
+        err = _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id)
+        return solutions, ctx, err
 
     for footprint in footprints:
         if ctx["cancelled"]:

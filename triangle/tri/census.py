@@ -67,13 +67,19 @@ FUNNEL_111 = ["exit_fp_all", "exit_fp_parity", "exit_fp_reach", "cand", "exit_pa
 FUNNEL_21 = ["strands", "partner_sets", "partner_clean", "tried", "topology_pass", "closure_pass"]
 
 
+_RSS_WARNED = False   # _rss_mb logs a probe failure at most once per process (see below)
+
+
 def _rss_mb():
-    """Resident memory of THIS process, in MB. Returns 0.0 if it cannot be read (guard then no-ops).
+    """Resident memory of THIS process, in MB. Returns 0.0 only when NO probe is available on the
+    platform (guard then no-ops); a genuinely broken probe (a wrong ctypes signature) is NOT swallowed
+    -- it surfaces as ArgumentError so the RSS ceiling can't be silently disabled by a code bug.
 
     The census OOMed the machine outright on its first run: the walk enumerators used to materialise
     every path into a list, and 20 workers doing that on the honeycomb exhausted RAM. The enumerators
     are lazy now, but a hard per-worker ceiling is the thing that turns "the box dies" into "one cell
     is marked truncated", so it stays regardless."""
+    global _RSS_WARNED
     try:
         import ctypes
         import ctypes.wintypes as wt
@@ -101,12 +107,19 @@ def _rss_mb():
         pmc.cb = ctypes.sizeof(PMC)
         if gpmi(cur(), ctypes.byref(pmc), pmc.cb):
             return pmc.WorkingSetSize / (1024.0 * 1024.0)
-    except Exception:
-        pass
+    except (OSError, AttributeError, ValueError, ImportError) as e:
+        # Real probe/platform failures only: psapi/ctypes.wintypes unavailable, non-Windows (no
+        # windll), a failed WinAPI call. A wrong ctypes SIGNATURE raises ctypes.ArgumentError, which
+        # is deliberately NOT caught -- that is a code bug and must surface, not silently zero out the
+        # RSS ceiling. Log once (per process) so a genuine probe outage is visible but not spammed.
+        if not _RSS_WARNED:
+            _RSS_WARNED = True
+            print("  _rss_mb: RSS probe unavailable (%s: %s); RSS ceiling disabled this run"
+                  % (type(e).__name__, e), flush=True)
     try:
         import resource
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-    except Exception:
+    except (ImportError, OSError):
         return 0.0
 
 
@@ -199,12 +212,18 @@ def run_cell(tiling, decomp, K, cap=CAP_SEC, outdir=OUTDIR, hubs=HUBS_21,
             if truncated:
                 break
 
-    # The ENUMERATORS honour `cap` internally and simply stop yielding when they hit it. From the
-    # consumer side that is indistinguishable from a finished enumeration -- so a cut-off cell would
-    # otherwise be written out as an exhaustive census with a short count. That is exactly the silent
-    # truncation that corrupted the previous k-stress tables. If we got anywhere near the cap, say so.
+    # The ENUMERATORS honour `cap` internally and stop yielding the moment (time - t0) > cap -- the
+    # SAME threshold this consumer's in-loop check uses (see above), on the SAME t0/clock (budget=cap,
+    # t0=t0 were passed straight through). From the consumer side a budget cut and a natural exhaustion
+    # both look like a finished iterator, so a cut-off cell would otherwise be written out as an
+    # exhaustive census with a short count -- the silent truncation that corrupted the previous
+    # k-stress tables. We therefore flag truncated iff the elapsed time actually EXCEEDED the cap,
+    # which is exactly the enumerator's own cutoff condition -- NOT a "near the cap" fudge: a cell that
+    # exhausted at 0.99*cap ran out of candidates on its own and is a real census, not a lower bound.
+    # (Matching `> cap` is the closest a consumer can get to natural-vs-cutoff without a cut flag
+    # threaded back from the enumerator itself.)
     dt = time.time() - t0
-    if not truncated and dt >= cap * 0.98:
+    if not truncated and dt > cap:
         truncated, stop = True, "time>%.0fs (enumerator cut)" % cap
 
     summary = {
@@ -222,6 +241,12 @@ def run_cell(tiling, decomp, K, cap=CAP_SEC, outdir=OUTDIR, hubs=HUBS_21,
 
 
 def _worker(cell):
+    """Run one census cell in a child process -> summary dict. MemoryError is EXPECTED (a big cell can
+    legitimately exhaust RAM) and is turned into a truncated record so the sweep continues. Every OTHER
+    exception is a real bug and is deliberately left to SURFACE: the parent records it as an error cell
+    and the ERRORED banner groups it by signature (see main), so a systematic bug shows up as many
+    identical errors instead of being laundered here into one 'error' stub indistinguishable from a
+    single flaky cell."""
     tiling, decomp, K, cap, outdir, hubs, cap_rss, cap_records = cell
     try:
         return run_cell(tiling, decomp, K, cap=cap, outdir=outdir, hubs=hubs,
@@ -231,8 +256,6 @@ def _worker(cell):
         return {"tiling": tiling, "decomp": decomp, "K": K, "closing": 0, "tw0": 0,
                 "truncated": True, "stop": "MemoryError", "dt": 0, "peak_rss_mb": None,
                 "funnel": {}, "spectrum": {}, "jsonl": None}
-    except Exception:
-        return {"tiling": tiling, "decomp": decomp, "K": K, "error": traceback.format_exc()}
 
 
 def safe_jobs(requested, cap_rss=CAP_RSS_MB, headroom_mb=4096):
@@ -279,6 +302,26 @@ def plan_cells(tilings, decomps, kmin, kmax, cap, outdir, even_111=True, hubs=HU
     return cells
 
 
+def _write_index(outdir, done):
+    """Write results/census/index.json from the collected per-cell summaries; return (ok, errs).
+    Called from a finally so a mid-sweep abort (a wedged pool, a KeyboardInterrupt) still leaves an
+    index of the cells that DID finish rather than nothing on disk."""
+    ok = [s for s in done if "error" not in s]
+    ok.sort(key=lambda s: (s["tiling"], s["decomp"], s["K"]))
+    errs = [s for s in done if "error" in s]
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, "index.json"), "w") as fh:
+        json.dump({"cells": ok, "errors": errs}, fh, indent=2)
+    return ok, errs
+
+
+def _err_sig(tb):
+    """Last non-empty line of a traceback string (the 'ExceptionType: message') -> used to GROUP error
+    cells so a systematic bug (many cells, one signature) is distinguishable from a single flaky cell."""
+    lines = [ln for ln in tb.strip().splitlines() if ln.strip()]
+    return lines[-1].strip() if lines else "unknown error"
+
+
 def main():
     ap = argparse.ArgumentParser(description="store-all K-census over the non-square tilings")
     ap.add_argument("--tiling", action="append", choices=TILINGS)
@@ -316,10 +359,21 @@ def main():
              os.path.relpath(args.outdir, REPO)), flush=True)
 
     done = []
-    with ProcessPoolExecutor(max_workers=jobs) as ex:
+    ex = ProcessPoolExecutor(max_workers=jobs)
+    try:
         futs = {ex.submit(_worker, c): c for c in cells}
         for fut in as_completed(futs):
-            s = fut.result()
+            cell = futs[fut]
+            try:
+                s = fut.result()
+            except Exception as e:
+                # A worker that CRASHED (BrokenProcessPool: an OOM-killed / segfaulted child) or an
+                # unexpected exception surfaced out of _worker. Record it as an error cell and keep
+                # going: one dead cell must neither abort the whole sweep nor lose the cells that
+                # already finished. as_completed yields only DONE futures, so .result() won't block.
+                s = {"tiling": cell[0], "decomp": cell[1], "K": cell[2],
+                     "error": "".join(
+                         traceback.format_exception(type(e), e, e.__traceback__)).strip()}
             done.append(s)
             if "error" in s:
                 print("  ERROR %s %s K=%d\n%s" % (s["tiling"], s["decomp"], s["K"], s["error"]),
@@ -329,16 +383,26 @@ def main():
                   % (s["tiling"], s["decomp"], s["K"], s["closing"], s["tw0"],
                      ("TRUNCATED " + s["stop"]) if s["truncated"] else "exhaustive",
                      s["dt"], s["peak_rss_mb"]), flush=True)
+    finally:
+        # Bounded teardown: never block on a wedged/dead worker (same pattern as square/engine/
+        # search.py). Write index.json regardless, so even a mid-sweep abort leaves an index of the
+        # cells that finished.
+        ex.shutdown(wait=False, cancel_futures=True)
+        ok, errs = _write_index(args.outdir, done)
 
-    ok = [s for s in done if "error" not in s]
-    ok.sort(key=lambda s: (s["tiling"], s["decomp"], s["K"]))
     index = os.path.join(args.outdir, "index.json")
-    with open(index, "w") as fh:
-        json.dump({"cells": ok, "errors": [s for s in done if "error" in s]}, fh, indent=2)
     print("\n%d/%d cells ok, %d truncated -> %s"
           % (len(ok), len(done), sum(1 for s in ok if s["truncated"]),
              os.path.relpath(index, REPO)), flush=True)
-    return 0 if len(ok) == len(done) else 1
+    if errs:
+        # ERRORED banner: aggregate by exception signature so a SYSTEMATIC bug (many cells, same
+        # error) is loud and distinct from a single flaky/crashed cell.
+        sigs = Counter(_err_sig(s["error"]) for s in errs)
+        print("\n!! %d/%d CELLS ERRORED (real bugs, not truncation):" % (len(errs), len(done)),
+              flush=True)
+        for sig, n in sigs.most_common():
+            print("   %3d x  %s" % (n, sig), flush=True)
+    return 0 if not errs else 1
 
 
 if __name__ == "__main__":

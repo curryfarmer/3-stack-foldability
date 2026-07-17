@@ -32,6 +32,7 @@ CHAIN = ["#1f77b4", "#e8820c", "#2ca02c",      # A blue / B orange / C green
 FOOTPRINT_EDGE = "#6f4fb0"                     # tromino destination outline (purple)
 GRID_EDGE = "#dddddd"                          # cell gridlines (light grey)
 INK = "#222222"                                # text / labels / near-black borders
+MUTED = "#444"                                 # sub-notes / secondary caption grey (shared w/ tri)
 
 # Semantic colors (creases, cuts, highlights, verdicts).
 JUMP = "#d62728"                               # 3-jump (along-axis fold) highlight (red)
@@ -113,11 +114,16 @@ def new_grid_axes(m, n, *, pad=0.3, extra_w=0.0, ticklabels=True):
     return fig, ax
 
 
-def draw_grid_cells(ax, m, n, *, checker=False):
+def draw_grid_cells(ax, m, n, *, checker=False, mask=None):
     """Fill the base m×n grid: plain white, or a sigma=(-1)^(x+y) red/blue parity tint when
-    checker=True (the same tile-parity coloring shared by every square analysis figure)."""
+    checker=True (the same tile-parity coloring shared by every square analysis figure).
+    `mask` (a set of (x, y) cells) restricts drawing to those cells — an arbitrary drawn sheet (S10)
+    shows only its sheet region S, not the full bounding rectangle. mask=None -> the whole grid (the
+    byte-identical historic path for rectangle sheets)."""
     for y in range(n):
         for x in range(m):
+            if mask is not None and (x, y) not in mask:
+                continue                       # off-sheet cell of an arbitrary drawn region -> skip
             if checker:
                 fc = PARITY_RED if (x + y) % 2 == 0 else PARITY_BLUE
             else:
@@ -183,17 +189,44 @@ def _split_sides(p, q, n):
     return out
 
 
-def draw_reflection(ax, seed, segs, passed):
+def _offset_seg(p, q, off):
+    """Shift the axis-aligned unit segment p->q perpendicular to itself by signed amount `off`."""
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    perp = (-dy, dx)                                        # unit perp (segs are axis-aligned, unit length)
+    return ((p[0] + perp[0] * off, p[1] + perp[1] * off),
+            (q[0] + perp[0] * off, q[1] + perp[1] * off))
+
+
+def _side_sign(seed, cell):
+    """+1 / -1: which side of the crease centerline the base `cell`'s center lies on, measured along
+    the crease perpendicular. Places each chain's seed arrow on ITS OWN side of the crease (the side
+    of the chain it belongs to) instead of an index-based split that could land it on the neighbour's
+    side. I/O: (seed seg, (x,y) cell) -> float."""
+    (px, py), (qx, qy) = seed
+    perp = (-(qy - py), qx - px)
+    mx, my = (px + qx) / 2, (py + qy) / 2
+    dot = (cell[0] + 0.5 - mx) * perp[0] + (cell[1] + 0.5 - my) * perp[1]
+    return 1.0 if dot >= 0 else -1.0
+
+
+def draw_reflection(ax, seed, segs, passed, cells=None):
     """Overlay the reflection gate for one shared-crease pair. The seed crease is drawn as one
     arrow PER CHAIN (colored to match, split to either side like the images below it — two solid
     colors instead of one, since a single shared-color arrow read as an unintended blend of both
-    chains' colors). Each chain's reflected image segment (Fold.reflection_verdict's own
-    segI/segJ — coincident on PASS) is drawn as its own full arrow on a separate side of that
-    centerline, dashed to distinguish it from the solid seed. Pass/fail (✓ coincide / ✗ mismatch)
-    is marked once at the seed's midpoint, tinted FOLD_BADGE/JAM_BADGE.
-    segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)). I/O: (ax, seg, list, bool) -> None."""
+    chains' colors). When `cells` (each chain's base cell, aligned with `segs`) is given, each seed
+    arrow is offset onto the side of the crease where that chain's own cell sits — otherwise it
+    reads as swapped (chain A's arrow on B's side). Each chain's reflected image segment
+    (Fold.reflection_verdict's own segI/segJ — coincident on PASS) is drawn as its own full arrow on
+    a separate side of that centerline, dashed to distinguish it from the solid seed. Pass/fail
+    (✓ coincide / ✗ mismatch) is marked once at the seed's midpoint, tinted FOLD_BADGE/JAM_BADGE.
+    segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)). I/O: (ax, seg, list, bool, cells) -> None."""
     n = len(segs)
-    for (pk, qk), (color, _) in zip(_split_sides(seed[0], seed[1], n), segs):
+    split = _split_sides(seed[0], seed[1], n)
+    for k, (color, _) in enumerate(segs):
+        if cells is not None:
+            pk, qk = _offset_seg(seed[0], seed[1], REFLECTION_SPLIT * _side_sign(seed, cells[k]))
+        else:
+            pk, qk = split[k]
         ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=13,
                                      lw=3.0, color=color, zorder=8, alpha=0.9))
 
@@ -270,7 +303,7 @@ def draw_subnotes(ax, lines):
     y = -0.02
     for text in lines:
         ax.text(0.5, y, text, transform=ax.transAxes, ha="center", va="top",
-                fontsize=7, color="#444", family="monospace")
+                fontsize=7, color=MUTED, family="monospace")
         y -= 0.07
 
 

@@ -79,3 +79,41 @@ def test_engine_twist_check_decides_2plus1():
     assert res["decided"] is True
     assert res["pass"] is False                                    # Tw != 0 -> jam
     assert round(res["pairs"][0]["tw"]) == want_tw
+
+
+def test_non_2plus1_is_undecided():
+    """A chain set that is NOT a 2-chain + 1-chain pair returns the legacy undecided shape
+    (exercises the else branch of twist_2plus1_from_chains -- _split_2plus1 -> None)."""
+    chains = [{"baseCells": [{"x": 0, "y": 0}]},                   # 1 + 1, not 2 + 1
+              {"baseCells": [{"x": 1, "y": 0}]}]
+    res = twist_jump.twist_2plus1_from_chains(chains)
+    assert res == {"decided": False, "pass": None, "pairs": [], "tw": None, "idx": None}
+
+
+def _pl(*cellpairs):
+    """Fake placements: each (a, b) becomes a placement whose domino cells idx0=a, idx1=b."""
+    return [{"cells": [a, b]} for a, b in cellpairs]
+
+
+def test_pick_canon_idx_skips_diagonal_seam():
+    """idx 0's hub seam is diagonal so it is rejected; idx 1 is clean so it is chosen (return 1)."""
+    placements2 = _pl(((0, 0), (0, 0)), ((1, 1), (1, 0)))          # idx0 end (1,1), idx1 end (1,0)
+    path1 = [twist_jump.cc((3, 0)), twist_jump.cc((2, 0))]         # end (2,0), start (3,0)
+    # idx0 hub: (1,1)->(2,0) is diagonal (reject); idx1 hub: (1,0)->(2,0) unit, close far (accept).
+    assert twist_jump.pick_canon_idx(placements2, path1) == 1
+
+
+def test_pick_canon_idx_both_diagonal_fallback():
+    """Both strands present a diagonal hub seam -> the loop exhausts and falls back to idx 0."""
+    placements2 = _pl(((0, 0), (4, 4)), ((1, 1), (3, 3)))          # idx0 end (1,1), idx1 end (3,3)
+    path1 = [twist_jump.cc((5, 5)), twist_jump.cc((2, 2))]         # end (2,2)
+    # idx0 hub (1,1)->(2,2) diagonal; idx1 hub (3,3)->(2,2) diagonal -> neither idx accepted.
+    assert twist_jump.pick_canon_idx(placements2, path1) == 0
+
+
+def test_pick_canon_idx_unequal_lengths_no_indexerror():
+    """Regression: the closing seam uses loop[-1] (length-agnostic). A 3-placement 2-chain against a
+    1-point 1-chain must not IndexError -- the old loop[2*k-1] indexed off the end."""
+    placements2 = _pl(((0, 0), (0, 0)), ((1, 0), (1, 0)), ((2, 0), (2, 0)))
+    path1 = [twist_jump.cc((3, 0))]                                # shorter than the 2-chain strand
+    assert twist_jump.pick_canon_idx(placements2, path1) == 0

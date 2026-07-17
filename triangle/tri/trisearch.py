@@ -55,19 +55,32 @@ def exit_ok(lat, finals):
     return sorted(deg) == [1, 1, 2]
 
 
-def pairwise_twists(lat, chains):
-    """The three theta-graph pairwise-loop twists for a 1+1+1 solution."""
+def pairwise_twists(lat, chains, sigma="path"):
+    """The three theta-graph pairwise-loop twists for a 1+1+1 solution.
+
+    sigma="path" (default) scores each spliced pairwise loop chainA + reversed(chainB) with the
+    loop-INDEX sigma (tritwist.path_sigma), the YYR authority. A spliced loop is not one proper walk,
+    so the bipartite tile-coloring fails to alternate round it and reads a spurious Tw=0; path_sigma
+    is correct (see the tritwist module docstring). Pass an explicit callable/sequence to override.
+    I/O: (lat, chains[3], sigma) -> {AB,BC,AC: loop_twist dict}."""
     names = ["AB", "BC", "AC"]
     pairs = [(0, 1), (1, 2), (0, 2)]
     res = {}
     for nm, (i, j) in zip(names, pairs):
-        loop = chains[i] + list(reversed(chains[j]))
-        res[nm] = TW.loop_twist(loop)
+        loop = list(chains[i]) + list(reversed(chains[j]))
+        s = TW.path_sigma(len(loop)) if sigma == "path" else sigma
+        res[nm] = TW.loop_twist(loop, sigma=s)
     return res
 
 
 # ---------- 1+1+1 ----------
 def search_111(lat, K=None, require_exit=True):
+    """Enumerate 1+1+1 solutions on a small tiling, twist-scored with path_sigma.
+
+    DEMO-ONLY: the `foldable` flag gates on exit_ok (the three chain ends form a trapezoid) only --
+    that is the exit-FOOTPRINT shape, NOT the full physical reflection-closure gate
+    (foldclose.reflection_closes_111). It therefore admits non-closing footprints and is a small-grid
+    demo, not the shipped foldability oracle. I/O: (lat, K, require_exit) -> list[solution dict]."""
     Kc = K if K is not None else len(lat.tris) // 3
     sols, seen = [], set()
     allset = set(lat.tris)
@@ -89,10 +102,12 @@ def search_111(lat, K=None, require_exit=True):
                     seen.add(key)
                     loops = pairwise_twists(lat, [wa, wb, wc])
                     foldable = closes and all(abs(loops[k]["Tw"]) < 1e-6 for k in loops)
+                    # under path_sigma the quantum is 120 (a clean Tw is a multiple of 120, not 360);
+                    # a non-mult-120 twist is the real geometry bug.
                     sols.append({"decomp": "1+1+1", "footprint": fp,
                                  "chains": [wa, wb, wc], "loops": loops, "closes": closes,
                                  "foldable": foldable,
-                                 "frac": any(TW.fractional(loops[k]["Tw"]) for k in loops)})
+                                 "frac": any(TW.fractional(loops[k]["Tw"], 120.0) for k in loops)})
     return sols
 
 
@@ -158,7 +173,10 @@ def search_21(lat):
                 if not exit_ok(lat, [strand[-1], third, w1[-1]]):
                     continue
                 loop = strand + list(reversed(w1))
-                res = TW.loop_twist(loop)
+                # score with path_sigma: the strand is all-U, so the bipartite tile-coloring is
+                # constant (+1) across it and reads a spurious Tw=0. Loop-index sigma is the authority
+                # (tritwist docstring). Foldable<=>Tw=0 stays the demo hypothesis; the gate is unchanged.
+                res = TW.loop_twist(loop, sigma=TW.path_sigma(len(loop)))
                 key = (tuple(rib), tuple(w1))
                 if key in seen:
                     continue
@@ -167,7 +185,7 @@ def search_21(lat):
                              "ribbon": rib, "two_tris": sorted(two_tris),
                              "chains": [strand, w1], "one_chain": w1,
                              "loop": res, "foldable": abs(res["Tw"]) < 1e-6,
-                             "frac": TW.fractional(res["Tw"])})
+                             "frac": TW.fractional(res["Tw"], 120.0)})
     return sols
 
 
@@ -175,8 +193,11 @@ def _summary(sols, kind):
     n = len(sols)
     fold = sum(1 for s in sols if s["foldable"])
     frac = sum(1 for s in sols if s["frac"])
-    print("%-6s solutions: %3d | predicted foldable (Tw=0): %3d | fractional-twist (BUG): %d"
-          % (kind, n, fold, frac))
+    # a non-mult-120 twist is a geometry BUG for 1+1+1 (all-adjacent AB/BC loops are quantized), but
+    # an EXPECTED seam artefact for the 2+1 strand reduction (UP-per-rhombus centroids not collinear).
+    frac_label = "fractional-twist (BUG)" if kind == "1+1+1" else "fractional-twist (seam artefact)"
+    print("%-6s solutions: %3d | predicted foldable (Tw=0): %3d | %s: %d"
+          % (kind, n, fold, frac_label, frac))
 
 
 if __name__ == "__main__":

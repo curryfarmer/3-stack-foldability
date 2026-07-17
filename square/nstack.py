@@ -131,11 +131,15 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv)
-    row = run_grid(args.m, args.n, args.panels,
-                   allow_non_corner=not args.corner_only,
-                   dedup=not args.no_dedup,
-                   jobs=args.jobs,
-                   use_runner=not args.in_process)
+    try:
+        row = run_grid(args.m, args.n, args.panels,
+                       allow_non_corner=not args.corner_only,
+                       dedup=not args.no_dedup,
+                       jobs=args.jobs,
+                       use_runner=not args.in_process)
+    except ValueError as exc:                    # bad --panels (< 3) is a USAGE error, not a crash --
+        print(f"error: {exc}", file=sys.stderr)  # mirror generate.py's clean exit 2 (was a bare
+        return 2                                  # ValueError traceback out of build_opts -> exit 1)
     print(json.dumps(row))
     return 1 if row.get("err") else 0
 

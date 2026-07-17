@@ -111,8 +111,8 @@ def main(argv=None):
     ap.add_argument("--first", action="store_true",
                     help="--grid-file: stop at the first closing fold instead of enumerating all")
     ap.add_argument("--render", action="store_true",
-                    help="--grid-file: also write the overlay/foldsheet/twist/reflect PNG bundle per fold "
-                         "(via render.py); default is JSON-only")
+                    help="--grid-file: also write the 2-image bundle per fold (schematic + twist PNG "
+                         "+ analysis JSON, via render.py); default is JSON-only")
     ap.add_argument("--tiling", choices=["equilateral", "righttri", "scalene", "hex"])
     ap.add_argument("--decomp", choices=["2plus1", "1plus1plus1"])
     ap.add_argument("--K", type=int, help="chain length")

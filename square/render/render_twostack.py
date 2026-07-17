@@ -178,8 +178,12 @@ def render_analysis(sol, m, n, out_path, *, title=None):
         xs, ys = _seg_pts(cut)
         ax.plot(xs, ys, color=fs.JUMP, lw=3.6, solid_capstyle="round", zorder=9)
 
+    # Gate the verdict word on verdict.foldable (via fs.verdict_badge — exactly how render_foldsheet's
+    # badge is computed), NOT on twist alone: twist == 0 can still JAM on a reflection failure, so a
+    # twist-only verdict here could contradict the foldsheet badge. The twist value stays in the title.
     tw = T2.twist_value(circuit)
-    verdict = "FOLD (flat)" if tw == 0 else f"JAM (twist={fs.pi_label(tw)})"
+    badge, _ = fs.verdict_badge(sol.get("verdict", {}).get("foldable"))
+    verdict = "FOLD (flat)" if badge == "FOLD" else badge
     stem = title or f"2-stack  {m}x{n}"
     ax.set_title(f"{stem}   turn-angle balance:  twist = {fs.pi_label(tw)}  →  {verdict}")
 

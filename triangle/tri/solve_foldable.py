@@ -207,6 +207,13 @@ def enum_111(lat, S, back, K, time_budget=None, t0=None, stats=None):
 def enum_21(lat, K, start_fps=None, require_cover=False, time_budget=None, t0=None):
     """Yield 2+1 solutions (rigid rhombus-ribbon strand + 1-chain), mirroring trisearch.search_21
     but with holes allowed (require_cover=False) and a restricted set of START footprints.
+
+    DEPRECATED for production figures: the shipped 2+1 path is find_example.gen_21 + foldsim (the
+    generalized rigid-domino model with the path-following twist). This legacy rhombus enum uses an
+    incompatible footprint convention (its trapezoid `mid` is a bridge tile outside the region) and
+    the strand-reduction twist is artifact-prone on triangles. Retained ONLY for the xval 2+1 oracle
+    cross-check (require_cover, 2x3 tiling) against trisearch.search_21. I/O: (lat, K, ...) -> yields
+    2+1 solution dicts.
     """
     M, N = lat.M, lat.N
     radj = TS._rhombus_grid_adj(M, N)
@@ -235,6 +242,7 @@ def enum_21(lat, K, start_fps=None, require_cover=False, time_budget=None, t0=No
                 if not TS.exit_ok(lat, [strand[-1], third, w1[-1]]):
                     continue
                 loop = strand + list(reversed(w1))
+                # bipartite sigma intentional: 2+1 triangle twist is diagnostic-only, not gated, and doesn't port to triangles (see record_21 docstring) -- do NOT switch to path_sigma
                 res = TW.loop_twist(loop)
                 yield {"ribbon": rib, "strand": strand, "one_chain": w1,
                        "two_tris": sorted(two_tris), "third": third,
@@ -247,14 +255,15 @@ def enum_21(lat, K, start_fps=None, require_cover=False, time_budget=None, t0=No
 def assert_clean(res, ctx):
     """Fail loud on a fractional twist (a geometry bug, not a real fold).
 
-    Tw must be a multiple of 360 — that is the foldability-relevant invariant. Individual gammas
-    are multiples of 120 ONLY for all-dual-adjacent loops (AB, BC). The AC arm-arm loop closes
-    across the two NON-adjacent degree-1 cells of the start/end trapezoids, so it legitimately
-    carries +-60 gammas; they pair up and the sigma-weighted sum stays a multiple of 360. So we
-    assert Tw mod 360 only, and report gamma-mult-120 as informational.
+    Under the loop-INDEX (path) sigma the quantum is 120, not 360: a clean pairwise-loop Tw is a
+    multiple of 120 (the bipartite mult-360 invariant was specific to the alternating tile-coloring).
+    Individual gammas are multiples of 120 ONLY on all-dual-adjacent loops (AB, BC); the AC arm-arm
+    loop closes across the two NON-adjacent degree-1 cells of the start/end trapezoids and legitimately
+    carries +-60 gammas that pair up, so we assert Tw mod 120 only and report gamma-mult-120 as
+    informational. A genuine geometry bug (e.g. a mislaid centroid) yields a non-mult-120 Tw and trips.
     """
-    if TW.fractional(res["Tw"]):
-        raise AssertionError("fractional Tw=%.6f (not multiple of 360) at %s" % (res["Tw"], ctx))
+    if TW.fractional(res["Tw"], 120.0):
+        raise AssertionError("fractional Tw=%.6f (not multiple of 120) at %s" % (res["Tw"], ctx))
 
 
 def color_balance(region):
@@ -264,10 +273,15 @@ def color_balance(region):
 
 # --------------------------------------------------------------------------- example records
 def record_111(lat, pa, pm, pc, K):
+    # TS.pairwise_twists scores with the loop-INDEX (path) sigma by default -- the correct authority
+    # for a spliced pairwise loop (see its docstring); the bipartite sigma reads a spurious Tw=0.
     L = TS.pairwise_twists(lat, [list(pa), list(pm), list(pc)])
     for nm in ("AB", "BC", "AC"):
         assert_clean(L[nm], "1+1+1 K=%d loop %s" % (K, nm))
     tw = [int(round(L[nm]["Tw"])) for nm in ("AB", "BC", "AC")]
+    # per-loop gamma cleanliness (the AC arm-arm loop legitimately carries +-60 gammas, so this is
+    # not always True -- match log_111's live computation rather than hardcoding it).
+    gammas_clean = all(not TW.fractional(g, 120.0) for nm in ("AB", "BC", "AC") for g in L[nm]["gammas"])
     region = sorted(set(pa) | set(pm) | set(pc))
     hcount = len(HF.holes(lat, region))
     rec = {
@@ -281,7 +295,7 @@ def record_111(lat, pa, pm, pc, K):
         "region_size": len(region), "color_balance": color_balance(region),
         "cocycle_ok": tw[2] == tw[0] + tw[1],
         "alternates": all(L[nm]["alternates"] for nm in ("AB", "BC", "AC")),
-        "gammas_clean": True, "tw_clean": True,
+        "gammas_clean": gammas_clean, "tw_clean": True,
         "sidematch": None, "sideinfo": "n/a (uniform equilateral edge)",
     }
     rec["_loops"] = L
@@ -289,9 +303,11 @@ def record_111(lat, pa, pm, pc, K):
 
 
 def record_21(lat, sol, K):
-    # NB: the strand-reduction twist is NOT always clean on triangles (the UP-per-rhombus strand
-    # centroids are not collinear), so 2+1 Tw is frequently a non-multiple-of-360 "seam artifact"
-    # (e.g. -240, +-163.574). We record it honestly (tw_clean flag) rather than fail loud.
+    # DEPRECATED for production: superseded by the find_example.gen_21 + foldsim rigid-domino path
+    # (this legacy record feeds only run_K/--campaign, whose output is gitignored). NB: the
+    # strand-reduction twist is NOT always clean on triangles (the UP-per-rhombus strand centroids are
+    # not collinear), so 2+1 Tw is frequently a non-multiple-of-360 "seam artifact" (e.g. -240,
+    # +-163.574). We record it honestly (tw_clean flag) rather than fail loud.
     res = sol["loop"]
     tw_raw = round(res["Tw"], 3)
     clean = not TW.fractional(res["Tw"])
@@ -354,7 +370,9 @@ def _verdict_note(foldable, tw_desc):
             else "PREDICTED TO JAM (%s) - fold to verify" % tw_desc)
 
 
-def render_111(rec, idx):
+def render_111(rec, idx, schematic_only=False):
+    # schematic_only=True: skip the separate overlay; the foldsheet carries the chain-walk foldpath
+    # (walk_chains) so it is the single folding schematic for the per-fold bundle.
     pa, pm, pc = [list(map(tuple, c)) for c in rec["chains"]]
     region = sorted(set(pa) | set(pm) | set(pc))
     sub = TL.TriLattice(cells=region)
@@ -364,23 +382,27 @@ def render_111(rec, idx):
     note = "1+1+1 EQUILATERAL K=%d (%d tris)\n%s\n%s" % (
         rec["K"], rec["region_size"], tw_desc, verdict)
     start_fp, end_fp = [pa[0], pm[0], pc[0]], [pa[-1], pm[-1], pc[-1]]  # START hub vs unfolded chain ends
-    over = TR.render_tiling(sub, [pa, pm, pc],
-                            "1+1+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
-                            "overlay_1plus1_K%d_%d.png" % (rec["K"], idx),
-                            twist_note=note, footprint=start_fp, end_footprint=end_fp)
+    over = None if schematic_only else TR.render_tiling(
+        sub, [pa, pm, pc], "1+1+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
+        "overlay_1plus1_K%d_%d.png" % (rec["K"], idx),
+        twist_note=note, footprint=start_fp, end_footprint=end_fp)
     sheet = FS.make_sheet(
         TL.TriLattice, TL.vcart, lambda t: [TL.vcart(v) for v in TL.tri_vertices(t)], TL.sigma,
         [pa, pm, pc], start_fp,
         "1+1+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
         "foldsheet_1plus1_K%d_%d.png" % (rec["K"], idx), rec["K"], verdict_note=verdict,
-        end_footprint=end_fp)
+        end_footprint=end_fp, walk_chains=[pa, pm, pc])
     return over, sheet
 
 
 def _crease_set_21(sub, rib, one_chain):
-    """The physically-faithful 2+1 fold-edge set: each rhombus's diagonal (the 2-layer stack fold),
-    each hinge between consecutive ribbon rhombi, and each 1-chain crease. (The 2-chain is a
-    2-stack rhombus ribbon, not a flat triangle strip, so its folds form a tree, not a path.)"""
+    """The 2+1 fold-edge set: each rhombus's diagonal (the 2-layer stack fold), each hinge between
+    consecutive ribbon rhombi, and each 1-chain crease.
+
+    DEPRECATED (analysis-only legacy; consumers render_21/run_K emit gitignored figures). It creases
+    the rigid-domino diagonal (an over-fold) and assumes the legacy START-footprint convention. The
+    shipped, physically-faithful crease set is domino21.crease_set_21 via find_example.gen_21+foldsim.
+    """
     cr = {}
 
     def add(t1, t2):
@@ -399,7 +421,10 @@ def _crease_set_21(sub, rib, one_chain):
     return cr
 
 
-def render_21(rec, idx):
+def render_21(rec, idx, schematic_only=False):
+    """DEPRECATED (analysis-only legacy, gitignored output): draws a run_K 2+1 record with the legacy
+    _crease_set_21. The shipped 2+1 figures come from find_example.render_case (gen_21 + foldsim
+    rigid-domino model). I/O: (rec, idx, schematic_only) -> (overlay_path|None, sheet_path)."""
     strand = [tuple(t) for t in rec["strand"]]
     one_chain = [tuple(t) for t in rec["one_chain"]]
     two_tris = [tuple(t) for t in rec["two_tris"]]
@@ -420,10 +445,10 @@ def render_21(rec, idx):
     # START hub [arm1, mid, arm2] vs the unfolded chain-END tiles (which fold back onto the hub).
     fp_start = [tuple(t) for t in rec["footprint"]]
     fp_end = [tuple(t) for t in rec["end_footprint"]]
-    over = TR.render_tiling(sub, [strand, one_chain],
-                            "2+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
-                            "overlay_2plus1_K%d_%d.png" % (rec["K"], idx),
-                            twist_note=note, footprint=fp_start, end_footprint=fp_end)
+    over = None if schematic_only else TR.render_tiling(
+        sub, [strand, one_chain], "2+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
+        "overlay_2plus1_K%d_%d.png" % (rec["K"], idx),
+        twist_note=note, footprint=fp_start, end_footprint=fp_end)
     rib = [tuple(r) for r in rec["ribbon"]]
     crease = _crease_set_21(sub, rib, one_chain)
     sheet = FS.make_sheet(
@@ -431,7 +456,8 @@ def render_21(rec, idx):
         [sorted(set(two_tris)), one_chain], fp_start,
         "2+1 EQUILATERAL K=%d - %s" % (rec["K"], verdict),
         "foldsheet_2plus1_K%d_%d.png" % (rec["K"], idx), rec["K"],
-        verdict_note=verdict, crease_override=crease, end_footprint=fp_end)
+        verdict_note=verdict, crease_override=crease, end_footprint=fp_end,
+        walk_chains=[strand, one_chain])
     return over, sheet
 
 
@@ -563,10 +589,18 @@ def run_K(decomp, K, time_cap=HARD_CAP_SEC, log_fh=None):
 
 
 # --------------------------------------------------------------------------- XVAL gate
+# Twist spectrum under the loop-INDEX (path) sigma authority (TS.pairwise_twists default). Recomputed
+# LIVE from enum_111 -- the old constant was the bipartite tile-coloring spectrum, which read spurious
+# zeros on these spliced pairwise loops. Both K stay 0-foldable (no (0,0,0)); only the diagnostic tw
+# values move. Under path the pairwise Tw is a multiple of 120 (not 360), e.g. the +-480/+-960/+-1920
+# AC entries below.
 ORACLE_111 = {
-    10: {"closing": 2, "spectrum": {(720, -720, 0): 1, (-720, 720, 0): 1}},
-    12: {"closing": 94, "spectrum": {(720, -720, 0): 39, (-720, 720, 0): 39,
-                                     (720, 720, 1440): 8, (-720, -720, -1440): 8}},
+    10: {"closing": 2, "spectrum": {(720, 720, 480): 1, (-720, -720, -480): 1}},
+    12: {"closing": 94, "spectrum": {(720, 720, 960): 27, (-720, -720, -960): 27,
+                                     (720, 720, 0): 11, (-720, -720, 0): 11,
+                                     (720, -720, 480): 4, (720, -720, -480): 4,
+                                     (-720, 720, 480): 4, (-720, 720, -480): 4,
+                                     (720, 720, 1920): 1, (-720, -720, -1920): 1}},
 }
 
 

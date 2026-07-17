@@ -33,11 +33,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import find_example as FE      # noqa: E402  build_lat / GEN (tile_cart, vcart, cent)
 import render_fold as RFD      # noqa: E402  _cand_from_record
 import seam_filter as SFILT    # noqa: E402  _region_edges / _fold_tiles / tile_chirality
-import foldsheet_tri as FS     # noqa: E402  draw_footprints, CHIR_COLOR/CHIR_TAG
-
-TINT = ["#eaf3fb", "#fdeeee", "#eafaef"]                 # faint per-chain fill (matches foldsheet_tri)
-CREASE_COL, ARROW_COL = "#b06f4f", "#6f4fb0"             # mirror axis (brown) / reflection arrow (purple)
-FOLD_BADGE, JAM_BADGE = "#1a7f48", "#c0392b"
+import tristyle as TS          # noqa: E402  draw_footprints, CHIR_COLOR/CHIR_TAG, save
+from tristyle import TINT, CREASE_COL, FOOTPRINT_EDGE, FOLD_BADGE, JAM_BADGE, GRID_EDGE, MUTED  # noqa: E402
 
 
 def _centroid(poly):
@@ -66,7 +63,7 @@ def _draw_unfolded(ax, lat, cand, tile_cart, vcart, crease):
                     | {tuple(t) for t in cand.get("two_tris", [])})
     for t in region:
         ax.add_patch(Polygon(tile_cart(t), closed=True, facecolor=TINT[chain_of.get(t, 0) % 3],
-                             edgecolor="#dddddd", lw=0.5, zorder=1))
+                             edgecolor=GRID_EDGE, lw=0.5, zorder=1))
     for fs in crease:                                       # crease = mirror axis of each fold
         u, v = tuple(fs)
         e = lat.shared.get((u, v)) or lat.shared.get((v, u))
@@ -77,38 +74,38 @@ def _draw_unfolded(ax, lat, cand, tile_cart, vcart, crease):
                 solid_capstyle="round", zorder=4)
     fp = [tuple(t) for t in cand["footprint"]]
     efp = [tuple(t) for t in cand["end_footprint"]]
-    FS.draw_footprints(ax, tile_cart, fp, efp, z0=8.4, labelsize=11, end_chirality=None)
+    TS.draw_footprints(ax, tile_cart, fp, efp, z0=8.4, labelsize=11, end_chirality=None)
     for et, st in zip(efp, fp):                             # net reflection: END cell -> START cell
         pe, ps = _centroid(tile_cart(et)), _centroid(tile_cart(st))
         if (pe[0] - ps[0]) ** 2 + (pe[1] - ps[1]) ** 2 < 1e-9:
             continue                                       # already coincident (short chain) -> no arrow
         ax.add_patch(FancyArrowPatch(pe, ps, arrowstyle="-|>", mutation_scale=13, lw=1.5,
-                                     color=ARROW_COL, zorder=10, shrinkA=7, shrinkB=7,
+                                     color=FOOTPRINT_EDGE, zorder=10, shrinkA=7, shrinkB=7,
                                      connectionstyle="arc3,rad=0.16", alpha=0.85))
     ax.set_title("unfolded sheet — creases (brown) = mirror axes;\narrows: END footprint reflects onto START",
-                 fontsize=9, color="#444")
+                 fontsize=9, color=MUTED)
     _fit(ax, [p for t in region for p in tile_cart(t)])
 
 
 def _draw_folded(ax, lat, cand, tile_cart, folded, chir):
-    """RIGHT panel: START footprint (teal) with each END tile's FOLDED image overlaid, coloured by
+    """RIGHT panel: START footprint (purple) with each END tile's FOLDED image overlaid, coloured by
     return orientation (proper/mirror/off-cell)."""
     fp = [tuple(t) for t in cand["footprint"]]
     efp = [tuple(t) for t in cand["end_footprint"]]
-    FS.draw_footprints(ax, tile_cart, fp, None, z0=6.0, labelsize=11)     # START target only
+    TS.draw_footprints(ax, tile_cart, fp, None, z0=6.0, labelsize=11)     # START target only
     per = chir.get("per_tile") or []
     allpts = [p for t in fp for p in tile_cart(t)]
     for i, et in enumerate(efp):
         ev = folded.get(tuple(et))
         klass = per[i]["klass"] if i < len(per) else None
-        col = FS.CHIR_COLOR.get(klass, "#888888")
+        col = TS.CHIR_COLOR.get(klass, MUTED)
         if ev is None:                                     # off-cell / unreached: draw at unfolded spot
             ev = tile_cart(et)
         ax.add_patch(Polygon(ev, closed=True, facecolor=col, edgecolor=col, lw=1.8, alpha=0.32,
                              zorder=9))
         ax.add_patch(Polygon(ev, closed=True, facecolor="none", edgecolor=col, lw=2.2, zorder=10))
         cx, cy = _centroid(ev)
-        ax.text(cx, cy, "%s\n%s" % ("ABC"[i % 3], FS.CHIR_TAG.get(klass, "?")), ha="center",
+        ax.text(cx, cy, "%s\n%s" % ("ABC"[i % 3], TS.CHIR_TAG.get(klass, "?")), ha="center",
                 va="center", color=col, fontsize=9, fontweight="bold", zorder=11)
         allpts += list(ev)
     klass = chir.get("klass", "n/a")
@@ -153,8 +150,7 @@ def render_reflection(json_path, out_sub=None):
     out_dir = os.path.join(FE._REPORT_BASE, out_sub)
     os.makedirs(out_dir, exist_ok=True)
     png = os.path.join(out_dir, "reflect_%s.png" % uid)
-    fig.savefig(png, dpi=160, bbox_inches="tight")
-    plt.close(fig)
+    TS.save(fig, png)
 
     print("REFLECTION %s %s K=%d  uid=%s  class=%s  verdict=%s"
           % (tiling, decomp, K, uid, chir.get("klass"), "FOLD" if chir.get("ok") else "JAM"))

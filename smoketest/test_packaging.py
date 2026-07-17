@@ -34,7 +34,9 @@ def test_all_clis_help_exit_zero():
 
 
 def test_triangle_generate_smoke(tmp_path):
-    """Tiny known case (scalene 2+1 K=4) -> exactly one closing fold, full 4-image bundle."""
+    """Tiny known case (scalene 2+1 K=4) -> exactly one closing fold, standardised 2-image bundle:
+    one folding schematic (creases + footprints + foldpath) + one twist diagram + JSON (record +
+    analysis). No separate overlay_ / reflect_ image (retired into the schematic + analysis JSON)."""
     proc = _run("-m", "triangle.tri.generate",
                 "--tiling", "scalene", "--decomp", "2plus1", "--K", "4",
                 "--out", str(tmp_path))
@@ -43,8 +45,11 @@ def test_triangle_generate_smoke(tmp_path):
     assert len(bundles) == 1, f"expected 1 bundle, got {[p.name for p in bundles]}"
     uid_dir = bundles[0]
     uid = uid_dir.name
-    for suffix in (f"{uid}.json", f"foldsheet_{uid}.png", f"overlay_{uid}.png", f"twist_{uid}.png"):
+    for suffix in (f"{uid}.json", f"schematic_{uid}.png", f"twist_{uid}.png", f"{uid}_analysis.json"):
         assert (uid_dir / suffix).is_file(), f"missing {suffix} in {uid_dir}"
+    # exactly TWO images, and none of the retired per-fold images
+    pngs = sorted(p.name for p in uid_dir.glob("*.png"))
+    assert pngs == [f"schematic_{uid}.png", f"twist_{uid}.png"], f"unexpected images: {pngs}"
 
 
 def test_triangle_render_roundtrip(tmp_path):
@@ -65,7 +70,8 @@ def test_triangle_render_roundtrip(tmp_path):
 
 
 def test_square_generate_smoke(tmp_path):
-    """Tiny known grid (6x4, 2+1 only) -> at least one bundle with the square output shape."""
+    """Tiny known grid (6x4, 2+1 only) -> at least one bundle with the standardised square output
+    shape: one JSON record + exactly two images (schematic + twist), matching the triangle track."""
     proc = _run("-m", "square.generate", "--m", "6", "--n", "4", "--decomps", "2+1",
                 "--out", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -74,7 +80,10 @@ def test_square_generate_smoke(tmp_path):
     uid_dir = bundles[0]
     uid = uid_dir.name
     assert (uid_dir / f"{uid}.json").is_file()
-    assert (uid_dir / f"foldsheet_{uid}.png").is_file()
+    for suffix in (f"schematic_{uid}.png", f"twist_{uid}.png"):
+        assert (uid_dir / suffix).is_file(), f"missing {suffix} in {uid_dir}"
+    pngs = sorted(p.name for p in uid_dir.glob("*.png"))
+    assert pngs == [f"schematic_{uid}.png", f"twist_{uid}.png"], f"unexpected images: {pngs}"
 
 
 def test_square_render_roundtrip(tmp_path):

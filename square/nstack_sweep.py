@@ -84,7 +84,10 @@ def run_one(m, n, panels, *, jobs, timeout, tmpdir):
             if time.time() - t0 > timeout:
                 timed_out = True
                 _killtree(proc.pid)            # the whole tree, not proc.kill()
-                proc.wait(timeout=30)
+                try:
+                    proc.wait(timeout=30)      # a wedged reap must not propagate out of the sweep
+                except subprocess.TimeoutExpired:  # (would kill a multi-hour run); the tree is already
+                    pass                       # killtree'd + this grid becomes a timeout row below
                 break
             time.sleep(2)
     dt = round(time.time() - t0, 1)
@@ -99,12 +102,23 @@ def run_one(m, n, panels, *, jobs, timeout, tmpdir):
     if proc.returncode != 0:
         return {"m": m, "n": n, "panels": panels,
                 "err": f"worker exit {proc.returncode}: {content[-500:]}", "seconds": dt}
-    line = content.strip().splitlines()[-1] if content.strip() else ""
-    try:
-        row = json.loads(line)
-    except (ValueError, IndexError):
-        return {"m": m, "n": n, "panels": panels, "err": f"unparseable worker output: {line[:200]}",
-                "seconds": dt}
+    # stderr is merged into stdout (FILE, never PIPE), so a late warning can be the LAST line; scan
+    # from the end for the first line that parses as a JSON object (the worker's one result row).
+    row = None
+    for line in reversed(content.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            row = parsed
+            break
+    if row is None:
+        return {"m": m, "n": n, "panels": panels,
+                "err": f"unparseable worker output: {content[-200:]}", "seconds": dt}
     row["seconds"] = dt
     return row
 
@@ -119,8 +133,14 @@ def already_done(results_path):
                 line = line.strip()
                 if not line:
                     continue
-                row = json.loads(line)
-                done.add((row["m"], row["n"], row["panels"]))
+                try:                           # a killed sweep can leave a truncated trailing line;
+                    row = json.loads(line)     # skip+warn rather than crash the whole resume on it
+                    key = (row["m"], row["n"], row["panels"])
+                except (ValueError, KeyError, TypeError):
+                    print(f"warning: skipping unparseable line in {results_path}: {line[:120]}",
+                          flush=True)
+                    continue
+                done.add(key)
     return done
 
 

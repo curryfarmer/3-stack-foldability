@@ -99,7 +99,8 @@ def main(Kmax):
     print("(canonical hub WLOG by p6m-transitivity on trapezoids; mid-chain forced)\n")
     print(" K | mid-chains | closing folds")
     print("---+------------+--------------")
-    all_zero_through = 0
+    all_zero_through = None      # highest K proven fold-free so far (None until the first clean K)
+    counterexample_K = None
     for K in range(2, Kmax + 1):
         lat, S, back = build_ambient(K)
         # verify R2: mid's only non-arm neighbor is `back`
@@ -110,9 +111,18 @@ def main(Kmax):
         if closing == 0:
             all_zero_through = K
         else:
+            counterexample_K = K
             break
-    print("\nResult: NO closing 3-stack fold exists for 2 <= K <= %d  (exhaustive, hub WLOG)."
-          % all_zero_through)
+    # Guard the verdict so it can never emit a null/empty range: a counterexample at the very first K
+    # leaves all_zero_through == None, which would otherwise print a self-contradictory "2 <= K <= 0".
+    if counterexample_K is not None:
+        print("\nResult: a closing 3-stack fold EXISTS at K = %d (COUNTEREXAMPLE above); the "
+              "obstruction does NOT hold." % counterexample_K)
+    elif all_zero_through is not None:
+        print("\nResult: NO closing 3-stack fold exists for 2 <= K <= %d  (exhaustive, hub WLOG)."
+              % all_zero_through)
+    else:
+        print("\nResult: no K tested (need Kmax >= 2).")
     print("R2 (forced mid-chain) verified at every K.")
 
 

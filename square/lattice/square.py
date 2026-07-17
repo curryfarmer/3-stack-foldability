@@ -22,6 +22,28 @@ from functools import lru_cache
 from lattice.base import Lattice
 
 
+def sheet_connected(cells):
+    """True iff `cells` is a single 4-connected polyomino (empty -> False). I/O: (iterable of (x,y)) -> bool.
+
+    The one flood-fill of record for square-grid 4-connectivity: the 3-stack engine (search.run's
+    drawn-sheet guard), the 2-stack engine (twostack._validate_sheet), and exit_congruent all call
+    it. It lives on the shared lattice layer because search.py and twostack.py must not import each
+    other (twostack must stay clear of the engine search closure)."""
+    cs = set(cells)
+    if not cs:
+        return False
+    seen = {next(iter(cs))}
+    stack = list(seen)
+    while stack:
+        cx, cy = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb = (cx + dx, cy + dy)
+            if nb in cs and nb not in seen:
+                seen.add(nb)
+                stack.append(nb)
+    return len(seen) == len(cs)
+
+
 class SquareLattice(Lattice):
     # ---- geometry (base hooks) ----
     def __init__(self, m, n, cells=None):
@@ -135,7 +157,10 @@ class SquareLattice(Lattice):
                 return False
         return True
 
-    # Exit-footprint congruence classifier (Rect / L by the N end cells' bounding box).
+    # Exit-footprint bbox PRE-FILTER (Rect / L by the N end cells' bounding box). This only screens
+    # by bounding box, which is a bijection with the true shape at panels==3 but NOT at panels>=4 —
+    # an S-tetromino and some disconnected sets share the L bbox. Callers must confirm real congruence
+    # via exit_congruent; exit_shape alone is a cheap reject only. I/O: (cells, panels) -> 'L'|'Rect'|None.
     @staticmethod
     def exit_shape(cells, panels=3):
         xs = [c[0] for c in cells]
@@ -148,26 +173,48 @@ class SquareLattice(Lattice):
             return "L"
         return None
 
-    # L footprint templates: corner at (0,0), arms; 4 rotations of D4 about the corner.
-    L_BASE = [
-        [(0, 0), (1, 0), (0, 1)],     # rot 0
-        [(0, 0), (0, 1), (-1, 0)],    # rot 1 (90 CW)
-        [(0, 0), (-1, 0), (0, -1)],   # rot 2 (180)
-        [(0, 0), (0, -1), (1, 0)],    # rot 3 (270 CW)
-    ]
+    @staticmethod
+    def _canonical_polyomino(cells):
+        """Translation + D4 invariant fingerprint of a cell set: the lexicographic-minimum,
+        origin-normalized, sorted tuple over the 8 D4 orientations. Two sets are congruent iff their
+        fingerprints are equal. I/O: (iterable of (x,y)) -> tuple[(x,y), ...]."""
+        best = None
+        for flip in (False, True):
+            pts = [(-x if flip else x, y) for (x, y) in cells]
+            for _ in range(4):                       # 4 rotations (the 4th brings us back to identity)
+                pts = [(-b, a) for (a, b) in pts]    # rotate 90 degrees about the origin
+                mnx = min(p[0] for p in pts)
+                mny = min(p[1] for p in pts)
+                norm = tuple(sorted((p[0] - mnx, p[1] - mny) for p in pts))
+                if best is None or norm < best:
+                    best = norm
+        return best
+
+    @staticmethod
+    def exit_congruent(cells, start_shape, panels):
+        """True iff the exit cells are ONE 4-connected polyomino D4-congruent to the start template of
+        `start_shape`. This is the exact test the bbox `exit_shape` only approximates for panels>=4,
+        where the L bbox also admits non-congruent (S-tetromino) and disconnected cell sets.
+        I/O: (cells, 'L'|'Rect', panels) -> bool."""
+        if not sheet_connected(cells):
+            return False
+        template = (SquareLattice.l_template(panels)[0] if start_shape == "L"
+                    else SquareLattice.rect_template(panels, "H"))
+        return (SquareLattice._canonical_polyomino(cells)
+                == SquareLattice._canonical_polyomino(template))
 
     @staticmethod
     def _l_arm_split(panels):
         """Two straight-arm lengths (a, b), split as evenly as possible, a+b = panels-1.
-        panels=3 -> (1, 1), matching L_BASE exactly."""
+        panels=3 -> (1, 1) (the classic corner tromino: one arm cell each way)."""
         a = (panels - 1) // 2
         return a, (panels - 1) - a
 
     @staticmethod
     def l_template(panels):
         """4 rotations of a corner + two straight arms (lengths from _l_arm_split), corner at
-        (0,0). Generalizes L_BASE (panels=3 reproduces it verbatim: arms of length 1 each,
-        one along +x, one along +y)."""
+        (0,0). panels=3 is the classic corner tromino: arms of length 1 each, one along +x,
+        one along +y."""
         a, b = SquareLattice._l_arm_split(panels)
         base = [(0, 0)] + [(i, 0) for i in range(1, a + 1)] + [(0, j) for j in range(1, b + 1)]
 
@@ -201,6 +248,12 @@ class SquareLattice(Lattice):
             return (m - 1 - X, n - 1 - Y)
         return (n - 1 - Y, X)
 
+    # NOTE: transform_arrow is INTENTIONALLY not replay-equivariant with apply_transform on odd
+    # rotations (rot in {1,3}, square grids only): rotating a fold's cells by 90/270 deg and rotating
+    # its arrows through here does NOT reproduce the same physical fold, so a hash is a dedup key, not
+    # a replayable path (see test_physical_deciders.py:9-11). Making it equivariant would only churn
+    # cosmetic arrow labels; canonical_hash CLASS COUNTS and gate verdicts are unaffected, because by
+    # Burnside no 3-stack sheet-covering fold has 90-deg symmetry, so no orbit merges or splits.
     @staticmethod
     def transform_arrow(t, d):
         if t["flip"]:

@@ -17,6 +17,9 @@ def reflect_point(p, a, b):
     B = x1 - x2
     C = -(A * x1 + B * y1)
     denom = A * A + B * B
+    if denom == 0:
+        raise ValueError("reflect_point needs distinct points a, b (got a coincident pair, "
+                         "so the crease line is undefined)")
     xr = x0 - 2 * A * (A * x0 + B * y0 + C) / denom
     yr = y0 - 2 * B * (A * x0 + B * y0 + C) / denom
     return (xr, yr)

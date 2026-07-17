@@ -21,6 +21,7 @@ import json
 import os
 import random
 import time
+import zlib
 
 import pytest
 
@@ -31,6 +32,13 @@ import trilattice as TL       # noqa: E402  fuzz: full equilateral lattice + tri
 import righttri as RT         # noqa: E402  fuzz: full righttri lattice
 import scalene as SC          # noqa: E402  fuzz: full scalene lattice
 import hexlattice as HX       # noqa: E402  fuzz: full hex lattice
+
+
+# Wall-clock budget for the shipped-authority searches that seed the round-trip proof. Generous and
+# env-overridable (FOLD_TRI_TEST_BUDGET, seconds) so a slow CI *lengthens* the search rather than
+# returning 0 folds -- a too-tight budget would silently turn the core round-trip proof into a no-op
+# (the KPLAN cases below are KNOWN-foldable, so they ASSERT folds were found, never skip to green).
+BUDGET = float(os.environ.get("FOLD_TRI_TEST_BUDGET", "300"))
 
 
 # --------------------------------------------------------------------------- helpers
@@ -45,7 +53,7 @@ def _rec_chains(rec):
     return [[tuple(t) for t in c] for c in rec["chains"]]
 
 
-def _ref_folds(tiling, K, cap, budget=45.0):
+def _ref_folds(tiling, K, cap, budget=BUDGET):
     """(lat, [cand,...]) — up to `cap` closing 1+1+1 folds from the shipped authority at chain length K.
     Equilateral goes through gen_eq (PO/solve_foldable); the other three through gen_111."""
     if tiling == "equilateral":
@@ -71,8 +79,9 @@ def test_roundtrip_rediscovers_authority_folds(tiling, K):
     region, with the same foldable verdict (path-sigma tilings). This simultaneously proves the Path-A
     exact-cover enumeration is correct/complete on all four tilings."""
     _, folds = _ref_folds(tiling, K, cap=4)
-    if not folds:
-        pytest.skip("no closing %s fold at K=%d in budget" % (tiling, K))
+    assert folds, ("no closing %s fold at K=%d within %.0fs -- this is a KNOWN-foldable KPLAN case, "
+                   "so 0 folds is a real failure (raise FOLD_TRI_TEST_BUDGET if the CI is merely slow)"
+                   % (tiling, K, BUDGET))
     for cand in folds:
         chains = _ref_chains(cand)
         recs = FG.run(tiling, _region_lists(chains))
@@ -105,8 +114,8 @@ def _assert_tier0(lat, tiling, recs):
 @pytest.mark.parametrize("tiling,K", [("righttri", 12), ("hex", 4)])
 def test_tier0_invariants_live(tiling, K):
     _, folds = _ref_folds(tiling, K, cap=1)
-    if not folds:
-        pytest.skip("no closing %s fold at K=%d in budget" % (tiling, K))
+    assert folds, ("no closing %s fold at K=%d within %.0fs -- KNOWN-foldable KPLAN case "
+                   "(raise FOLD_TRI_TEST_BUDGET if the CI is merely slow)" % (tiling, K, BUDGET))
     cells = _region_lists(_ref_chains(folds[0]))
     lat = FG.build_lattice(tiling, cells)
     recs = FG.enumerate_folds(lat, tiling)
@@ -117,8 +126,8 @@ def test_tier0_invariants_live(tiling, K):
 def test_first_toggle_returns_one():
     """--first / first=True short-circuits at the first closing fold."""
     _, folds = _ref_folds("hex", 4, cap=1)
-    if not folds:
-        pytest.skip("no closing hex fold in budget")
+    assert folds, ("no closing hex fold at K=4 within %.0fs -- KNOWN-foldable KPLAN case "
+                   "(raise FOLD_TRI_TEST_BUDGET if the CI is merely slow)" % BUDGET)
     cells = _region_lists(_ref_chains(folds[0]))
     one = FG.run("hex", cells, first=True)
     allf = FG.run("hex", cells)
@@ -177,8 +186,8 @@ def test_equilateral_obstruction_zero_foldable():
     from a K=12 equilateral closing fold re-enumerates to closing folds but ZERO predicted foldable
     (loop-index sigma)."""
     _, folds = _ref_folds("equilateral", 12, cap=3)
-    if not folds:
-        pytest.skip("no closing equilateral fold at K=12 in budget")
+    assert folds, ("no closing equilateral fold at K=12 within %.0fs -- KNOWN-closing KPLAN case "
+                   "(raise FOLD_TRI_TEST_BUDGET if the CI is merely slow)" % BUDGET)
     for cand in folds:
         lat = FG.build_lattice("equilateral", _region_lists(_ref_chains(cand)))
         recs = FG.enumerate_folds(lat, "equilateral")
@@ -219,7 +228,9 @@ def _grow_region(lat, size, rng):
 def test_fuzz_tier0_never_escapes(tiling):
     """Seeded connected regions (len % 3 == 0): ingest never crashes/escapes; Tier-0 holds on whatever
     it emits (which may be zero closing folds -- that is fine, only that it never emits a bad one)."""
-    rng = random.Random(0xF01D + hash(tiling) % 1000)
+    # crc32 (deterministic) not the built-in hash (PYTHONHASHSEED-salted per process), so every run
+    # sweeps the SAME per-tiling regions -- a reproducible fuzz, not a flaky guard that changes nightly.
+    rng = random.Random(0xF01D + zlib.crc32(tiling.encode()))
     full = _full_lattice(tiling)
     checked = 0
     for _ in range(8):

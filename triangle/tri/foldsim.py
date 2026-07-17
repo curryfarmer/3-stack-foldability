@@ -55,15 +55,15 @@ def _apply(pts, mirrors):
     return pts
 
 
-def simulate(lat, region, crease, rigid, anchor=None):
-    """Fold the sheet. `crease`/`rigid` are sets of frozenset({tileA, tileB}) interior edges.
-
-    Returns dict:
-      landing   : {tile -> world _poly_key}  (folded polygon key of every reached tile)
-      reached   : set of tiles reachable from the anchor via crease|rigid edges
-      consistent: bool — every crease edge coincides from both sides (closure holds)
-      comp      : {tile -> rigid-component root}
-    """
+def fold_components(lat, region, crease, rigid, anchor=None):
+    """Shared reflection-composition pass behind BOTH simulate (poly_key landings) and seam_filter
+    (raw folded vertices). Returns (comp, cmirror, reached, crease):
+      comp    : {tile -> rigid-component root} (RIGID edges fold as one unit);
+      cmirror : {component -> [mirror,...]} crease-path back to the anchor component, each mirror an
+                edge (p1,p2); mirrors[0] is applied first (fold a tile via _apply(vs, cmirror[comp]));
+      reached : set of tiles whose component is in cmirror;
+      crease  : the normalized crease set (frozenset pairs), for the caller's own downstream use.
+    Kept as the single source of the BFS so seam_filter cannot silently diverge from simulate."""
     region = [tuple(t) for t in region]
     rset = set(region)
     crease = {frozenset(map(tuple, fs)) for fs in crease}
@@ -94,6 +94,33 @@ def simulate(lat, region, crease, rigid, anchor=None):
                 q.append(d)
 
     reached = {t for t in region if comp[t] in cmirror}
+    return comp, cmirror, reached, crease
+
+
+def folded_vertices(lat, region, crease, rigid, anchor=None, tiles=None):
+    """{tile -> folded [(x,y),...]} for `tiles` (default: every reached tile), via the SAME fold pass
+    as simulate. Returns raw folded coordinates (winding preserved) that simulate's poly_key landings
+    discard — seam_filter's chirality read-out consumes this instead of copying the component BFS."""
+    comp, cmirror, reached, _ = fold_components(lat, region, crease, rigid, anchor)
+    want = list(reached) if tiles is None else [tuple(t) for t in tiles]
+    out = {}
+    for t in want:
+        t = tuple(t)
+        if comp.get(t) in cmirror:
+            out[t] = _apply(lat.vertices_cart(t), cmirror[comp[t]])
+    return out
+
+
+def simulate(lat, region, crease, rigid, anchor=None):
+    """Fold the sheet. `crease`/`rigid` are sets of frozenset({tileA, tileB}) interior edges.
+
+    Returns dict:
+      landing   : {tile -> world _poly_key}  (folded polygon key of every reached tile)
+      reached   : set of tiles reachable from the anchor via crease|rigid edges
+      consistent: bool — every crease edge coincides from both sides (closure holds)
+      comp      : {tile -> rigid-component root}
+    """
+    comp, cmirror, reached, crease = fold_components(lat, region, crease, rigid, anchor)
     landing = {t: FW._poly_key(_apply(lat.vertices_cart(t), cmirror[comp[t]]))
                for t in reached}
 

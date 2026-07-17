@@ -21,6 +21,7 @@ import math
 from collections import defaultdict
 
 from lattice.reflect import reflect_point
+from lattice.square import sheet_connected
 
 
 # ---------- grid graph ----------
@@ -47,23 +48,6 @@ def _adjacency(m, n, cells=None):
     return adj
 
 
-def _sheet_connected(sheet):
-    """4-connectivity of a drawn sheet (iterative flood-fill; ports search.py:_sheet_connected
-    so twostack stays self-contained -- it must NOT import the engine search closure)."""
-    it = iter(sheet)
-    start = next(it)
-    seen = {start}
-    stack = [start]
-    while stack:
-        x, y = stack.pop()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nb = (x + dx, y + dy)
-            if nb in sheet and nb not in seen:
-                seen.add(nb)
-                stack.append(nb)
-    return len(seen) == len(sheet)
-
-
 def _validate_sheet(sheet):
     """Structural guards for a drawn 2-stack sheet, same order + (return an error string, never
     raise) convention as the 3-stack engine: empty -> origin-normalized -> 4-connected -> even
@@ -74,7 +58,7 @@ def _validate_sheet(sheet):
     ys = [c[1] for c in sheet]
     if min(xs) != 0 or min(ys) != 0:
         return "sheet must be normalized to the origin (min corner (0,0))"
-    if not _sheet_connected(sheet):
+    if not sheet_connected(sheet):
         return "sheet is not 4-connected"
     if len(sheet) % 2 != 0:
         return "cell count must be even (2-stack folds into two equal stacks)"

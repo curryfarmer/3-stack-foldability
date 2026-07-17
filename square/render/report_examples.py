@@ -40,7 +40,7 @@ os.makedirs(SCRATCH, exist_ok=True)
 def load_bundle(out_dir, uid=None):
     """Load one solved bundle dict from out_dir. If uid given, that one; else the first."""
     if uid:
-        return json.load(open(os.path.join(out_dir, uid, f"{uid}.json")))
+        return json.load(open(os.path.join(REPO, out_dir, uid, f"{uid}.json")))
     paths = sorted(glob.glob(os.path.join(REPO, out_dir, "*", "*.json")))
     if not paths:
         raise FileNotFoundError(f"no bundles under {out_dir}")

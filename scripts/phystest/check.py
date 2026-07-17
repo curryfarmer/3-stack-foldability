@@ -40,10 +40,12 @@ _CHECKERS = {
     "triangle": os.path.join(_SCRIPTS_DIR, "validate_triangle.py"),
 }
 
-# Mismatch kinds that mean "the harness broke", not "the engine disagrees". Everything else —
-# including any kind added later that we don't recognise — counts as DATA and fails the gate. An
-# unknown mismatch must never be silently downgraded to an infra hiccup.
-_INFRA_KINDS = frozenset(("timeout", "no_output"))
+# Mismatch kinds that mean "the harness broke", not "the engine disagrees". "exception" is a grid
+# search that CRASHED (e.g. a killed pypy worker): validate_*.run degrades it to a per-record
+# mismatch, but nothing was proven either way, so it is INFRA (ERROR) not a real disagreement (FAIL).
+# Everything else — including any kind added later that we don't recognise — counts as DATA and fails
+# the gate: an unknown mismatch must never be silently downgraded to an infra hiccup.
+_INFRA_KINDS = frozenset(("timeout", "no_output", "exception"))
 
 _DEFAULT_TIMEOUT = 4 * 60 * 60      # 4h. The square checker's cold run is dominated by the big
                                     # grids and can run for hours; this bounds a genuine hang, it is
@@ -81,8 +83,18 @@ def _run_checker(engine, script, timeout):
         # stdout AND stderr to a FILE (never PIPE) so no grandchild can hold a pipe open; -u so the
         # file has content even if we have to kill the tree.
         with open(out_path, "w", encoding="utf-8") as fw:
-            proc = subprocess.Popen([sys.executable, "-u", script, "--json"],
-                                    stdout=fw, stderr=subprocess.STDOUT)
+            try:
+                proc = subprocess.Popen([sys.executable, "-u", script, "--json"],
+                                        stdout=fw, stderr=subprocess.STDOUT)
+            except OSError as exc:
+                # Couldn't even launch the checker (missing exe, EMFILE, ...). "exception" is an
+                # INFRA kind, so this reads as ERROR (nothing proven), not a data disagreement.
+                # (finally below still removes out_path; no child was created, so none is orphaned.)
+                return {"engine": engine, "skipped": False, "nAgree": None, "nTotal": None,
+                        "mismatches": [{"kind": "exception",
+                                        "detail": "could not start checker: %s" % exc}],
+                        "returncode": -1, "hardError": True,
+                        "seconds": round(time.time() - t0, 1)}
             # Separate read handle tails the same file, so a multi-hour run reports progress live
             # instead of going silent and then dumping 132 minutes of output at the end.
             with open(out_path, "r", encoding="utf-8", errors="replace") as fr:

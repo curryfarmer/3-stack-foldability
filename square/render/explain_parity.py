@@ -2,7 +2,7 @@
 
 Companion to the report section that reduces YYR vector parity to a parity check on two integers
 (nH, nV) per sub-chain. Four figures, square track, all styled via figstyle (the single source of
-truth shared with render_square / enumerate_twist):
+truth shared with render_square / render_twist_2plus1):
 
   PARITY_1_involution.png   P1 — two same-axis folds restore the crease vector (componentwise flip
                             cancels in pairs; net effect depends only on nH mod 2, nV mod 2).
@@ -16,7 +16,7 @@ truth shared with render_square / enumerate_twist):
 Convention here is math-style (+y UP, axis off) for the schematic panels (1, 2, 4); the worked
 example (3) uses the viewer convention (+y down) via figstyle so it matches the foldsheets.
 
-Run: .venv/Scripts/python.exe py/explain_parity.py
+Run: .venv/Scripts/python.exe square/render/explain_parity.py
 """
 import json
 import os

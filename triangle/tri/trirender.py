@@ -13,13 +13,11 @@ import matplotlib            # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt          # noqa: E402
 from matplotlib.patches import Polygon   # noqa: E402
-from foldsheet_tri import draw_footprints  # noqa: E402  shared start+end footprint highlighter
+from tristyle import (draw_footprints, draw_walk_arrows, save,   # noqa: E402
+                      TINT_UP, TINT_DN, CHAIN, INK, VLY, MNT, GRID_EDGE, MUTED)
 
+# OUT is mutated externally by the engine (find_example.set_outdir sets TR.OUT) -> keep it here.
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "report", "tri")
-
-TINT_UP, TINT_DN = "#eaf3fb", "#fdeeee"
-CHAIN = ["#1f77b4", "#e8820c", "#2ca02c"]
-INK = "#222222"
 
 
 def _poly(tid):
@@ -29,11 +27,11 @@ def _poly(tid):
 def draw_lattice(ax, lat, sigma_fill=True, label_sigma=False):
     for t in lat.tris:
         fc = (TINT_UP if TL.sigma(t) > 0 else TINT_DN) if sigma_fill else "white"
-        ax.add_patch(Polygon(_poly(t), closed=True, facecolor=fc, edgecolor="#bbb", lw=0.8, zorder=1))
+        ax.add_patch(Polygon(_poly(t), closed=True, facecolor=fc, edgecolor=GRID_EDGE, lw=0.8, zorder=1))
         if label_sigma:
             cx, cy = TL.centroid(t)
             ax.text(cx, cy, "+" if TL.sigma(t) > 0 else "−", ha="center", va="center",
-                    color="#3399cc" if TL.sigma(t) > 0 else "#d83232", fontsize=8, zorder=3)
+                    color=VLY if TL.sigma(t) > 0 else MNT, fontsize=8, zorder=3)
     ax.set_aspect("equal"); ax.axis("off")
 
 
@@ -42,6 +40,7 @@ def overlay_walk(ax, walk, color, number=True, lw=2.4, z=6):
     xs, ys = zip(*cents)
     ax.plot(xs, ys, "-", color=color, lw=lw, solid_capstyle="round", zorder=z)
     ax.plot(xs, ys, "o", color=color, ms=4, zorder=z + 1)
+    draw_walk_arrows(ax, cents, color, z=z + 1)      # per-step direction arrowheads
     if number:
         for k, (x, y) in enumerate(cents):
             ax.text(x, y, str(k), ha="center", va="center", color="white", fontsize=6,
@@ -55,12 +54,14 @@ def fill_chain(ax, walk, color, alpha=0.30):
 
 
 def outline_footprint(ax, fp, end_fp=None):
-    # START hub (teal, filled) + unfolded chain-END tiles (purple, dashed), A/B/C in chain order
+    # START hub (purple, faint fill) + unfolded chain-END tiles (purple, dashed), A/B/C in chain order
     draw_footprints(ax, _poly, fp, end_fp, z0=3.6, labelsize=10)
 
 
-def render_tiling(lat, chains, title, out_name, twist_note="", footprint=None, closed_loops=None,
+def render_tiling(lat, chains, title, out_name, twist_note="", footprint=None,
                   end_footprint=None):
+    """Draw a sigma-tinted lattice + A/B/C chain overlays (+ optional START/END footprints); save
+    under OUT and return the PNG path."""
     fig, ax = plt.subplots(figsize=(7.6, 6.4))
     draw_lattice(ax, lat, sigma_fill=True)
     for ci, w in enumerate(chains):
@@ -76,9 +77,5 @@ def render_tiling(lat, chains, title, out_name, twist_note="", footprint=None, c
             fontweight="bold", color=INK)
     if twist_note:
         ax.text(max(xs) + 0.3, max(ys) - 0.9, twist_note, ha="left", va="top", fontsize=9,
-                color="#444", family="monospace")
-    os.makedirs(OUT, exist_ok=True)
-    path = os.path.join(OUT, out_name)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+                color=MUTED, family="monospace")
+    return save(fig, os.path.join(OUT, out_name))
