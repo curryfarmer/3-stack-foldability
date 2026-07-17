@@ -94,22 +94,21 @@ class ResultsView:
 
     # ---- filter bar ----
     def _build_filter_bar(self):
+        """Only the post-fold-only dimensions live here (foldable + gate vector). Stacks/decomp are
+        pre-fold search shapers owned by the top bar (gui/app.py); duplicating them here as display
+        filters was confusing, so they were removed."""
         tk, ttk = self._tk, self._ttk
         bar = ttk.Frame(self.frame)
         bar.pack(side="top", fill="x", padx=4, pady=(4, 0))
 
-        self._stacks_vars = {2: tk.BooleanVar(value=True), 3: tk.BooleanVar(value=True)}
-        self._decomp_vars = {"2+1": tk.BooleanVar(value=True), "1+1+1": tk.BooleanVar(value=True)}
-        self._foldable_var = tk.StringVar(value="any")
+        # Default to foldable-only: a jam is a candidate that cleared exit+parity+reflection but whose
+        # end footprint does NOT coincide (twist-fail), so its schematic reads as "footprints don't
+        # match". Hiding them by default means every row on first view is a genuine, matching fold;
+        # flip this tristate to "any"/"no" to inspect the jams.
+        self._foldable_var = tk.StringVar(value="yes")
         self._vector_vars = {key: tk.StringVar(value="any") for _lbl, key in self._VECTOR_COMPONENTS}
 
-        ttk.Label(bar, text="stacks").pack(side="left")
-        for n, var in self._stacks_vars.items():
-            ttk.Checkbutton(bar, text=str(n), variable=var, command=self._render).pack(side="left")
-        ttk.Label(bar, text=" decomp").pack(side="left")
-        for name, var in self._decomp_vars.items():
-            ttk.Checkbutton(bar, text=name, variable=var, command=self._render).pack(side="left")
-        ttk.Label(bar, text=" foldable").pack(side="left")
+        ttk.Label(bar, text="foldable").pack(side="left")
         self._tristate_menu(bar, self._foldable_var, ("any", "yes", "no"))
 
         bar2 = ttk.Frame(self.frame)
@@ -127,13 +126,8 @@ class ResultsView:
         menu.pack(side="left")
 
     def _active_filters(self):
-        """Read the filter bar into foldfilter.apply kwargs. An all-checked or all-unchecked checkbox
-        group is treated as 'no constraint' so a row with an out-of-menu value (e.g. an n-stack) is
-        never silently hidden. I/O: () -> dict."""
-        def _group(varmap):
-            checked = {k for k, v in varmap.items() if v.get()}
-            return None if (not checked or checked == set(varmap)) else checked
-
+        """Read the filter bar into foldfilter.apply kwargs (foldable + gate vector only -- stacks/
+        decomp are shaped pre-fold in the top bar). I/O: () -> dict."""
         require_vector = {}
         for _lbl, key in self._VECTOR_COMPONENTS:
             val = self._vector_vars[key].get()
@@ -142,8 +136,7 @@ class ResultsView:
             elif val == "✗":
                 require_vector[key] = False
         foldable = {"any": None, "yes": True, "no": False}[self._foldable_var.get()]
-        return {"stacks": _group(self._stacks_vars), "decomps": _group(self._decomp_vars),
-                "require_vector": require_vector or None, "foldable": foldable}
+        return {"require_vector": require_vector or None, "foldable": foldable}
 
     # ---- populate ----
     def show(self, rows, gate_unproven):

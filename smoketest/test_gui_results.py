@@ -44,12 +44,41 @@ def test_results_view_populates(tk_root):
     rows, gate = results.parse_bundle(_BUNDLE)
     view = results.ResultsView(tk_root)
     view.show(rows, gate)
-    assert view.rows() == rows
+    assert view.rows() == rows                         # full set stored regardless of filter
     assert view.badge_visible is True
+    # Default filter is foldable-only (jams hidden): the tree shows exactly the foldable rows.
+    foldable = [r for r in rows if r["foldable"] is True]
+    assert len(view.tree.get_children()) == len(foldable)
+    view._foldable_var.set("any")                      # opening it up reveals every record
+    view._render()
     assert len(view.tree.get_children()) == 3
     # a proven-only bundle hides the badge
     view.show([r for r in rows if r["proven"]], False)
     assert view.badge_visible is False
+
+
+def test_results_view_filter_bar_dedup(tk_root):
+    """S12 removed the stacks/decomp DISPLAY filters (they are pre-fold search shapers in the top bar).
+    The filter bar now exposes only the post-fold-only dimensions: foldable + gate vector."""
+    view = results.ResultsView(tk_root)
+    assert not hasattr(view, "_stacks_vars")
+    assert not hasattr(view, "_decomp_vars")
+    assert set(view._active_filters().keys()) == {"require_vector", "foldable"}
+
+
+def test_foldable_filter_narrows_then_restores(tk_root):
+    """The foldable tristate still bites: 'no' shows exactly the not-foldable rows; 'any' shows all."""
+    rows, gate = results.parse_bundle(_BUNDLE)
+    view = results.ResultsView(tk_root)
+    view.show(rows, gate)
+    not_foldable = [r for r in rows if r["foldable"] is False]
+    assert not_foldable and len(not_foldable) < len(rows)   # fixture has a genuine mix
+    view._foldable_var.set("no")
+    view._render()
+    assert len(view.tree.get_children()) == len(not_foldable)
+    view._foldable_var.set("any")
+    view._render()
+    assert len(view.tree.get_children()) == len(rows)
 
 
 # tk_root is the shared, Tk-unavailable-skipping fixture from smoketest/conftest.py.

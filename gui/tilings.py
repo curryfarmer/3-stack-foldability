@@ -50,3 +50,9 @@ def dump_argv(tiling, m, n):
 def orientation(tiling):
     """The tiling's native y convention, 'down' (square) or 'up' (triangle). I/O: (str) -> str."""
     return TILINGS[tiling]["orientation"]
+
+
+def engine(tiling):
+    """Which fold engine backs `tiling`: 'square' (n-stack capable, any N>=2) or 'triangle' (3-stack /
+    1+1+1 only). Lets the GUI lock the stack count for triangle tilings. I/O: (str) -> str."""
+    return TILINGS[tiling]["engine"]

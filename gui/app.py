@@ -10,7 +10,9 @@ scripted end-to-end drive the whole app headlessly (Tk constructs without a disp
 """
 import os
 import queue
+import shutil
 import sys
+import tempfile
 import time
 
 from gui import canvas as canvas_mod
@@ -63,9 +65,13 @@ class App:
         self._tiling_var = tk.StringVar(value=tilings.names()[0])
         self._status = tk.StringVar(value="pick a tiling, draw a sheet, then Fold")
         # pre-fold search controls (shape what the engine computes -> faster)
-        self._stacks_vars = {2: tk.BooleanVar(value=False), 3: tk.BooleanVar(value=True)}
+        self._stacks = tk.IntVar(value=3)               # single stack count N (2-stack engine at 2,
+                                                        # footprint engine at N>=3; N=4 oracle-validated)
         self._decomp_vars = {"2+1": tk.BooleanVar(value=True), "1+1+1": tk.BooleanVar(value=True)}
         self._find_mode = tk.StringVar(value="all")     # "all" | "example" (find-first)
+        self._save_var = tk.BooleanVar(value=False)     # opt-in: persist results (else temp + discard)
+        self._save_dir = tk.StringVar(value=self.out_dir)
+        self._temp_dirs = []                            # unsaved-run scratch dirs to clean up
         self._preview_kind = tk.StringVar(value="")     # which image kind the viewer shows
         self._preview_row = None                        # the row currently in the viewer
         self._build()
@@ -91,19 +97,27 @@ class App:
                                       state="disabled")
         self._cancel_btn.pack(side="left", padx=(4, 0))
 
-        # Row 2: search-shaping options (fewer stacks/decomps + find-example = faster).
+        # Row 2: search-shaping options (single stack count N + decomp + find-example = faster).
         opts = ttk.Frame(self.root)
         opts.pack(side="top", fill="x", padx=6, pady=(2, 6))
         ttk.Label(opts, text="stacks").pack(side="left")
-        for n, var in self._stacks_vars.items():
-            ttk.Checkbutton(opts, text=str(n), variable=var).pack(side="left")
-        ttk.Label(opts, text=" decomp").pack(side="left")
-        for name, var in self._decomp_vars.items():
-            ttk.Checkbutton(opts, text=name, variable=var).pack(side="left")
+        self._stacks_spin = ttk.Spinbox(opts, from_=2, to=8, width=3, textvariable=self._stacks)
+        self._stacks_spin.pack(side="left")             # locked to 3 for triangle tilings (see pick)
+        self._decomp_frame = ttk.Frame(opts)            # rebuilt per-(engine, N)
+        self._decomp_frame.pack(side="left")
         ttk.Label(opts, text="  find:").pack(side="left")
         ttk.Radiobutton(opts, text="all", value="all", variable=self._find_mode).pack(side="left")
         ttk.Radiobutton(opts, text="example (fast)", value="example",
                         variable=self._find_mode).pack(side="left")
+        self._stacks.trace_add("write", lambda *a: self._on_stacks_change())
+        self._rebuild_decomp_row()
+
+        # Row 3: opt-in result storage (default off -> temp dir, discarded after viewing).
+        store = ttk.Frame(self.root)
+        store.pack(side="top", fill="x", padx=6, pady=(0, 6))
+        ttk.Checkbutton(store, text="Save results", variable=self._save_var).pack(side="left")
+        ttk.Entry(store, textvariable=self._save_dir, width=40).pack(side="left", padx=4)
+        ttk.Button(store, text="Browse…", command=self._on_browse).pack(side="left")
 
         body = ttk.Frame(self.root)
         body.pack(side="top", fill="both", expand=True)
@@ -133,6 +147,14 @@ class App:
         self._tiling_var.set(tiling)
         self._m.set(m)
         self._n.set(n)
+        # Triangle engines are 3-stack / 1+1+1 only -> lock N to 3 so the size gate + dispatch use the
+        # count the engine will actually run; square is n-stack capable (any N in 2..8).
+        if tilings.engine(tiling) == "triangle":
+            self._stacks.set(3)
+            self._stacks_spin.config(state="disabled")
+        else:
+            self._stacks_spin.config(state="normal")
+        self._rebuild_decomp_row()
         self.geometry = geometry_client.load(tiling, m, n)
         if self.canvas is not None:
             self.canvas.widget.destroy()
@@ -148,7 +170,8 @@ class App:
 
     @property
     def fold_enabled(self):
-        return self.canvas is not None and self.canvas.is_valid_sheet() and not self._pending
+        return (self.canvas is not None and self.canvas.is_valid_sheet()
+                and not self._pending and self._size_ok())
 
     @property
     def badge_visible(self):
@@ -164,11 +187,12 @@ class App:
         stacks = self._selected_stacks()
         decomps = self._selected_decomps()
         first = self._find_mode.get() == "example"
+        out_dir = self._resolve_out_dir()
         self._pending = True
         self._fold_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._set_status("folding %d cells%s…" % (len(cells), " (first example)" if first else ""))
-        self.dispatch.start(self.tiling, cells, out_dir=self.out_dir, stacks=stacks, decomps=decomps,
+        self.dispatch.start(self.tiling, cells, out_dir=out_dir, stacks=stacks, decomps=decomps,
                             first=first, timeout=timeout, on_done=self._result_q.put)
         self.root.after(150, self._poll_result)
         if wait:
@@ -176,16 +200,93 @@ class App:
                 self.root.update()
                 time.sleep(0.02)
 
+    def _stacks_n(self):
+        """The chosen stack count N (guards a mid-typed spinbox). I/O: () -> int."""
+        try:
+            return int(self._stacks.get())
+        except (self._tk.TclError, ValueError):
+            return 3
+
     def _selected_stacks(self):
-        """The checked stack counts, or None (search the grid-file default). I/O: () -> list[int]|None."""
-        chosen = sorted(n for n, v in self._stacks_vars.items() if v.get())
-        return chosen or None
+        """The single chosen stack count as a one-element list. I/O: () -> list[int]."""
+        return [self._stacks_n()]
 
     def _selected_decomps(self):
-        """A single decomp restriction ("2+1"/"1+1+1") when exactly one box is checked, else None
-        (search both -- the engine default). I/O: () -> str | None."""
+        """A single decomp restriction ("2+1"/"1+1+1") for N==3 when exactly one box is checked, else
+        None. 2+1 is only defined for the square engine at N==3; the triangle engine is always 1+1+1
+        (ignores decomps); N!=3 always searches the engine default (all-singleton). I/O: () -> str | None."""
+        if self._engine() == "triangle" or self._stacks_n() != 3:
+            return None
         chosen = [name for name, v in self._decomp_vars.items() if v.get()]
         return chosen[0] if len(chosen) == 1 else None
+
+    def _engine(self):
+        """The fold engine backing the current tiling ('square' | 'triangle'), defaulting to the
+        dropdown selection before any grid is loaded. I/O: () -> str."""
+        return tilings.engine(self.tiling or self._tiling_var.get())
+
+    def _rebuild_decomp_row(self):
+        """Populate the decomp frame for the current (engine, N): a static 1+1+1 label for triangle
+        (engine is 1+1+1-only); for square: nothing at N==2 (no decomposition), both 2+1/1+1+1
+        checkboxes at N==3, a static 1+…+1 label at N>=4. I/O: () -> None."""
+        ttk = self._ttk
+        for child in self._decomp_frame.winfo_children():
+            child.destroy()
+        if self._engine() == "triangle":
+            ttk.Label(self._decomp_frame, text=" decomp 1+1+1").pack(side="left")
+            return
+        n = self._stacks_n()
+        if n == 2:
+            return
+        ttk.Label(self._decomp_frame, text=" decomp").pack(side="left")
+        if n == 3:
+            for name, var in self._decomp_vars.items():
+                ttk.Checkbutton(self._decomp_frame, text=name, variable=var).pack(side="left")
+        else:
+            ttk.Label(self._decomp_frame, text="1+…+1").pack(side="left")
+
+    def _on_stacks_change(self):
+        """React to a new stack count: rebuild the decomp row + re-evaluate the size gate. I/O: () -> None."""
+        self._rebuild_decomp_row()
+        self._refresh_fold_btn()
+
+    def _on_browse(self):
+        """Pick a save directory (turns Save on). I/O: () -> None."""
+        from tkinter import filedialog
+        d = filedialog.askdirectory(initialdir=self._save_dir.get() or os.getcwd())
+        if d:
+            self._save_dir.set(d)
+            self._save_var.set(True)
+
+    def _size_ok(self):
+        """The drawn sheet has a foldable cell count for N: a positive multiple of N (== the engine's
+        cells % panels == 0 and K >= 1 gate). I/O: () -> bool."""
+        if self.canvas is None:
+            return False
+        n = self._stacks_n()
+        c = len(self.canvas.selected_cells())
+        return c >= n and c % n == 0
+
+    def _resolve_out_dir(self):
+        """Where THIS fold writes: the chosen dir when Save is on, else a fresh temp dir tracked for
+        cleanup. Cleans any prior unsaved run first. I/O: () -> str."""
+        self._cleanup_temp_dirs()
+        if self._save_var.get():
+            return os.path.abspath(self._save_dir.get().strip() or self.out_dir)
+        d = tempfile.mkdtemp(prefix="foldgui_")
+        self._temp_dirs.append(d)
+        return d
+
+    def _cleanup_temp_dirs(self):
+        """Remove every tracked unsaved-run scratch dir. Never touches a user-chosen dir. I/O: () -> None."""
+        for d in self._temp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+        self._temp_dirs = []
+
+    def close(self):
+        """Discard unsaved scratch dirs, then destroy the window. I/O: () -> None."""
+        self._cleanup_temp_dirs()
+        self.root.destroy()
 
     # ---- internals ----
     def _poll_result(self):
@@ -200,8 +301,9 @@ class App:
             rows, gate = results_mod.parse_bundle(result.bundle_path)
             self.results.show(rows, gate)
             self._on_row(None)                          # clear any stale preview from a prior fold
-            self._set_status("done: %d record(s)%s"
-                             % (len(rows), " — unproven" if gate else ""))
+            self._set_status("done: %d record(s)%s%s"
+                             % (len(rows), " — unproven" if gate else "",
+                                "" if self._save_var.get() else " — not saved (temporary)"))
         else:
             self._set_status("no fold (rc=%s): %s"
                              % (result.returncode, _failure_reason(result.output)))
@@ -272,6 +374,18 @@ class App:
 
     def _refresh_fold_btn(self):
         self._fold_btn.config(state="normal" if self.fold_enabled else "disabled")
+        self._size_hint()
+
+    def _size_hint(self):
+        """When a connected sheet has the wrong cell count for N, say so (front-runs the engine's
+        divisibility reject with instant feedback). I/O: () -> None."""
+        if self.canvas is None or self._pending or not self.canvas.is_valid_sheet():
+            return
+        if not self._size_ok():
+            n = self._stacks_n()
+            c = len(self.canvas.selected_cells())
+            mults = ", ".join(str(n * k) for k in (1, 2, 3))
+            self._set_status("N=%d needs a sheet of %s, … cells (got %d)" % (n, mults, c))
 
     def _set_status(self, msg):
         self._status.set(msg)
@@ -286,7 +400,8 @@ def main(argv=None):
 
     import tkinter as tk
     root = tk.Tk()
-    App(root, out_dir=args.out)
+    app = App(root, out_dir=args.out)
+    root.protocol("WM_DELETE_WINDOW", app.close)
     root.mainloop()
     return 0
 

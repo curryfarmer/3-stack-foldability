@@ -28,12 +28,15 @@ python -m venv .venv
 
 This installs four console scripts:
 
-| command        | package  | does                                                        |
-|-----------------|----------|--------------------------------------------------------------|
-| `sq-generate`   | square   | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
-| `sq-render`     | square   | re-render an existing `out/<uid>/<uid>.json` record           |
-| `tri-generate`  | triangle | search one tiling/decomposition/K for a closing fold          |
-| `tri-render`    | triangle | re-render an existing triangle record                          |
+| command        | package  | search scope                                    | does                                                        |
+|-----------------|----------|-------------------------------------------------|--------------------------------------------------------------|
+| `sq-generate`   | square   | full — all footprints × decomps on the `m×n` grid | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
+| `sq-render`     | square   | none — redraws a saved record                    | re-render an existing `out/<uid>/<uid>.json` record           |
+| `tri-generate`  | triangle | partial — one (tiling, decomp, K) per invocation | search one tiling/decomposition/K for a closing fold          |
+| `tri-render`    | triangle | none — redraws a saved record                    | re-render an existing triangle record                          |
+
+Passing `--first` to either `sq-generate` or `tri-generate` short-circuits the search at the first
+foldable example (find-first mode) instead of enumerating everything.
 
 ## Output format
 
@@ -105,6 +108,16 @@ The GUI needs **Tk** — bundled with the python.org and Windows builds; on some
 4. **Fold.** Results fill the table on the right; **Cancel** kills a run in flight.
 5. **Filter + view.** The filter bar narrows the rows live; click a row to preview its fold image
    (choose which image with the kind buttons, or read a "no image for this record" note).
+
+### Where results are stored
+
+A successful fold writes a bundle to `<out>/<gridUid>/bundle.json`, plus a per-record
+`<out>/<uid>/<uid>.json` with its `schematic_<uid>.png` / `twist_<uid>.png` images (triangle also
+adds `<uid>_analysis.json`). In the window a **Save results** checkbox controls persistence: when it
+is OFF (the default) the fold is written to a temporary directory and discarded once you have viewed
+it; when ON, results are written to the folder shown next to it (default `./out`, changeable via
+**Browse…**). The headless `gui.cli --out` and the launch-time `gui.app --out DIR` set the location
+directly.
 
 ### Single example vs. every fold
 

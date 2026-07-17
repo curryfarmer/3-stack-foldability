@@ -41,11 +41,16 @@ def test_pick_select_fold_gate(app):
     assert app.fold_enabled is False
     app.select([])                             # empty
     assert app.fold_enabled is False
-    # a triangle tiling also constructs its canvas + selects
+    # A triangle tiling constructs its canvas + locks the stack count to 3 (triangle engines are
+    # 3-stack / 1+1+1 only). A single cell is below the fold minimum; the full connected block clears
+    # the size gate iff its cell count is a multiple of 3 -- the same divisibility the engine enforces.
     app.pick("equilateral", 2, 2)
     assert len(app.geometry.ids) == 8
+    assert app._stacks_n() == 3
     app.select([0])
-    assert app.fold_enabled is True
+    assert app.fold_enabled is False
+    app.select(list(range(len(app.geometry.ids))))
+    assert app.fold_enabled is (len(app.geometry.ids) % 3 == 0)
 
 
 @pytest.mark.slow
