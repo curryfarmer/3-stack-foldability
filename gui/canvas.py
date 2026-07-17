@@ -44,6 +44,7 @@ class CanvasView:
         self.tiling = tiling
         self.on_change = on_change
         self.selected = set()            # tile indices into geometry.ids / .polys
+        self._stroke = None              # active paint stroke: {"mode": "add"|"erase", "touched": set}
 
         self.fig = Figure(figsize=(5.5, 5.5))
         self.ax = self.fig.add_subplot(111)
@@ -52,7 +53,14 @@ class CanvasView:
 
         self._patches = []
         self._draw_all(tilings.orientation(tiling))
-        self.canvas.mpl_connect("button_press_event", self._on_click)
+        # Paint-select: press starts a stroke (mode from the start tile — empty->add, selected->erase,
+        # right-button always erases), motion extends it over every tile the cursor crosses, release
+        # ends it. A press+release with no motion touches exactly one tile, so a plain click still
+        # toggles. Live feedback paints each tile as it is touched; the full validity recolor (+ the
+        # on_change callback) fires once at release, not per motion event.
+        self.canvas.mpl_connect("button_press_event", self._on_press)
+        self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+        self.canvas.mpl_connect("button_release_event", self._on_release)
         self.canvas.draw()
 
     # ---- drawing ----
@@ -91,13 +99,63 @@ class CanvasView:
         if self.on_change:
             self.on_change()
 
-    # ---- interaction ----
-    def _on_click(self, event):
+    # ---- interaction (paint-select) ----
+    def _event_idx(self, event):
+        """The tile under a mouse event, or None (off-axes / off-tile). I/O: (event) -> int | None."""
         if event.inaxes is not self.ax or event.xdata is None:
+            return None
+        return hit_test((event.xdata, event.ydata), self.geometry.polys)
+
+    def _on_press(self, event):
+        idx = self._event_idx(event)
+        if idx is None:
             return
-        idx = hit_test((event.xdata, event.ydata), self.geometry.polys)
+        # right button (3) always erases; otherwise the start tile's state picks the whole stroke's
+        # mode, so dragging never flip-flops tile-by-tile.
+        mode = "erase" if (event.button == 3 or idx in self.selected) else "add"
+        self._stroke = {"mode": mode, "touched": set()}
+        self._apply_stroke(idx)
+
+    def _on_motion(self, event):
+        if self._stroke is None:
+            return
+        idx = self._event_idx(event)
         if idx is not None:
-            self.toggle(idx)
+            self._apply_stroke(idx)
+
+    def _on_release(self, _event):
+        if self._stroke is None:
+            return
+        self._stroke = None
+        self._recolor()                  # full validity recolor + one on_change for the whole stroke
+
+    def _apply_stroke(self, idx):
+        """Apply the active stroke's mode to tile `idx` once, painting it immediately. I/O:
+        (int) -> None."""
+        touched = self._stroke["touched"]
+        if idx in touched:
+            return
+        touched.add(idx)
+        if self._stroke["mode"] == "add":
+            self.selected.add(idx)
+            self._paint_patch(idx, True)
+        else:
+            self.selected.discard(idx)
+            self._paint_patch(idx, False)
+        self.canvas.draw_idle()
+
+    def _paint_patch(self, idx, on):
+        """Provisional per-tile paint during a stroke (no BFS validity check -- _recolor at release
+        settles the valid/invalid edge color). I/O: (int, bool) -> None."""
+        patch = self._patches[idx]
+        if on:
+            patch.set_facecolor(self._cfg.SELECTED_FILL)
+            patch.set_edgecolor(self._cfg.SELECTED_EDGE)
+            patch.set_linewidth(2.2)
+        else:
+            patch.set_facecolor(self._cfg.CELL_FILL)
+            patch.set_edgecolor(self._cfg.GRID_EDGE)
+            patch.set_linewidth(0.8)
 
     def toggle(self, idx):
         """Flip tile `idx`'s selection and recolor. I/O: (int) -> None."""

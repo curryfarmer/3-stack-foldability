@@ -54,14 +54,19 @@ def write_grid_file(tiling, cells, stacks, path):
     return path
 
 
-def build_argv(grid_file, out_dir, stacks=None, jobs=None, timeout=None):
+def build_argv(grid_file, out_dir, stacks=None, jobs=None, timeout=None, first=False, decomps=None):
     """The fold_grid.py command (interpreter + script + args). out_dir should be absolute so the bundle
-    location is CWD-independent. I/O: (...) -> list[str]."""
+    location is CWD-independent. `first` -> find-example mode; `decomps` -> restrict the square
+    decompositions searched (e.g. "2+1"). I/O: (...) -> list[str]."""
     argv = [sys.executable, "-u", _FOLD_GRID, grid_file, "--out", out_dir]
     if stacks:
         argv += ["--stacks", ",".join(str(s) for s in stacks)]
     if jobs:
         argv += ["--jobs", str(jobs)]
+    if first:
+        argv += ["--first"]
+    if decomps:
+        argv += ["--decomps", decomps]
     if timeout is not None:
         argv += ["--timeout", str(timeout)]
     return argv
@@ -73,16 +78,18 @@ def parse_grid_uid(text):
     return m.group(1) if m else None
 
 
-def fold_once(tiling, cells, *, out_dir, stacks=None, jobs=None, timeout=None,
-              on_line=None, on_proc=None, is_cancelled=None):
+def fold_once(tiling, cells, *, out_dir, stacks=None, jobs=None, timeout=None, first=False,
+              decomps=None, on_line=None, on_proc=None, is_cancelled=None):
     """Run one fold_grid job to completion, orphan-free, tailing output live to `on_line`. Writes the
-    grid-file into `out_dir`. `on_proc(proc)` (if given) receives the Popen so a caller can reap it on
+    grid-file into `out_dir`. `first` -> find-example mode; `decomps` -> restrict the square
+    decompositions searched. `on_proc(proc)` (if given) receives the Popen so a caller can reap it on
     cancel; `is_cancelled()` (if given) is polled to kill early. Returns a DispatchResult; bundle_path
     is set only when rc==0 and the bundle exists. I/O: (...) -> DispatchResult."""
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     grid_file = write_grid_file(tiling, cells, stacks, os.path.join(out_dir, "_grid.json"))
-    argv = build_argv(grid_file, out_dir, stacks=stacks, jobs=jobs, timeout=timeout)
+    argv = build_argv(grid_file, out_dir, stacks=stacks, jobs=jobs, timeout=timeout,
+                      first=first, decomps=decomps)
 
     fd, out_path = tempfile.mkstemp(prefix="gui_dispatch_", suffix=".out")
     os.close(fd)
@@ -140,16 +147,17 @@ class Dispatch:
         self._cancelled = False
         self._thread = None
 
-    def start(self, tiling, cells, *, out_dir, stacks=None, jobs=None, timeout=None,
-              on_line=None, on_done):
-        """Launch a background fold. on_done(DispatchResult) runs on the WORKER thread -- the app must
+    def start(self, tiling, cells, *, out_dir, stacks=None, jobs=None, timeout=None, first=False,
+              decomps=None, on_line=None, on_done):
+        """Launch a background fold. `first` -> find-example mode; `decomps` -> restrict the square
+        decompositions searched. on_done(DispatchResult) runs on the WORKER thread -- the app must
         marshal it to the UI thread (root.after). I/O: (...) -> None."""
         self._cancelled = False
         self._proc = None
 
         def _worker():
             result = fold_once(tiling, cells, out_dir=out_dir, stacks=stacks, jobs=jobs,
-                               timeout=timeout, on_line=on_line,
+                               timeout=timeout, first=first, decomps=decomps, on_line=on_line,
                                on_proc=self._set_proc, is_cancelled=lambda: self._cancelled)
             on_done(result)
 

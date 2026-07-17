@@ -293,6 +293,10 @@ def run(opts):
     ctx["hcCount"] = len(circuits)
 
     dedup = opts.get("dedup", True)
+    # first: stop after the first FOLDABLE circuit (the GUI "find an example" mode). The Hamiltonian
+    # enumeration above still runs in full (that is the RSPA engine's cost), but the per-circuit
+    # reflection/twist evaluation below short-circuits, so the returned bundle carries one example.
+    first = opts.get("first")
     seen = set()
     solutions = []
     next_id = 1
@@ -322,4 +326,6 @@ def run(opts):
             "twistValue": tw,
         })
         next_id += 1
+        if first and foldable:
+            break
     return solutions, ctx, None

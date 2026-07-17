@@ -12,7 +12,12 @@ thumbnail picker prefers a known-visual key but falls back to whatever the recor
 import json
 import os
 
-_THUMB_ORDER = ("foldsheet", "overlay", "twist", "reflect")   # preferred preview, best first
+from gui import foldfilter
+
+# Preferred preview image, best-first. Covers BOTH engines: triangle emits foldsheet/overlay/reflect,
+# square emits `schematic` (its primary fold image) -- omitting schematic used to make a square fold
+# preview default to the less-intuitive twist diagram (or nothing).
+_THUMB_ORDER = ("foldsheet", "schematic", "overlay", "twist", "reflect")
 
 
 def _pick_thumb(bundle_dir, rec_dir, files):
@@ -28,8 +33,9 @@ def _pick_thumb(bundle_dir, rec_dir, files):
 
 def parse_bundle(bundle_path):
     """Read a fold-bundle/1 into (rows, gate_unproven). Each row = {uid, stacks, foldable, proven,
-    verdict, dir, files, thumb}; thumb is resolved against the bundle's own directory. I/O:
-    (str) -> (list[dict], bool)."""
+    verdict, decomp, vector, dir, files, thumb}; decomp/vector are the normalized filter keys
+    fold_grid stamps (decomp None + vector None for records lacking them); thumb is resolved against
+    the bundle's own directory. I/O: (str) -> (list[dict], bool)."""
     with open(bundle_path, encoding="utf-8") as f:
         bundle = json.load(f)
     bundle_dir = os.path.dirname(os.path.abspath(bundle_path))
@@ -43,6 +49,8 @@ def parse_bundle(bundle_path):
             "foldable": rec.get("foldable"),
             "proven": rec.get("proven"),
             "verdict": rec.get("verdict"),
+            "decomp": rec.get("decomp"),        # normalized "2+1"/"1+1+1"/None (fold_grid enriches)
+            "vector": rec.get("vector"),        # per-gate dict / None -> foldability-vector filter
             "dir": rec_dir,
             "files": files,
             "thumb": _pick_thumb(bundle_dir, rec_dir, files),
@@ -51,39 +59,120 @@ def parse_bundle(bundle_path):
 
 
 class ResultsView:
-    """A ttk verdict table + unproven badge. Lazy-imports tkinter so parse_bundle stays display-free."""
+    """A ttk verdict table + a live filter bar + unproven badge. Lazy-imports tkinter so parse_bundle
+    stays display-free. The table shows the subset of the last `show(rows)` matching the filter bar; a
+    row click hands the ORIGINAL row dict back to `on_select`. Filtering is delegated to the pure
+    gui.foldfilter (shared with the headless CLI), so the two front-ends filter identically."""
 
-    _COLS = ("uid", "stacks", "foldable", "proven")
+    _COLS = ("uid", "stacks", "decomp", "foldable", "proven", "gates")
+    _COL_WIDTH = {"uid": 100, "stacks": 50, "decomp": 60, "foldable": 60, "proven": 55, "gates": 150}
+    _VECTOR_COMPONENTS = (("exit", "exitFootprint"), ("parity", "parity"),
+                          ("refl", "reflection"), ("twist", "twist"))
 
     def __init__(self, parent, on_select=None):
-        import tkinter as tk                    # noqa: F401  (lazy: keep parse-only imports light)
+        import tkinter as tk
         from tkinter import ttk
 
+        self._tk, self._ttk = tk, ttk
         self._on_select = on_select
-        self._rows = []
+        self._rows = []          # every row from the last show()
+        self._shown = []         # the filtered subset currently in the tree (iid = index here)
         self.badge_visible = False
 
         self.frame = ttk.Frame(parent)
+        self._build_filter_bar()
+        self._count = ttk.Label(self.frame, text="")
+        self._count.pack(anchor="w", padx=4)
         self._badge = ttk.Label(self.frame, text="", foreground="#c0392b")
-        self._badge.pack(anchor="w", padx=4, pady=(4, 0))
+        self._badge.pack(anchor="w", padx=4, pady=(2, 0))
         self.tree = ttk.Treeview(self.frame, columns=self._COLS, show="headings", height=8)
         for c in self._COLS:
             self.tree.heading(c, text=c)
-            self.tree.column(c, width=110, anchor="w")
+            self.tree.column(c, width=self._COL_WIDTH[c], anchor="w")
         self.tree.pack(fill="both", expand=True, padx=4, pady=4)
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
 
+    # ---- filter bar ----
+    def _build_filter_bar(self):
+        tk, ttk = self._tk, self._ttk
+        bar = ttk.Frame(self.frame)
+        bar.pack(side="top", fill="x", padx=4, pady=(4, 0))
+
+        self._stacks_vars = {2: tk.BooleanVar(value=True), 3: tk.BooleanVar(value=True)}
+        self._decomp_vars = {"2+1": tk.BooleanVar(value=True), "1+1+1": tk.BooleanVar(value=True)}
+        self._foldable_var = tk.StringVar(value="any")
+        self._vector_vars = {key: tk.StringVar(value="any") for _lbl, key in self._VECTOR_COMPONENTS}
+
+        ttk.Label(bar, text="stacks").pack(side="left")
+        for n, var in self._stacks_vars.items():
+            ttk.Checkbutton(bar, text=str(n), variable=var, command=self._render).pack(side="left")
+        ttk.Label(bar, text=" decomp").pack(side="left")
+        for name, var in self._decomp_vars.items():
+            ttk.Checkbutton(bar, text=name, variable=var, command=self._render).pack(side="left")
+        ttk.Label(bar, text=" foldable").pack(side="left")
+        self._tristate_menu(bar, self._foldable_var, ("any", "yes", "no"))
+
+        bar2 = ttk.Frame(self.frame)
+        bar2.pack(side="top", fill="x", padx=4)
+        ttk.Label(bar2, text="gate").pack(side="left")
+        for lbl, key in self._VECTOR_COMPONENTS:
+            ttk.Label(bar2, text=" %s" % lbl).pack(side="left")
+            self._tristate_menu(bar2, self._vector_vars[key], ("any", "✓", "✗"))
+
+    def _tristate_menu(self, parent, var, values):
+        """A compact ttk.OptionMenu bound to `var` that re-renders on any pick. I/O: (widget, StringVar,
+        tuple[str]) -> None."""
+        ttk = self._ttk
+        menu = ttk.OptionMenu(parent, var, var.get(), *values, command=lambda _v: self._render())
+        menu.pack(side="left")
+
+    def _active_filters(self):
+        """Read the filter bar into foldfilter.apply kwargs. An all-checked or all-unchecked checkbox
+        group is treated as 'no constraint' so a row with an out-of-menu value (e.g. an n-stack) is
+        never silently hidden. I/O: () -> dict."""
+        def _group(varmap):
+            checked = {k for k, v in varmap.items() if v.get()}
+            return None if (not checked or checked == set(varmap)) else checked
+
+        require_vector = {}
+        for _lbl, key in self._VECTOR_COMPONENTS:
+            val = self._vector_vars[key].get()
+            if val == "✓":
+                require_vector[key] = True
+            elif val == "✗":
+                require_vector[key] = False
+        foldable = {"any": None, "yes": True, "no": False}[self._foldable_var.get()]
+        return {"stacks": _group(self._stacks_vars), "decomps": _group(self._decomp_vars),
+                "require_vector": require_vector or None, "foldable": foldable}
+
+    # ---- populate ----
     def show(self, rows, gate_unproven):
-        """Populate the table + badge. I/O: (list[dict], bool) -> None."""
+        """Store the full row set + badge, then render through the current filter. I/O:
+        (list[dict], bool) -> None."""
         self._rows = rows
-        self.tree.delete(*self.tree.get_children())
-        for i, r in enumerate(rows):
-            self.tree.insert("", "end", iid=str(i),
-                             values=(r["uid"], r["stacks"], r["foldable"], r["proven"]))
         self.badge_visible = bool(gate_unproven)
         self._badge.config(
             text="unproven — exploratory heuristic; physical fold is ground truth"
             if self.badge_visible else "")
+        self._render()
+
+    def _render(self):
+        """Re-filter self._rows through the bar and repopulate the tree. I/O: () -> None."""
+        self._shown = foldfilter.apply(self._rows, **self._active_filters())
+        self.tree.delete(*self.tree.get_children())
+        for i, r in enumerate(self._shown):
+            self.tree.insert("", "end", iid=str(i), values=(
+                r.get("uid"), r.get("stacks"), r.get("decomp") or "—",
+                r.get("foldable"), r.get("proven"), foldfilter.vector_summary(r.get("vector"))))
+        total = len(self._rows)
+        shown = len(self._shown)
+        if total == 0:
+            self._count.config(text="0 records — nothing folded")
+        elif shown == total:
+            self._count.config(text="%d record(s) — click one to preview" % total)
+        else:
+            self._count.config(text="%d of %d record(s) (filtered) — click one to preview"
+                               % (shown, total))
 
     def rows(self):
         return self._rows
@@ -91,4 +180,4 @@ class ResultsView:
     def _on_tree_select(self, _evt):
         sel = self.tree.selection()
         if sel and self._on_select:
-            self._on_select(self._rows[int(sel[0])])
+            self._on_select(self._shown[int(sel[0])])

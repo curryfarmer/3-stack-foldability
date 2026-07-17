@@ -648,6 +648,12 @@ def run(opts, on_solution=None, is_cancelled=None):
         return solutions, ctx, "K < 1 (empty grid)"
 
     store_all = opts.get("storeAll", False)
+    # first: stop at the FIRST foldable solution (the GUI "find an example" mode). It piggybacks on the
+    # existing ctx["cancelled"] unwind (checked at every DFS level + both outer loops), so the whole
+    # search tears down promptly once one foldable candidate is admitted. Forces the serial path below
+    # (a foldable-triggered early stop can't cross the process boundary cleanly). Meaningless with
+    # store_all (which deliberately keeps every candidate), so the two are never combined upstream.
+    first = opts.get("first") and not store_all
     footprints = enumerate_footprints(m, n, opts)
     ctx["footprintsTotal"] = len(footprints)
 
@@ -657,7 +663,7 @@ def run(opts, on_solution=None, is_cancelled=None):
     # Need >=2 footprints to split; worker count is capped at the chunk count, so having
     # fewer footprints than jobs just uses fewer workers (corner grids have only 6).
     jobs = _resolve_jobs(opts)
-    if (jobs > 1 and len(footprints) >= 2
+    if (jobs > 1 and len(footprints) >= 2 and not first
             and on_solution is None and is_cancelled is None):
         err = _search_parallel(m, n, K, opts, footprints, jobs, ctx, solutions, dedup, next_id)
         return solutions, ctx, err
@@ -681,6 +687,10 @@ def run(opts, on_solution=None, is_cancelled=None):
                     ctx["reflPass"] += 1
                 if sol is not None:
                     _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id)
+                    # find-example: the first foldable (twist-decided FOLD) admission stops the search
+                    # via the shared cancellation flag (unwound at every DFS level + the outer loops).
+                    if first and sol["verdict"]["twist"] is True:
+                        ctx["cancelled"] = True
 
             search_decomposition(m, n, K, decomp, on_candidate, ctx, sheet)
             if is_cancelled and is_cancelled():

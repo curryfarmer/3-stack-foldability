@@ -62,6 +62,9 @@ def parse_args(argv):
                         "gate-survivors")
     p.add_argument("--jobs", type=int, default=None,
                    help="parallel worker processes (default 1; env FOLD_JOBS as fallback)")
+    p.add_argument("--first", action="store_true",
+                   help="stop at the FIRST foldable example instead of enumerating all (find-example "
+                        "mode). Forces the serial 3-stack path (early stop can't cross workers).")
     p.add_argument("--no-dedup", action="store_true",
                    help="disable canonical dedup (D4 on a square sheet, D2 otherwise)")
     p.add_argument("--force", action="store_true",
@@ -150,7 +153,7 @@ def build_opts(args):
         if ignored:
             print(f"warning: --stacks 2 ignores {', '.join(ignored)} (the RSPA 2-stack engine has no "
                   f"footprint/decomposition/store-all/parallel phase)", file=sys.stderr)
-        opts = {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup}
+        opts = {"m": m, "n": n, "stacks": 2, "dedup": not args.no_dedup, "first": args.first}
         if sheet is not None:
             opts["sheet"] = sheet
         return opts
@@ -176,6 +179,7 @@ def build_opts(args):
     opts["decomps"] = decomps
     opts["stacks"] = 3
     opts["storeAll"] = args.store_all
+    opts["first"] = args.first
     if sheet is not None:
         opts["sheet"] = sheet
     return opts

@@ -214,6 +214,29 @@ def _record_foldable(rec):
     return None
 
 
+# The two engines name + spell the decomposition differently (square `decomposition` "2+1"/"1+1+1";
+# triangle `decomp` "2plus1"/"1plus1plus1"), so normalize to ONE vocabulary the filters key on.
+_DECOMP_NORMAL = {"2+1": "2+1", "1+1+1": "1+1+1", "2plus1": "2+1", "1plus1plus1": "1+1+1"}
+
+
+def _record_decomp(rec):
+    """Normalized decomposition of a written record: "2+1" / "1+1+1" (n-stack all-singleton keys pass
+    through verbatim) / None. Square 2-stack has no decomposition; triangle via this orchestrator is
+    always 1+1+1. I/O: (dict) -> str | None."""
+    raw = rec.get("decomposition", rec.get("decomp"))
+    if raw is None:
+        return None
+    return _DECOMP_NORMAL.get(raw, raw)
+
+
+def _record_vector(rec):
+    """The foldability-vector (per-gate pass/fail) a record self-reports, or None when it carries no
+    structured vector. Square 3/n-stack + 2-stack store a `verdict` DICT (the gate components); triangle
+    stores a plain verdict STRING, so it has no vector here. I/O: (dict) -> dict | None."""
+    v = rec.get("verdict")
+    return v if isinstance(v, dict) else None
+
+
 def _collect_records(workdir):
     """Every out/<uid>/<uid>.json under workdir, as (uid, rec, files) — files lists the bundle's
     on-disk artifacts (json + any PNGs) relative to <uid>/."""
@@ -240,14 +263,20 @@ def _collect_records(workdir):
 
 
 # --------------------------------------------------------------------------- orchestration
-def _dispatch_square(grid_file, workdir, resolved, jobs, timeout):
-    """One square subprocess per resolved N. Returns the `configs` list (per-N status/reason). Raises
-    RuntimeError on a square exit 2 (usage / malformed grid-file) -> the caller aborts."""
+def _dispatch_square(grid_file, workdir, resolved, jobs, timeout, first=False, decomps=None):
+    """One square subprocess per resolved N. `first` -> stop at the first foldable example; `decomps`
+    -> restrict the searched decompositions (e.g. "2+1"), both forwarded to the engine. Returns the
+    `configs` list (per-N status/reason). Raises RuntimeError on a square exit 2 (usage / malformed
+    grid-file) -> the caller aborts."""
     configs = []
     for n in resolved:
         argv = [_SQUARE_GEN, "--grid-file", grid_file, "--stacks", str(n), "--out", workdir]
         if jobs is not None:
             argv += ["--jobs", str(jobs)]
+        if first:
+            argv += ["--first"]
+        if decomps:
+            argv += ["--decomps", decomps]
         print("\n=== square --stacks %d ===" % n, flush=True)
         rc, out = _run_worker(argv, "sq%d" % n, timeout)
         if rc == 0:
@@ -259,10 +288,13 @@ def _dispatch_square(grid_file, workdir, resolved, jobs, timeout):
     return configs
 
 
-def _dispatch_triangle(grid_file, tiling, workdir, timeout):
-    """One triangle subprocess (1+1+1, --render). Returns a one-entry `configs` list. Raises
-    RuntimeError on any non-zero exit (a bad region traceback) -> the caller aborts."""
+def _dispatch_triangle(grid_file, tiling, workdir, timeout, first=False):
+    """One triangle subprocess (1+1+1, --render). `first` -> stop at the first closing fold. Returns a
+    one-entry `configs` list. Raises RuntimeError on any non-zero exit (a bad region traceback) -> the
+    caller aborts."""
     argv = [_TRIANGLE_GEN, "--grid-file", grid_file, "--render", "--out", workdir]
+    if first:
+        argv += ["--first"]
     print("\n=== triangle %s (1+1+1) ===" % tiling, flush=True)
     rc, _out = _run_worker(argv, "tri", timeout)
     if rc != 0:
@@ -291,6 +323,8 @@ def _build_bundle(grid_uid, tiling, sheet_cells, resolved, configs, workdir):
             "proven": _record_proven(rec),
             "foldable": _record_foldable(rec),
             "verdict": rec.get("verdict"),
+            "decomp": _record_decomp(rec),      # normalized "2+1"/"1+1+1"/None -> the decomp filter
+            "vector": _record_vector(rec),      # per-gate dict / None -> the foldability-vector filter
             "dir": uid,
             "files": files,
         })
@@ -331,6 +365,12 @@ def main(argv=None):
     ap.add_argument("--out", default="out", help="output root (bundle lands in <out>/<gridUid>/)")
     ap.add_argument("--jobs", type=int, default=None,
                     help="parallel worker processes forwarded to the square engine (3/n-stack search)")
+    ap.add_argument("--first", action="store_true",
+                    help="stop at the FIRST foldable example instead of enumerating all (find-example "
+                         "mode) -- forwarded to both engines. Much faster when you only want one fold.")
+    ap.add_argument("--decomps", default=None,
+                    help="restrict the SQUARE decompositions searched, e.g. '2+1' or '1+1+1' (default: "
+                         "both). Ignored for triangle (1+1+1 only). Searching fewer decomps is faster.")
     ap.add_argument("--timeout", type=float, default=None,
                     help="per-engine-subprocess wall-clock budget in seconds (default: unbounded). On "
                          "timeout the whole process tree is killtree-reaped.")
@@ -358,9 +398,10 @@ def main(argv=None):
     grid_abs = os.path.abspath(args.grid_file)
     try:
         if tiling == SQUARE_TILING:
-            configs = _dispatch_square(grid_abs, workdir, resolved, args.jobs, args.timeout)
+            configs = _dispatch_square(grid_abs, workdir, resolved, args.jobs, args.timeout,
+                                       first=args.first, decomps=args.decomps)
         else:
-            configs = _dispatch_triangle(grid_abs, tiling, workdir, args.timeout)
+            configs = _dispatch_triangle(grid_abs, tiling, workdir, args.timeout, first=args.first)
     except RuntimeError as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 1
