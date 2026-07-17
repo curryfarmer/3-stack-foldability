@@ -197,29 +197,37 @@ def _offset_seg(p, q, off):
             (q[0] + perp[0] * off, q[1] + perp[1] * off))
 
 
-def _side_sign(seed, cell):
-    """+1 / -1: which side of the crease centerline the base `cell`'s center lies on, measured along
-    the crease perpendicular. Places each chain's seed arrow on ITS OWN side of the crease (the side
-    of the chain it belongs to) instead of an index-based split that could land it on the neighbour's
-    side. I/O: (seed seg, (x,y) cell) -> float."""
-    (px, py), (qx, qy) = seed
+def _seg_perp_side(seg, pt):
+    """+1 / -1: which side of `seg`'s centerline the point `pt` lies on, measured along the segment
+    perpendicular. I/O: (seg=((x0,y0),(x1,y1)), pt=(x,y)) -> float."""
+    (px, py), (qx, qy) = seg
     perp = (-(qy - py), qx - px)
     mx, my = (px + qx) / 2, (py + qy) / 2
-    dot = (cell[0] + 0.5 - mx) * perp[0] + (cell[1] + 0.5 - my) * perp[1]
+    dot = (pt[0] - mx) * perp[0] + (pt[1] - my) * perp[1]
     return 1.0 if dot >= 0 else -1.0
 
 
-def draw_reflection(ax, seed, segs, passed, cells=None):
+def _side_sign(seed, cell):
+    """+1 / -1: which side of the crease centerline the base `cell`'s center lies on. Places each
+    chain's arrow on ITS OWN side of the crease (the side of the chain it belongs to) instead of an
+    index-based split that could land it on the neighbour's side. I/O: (seed seg, (x,y) cell) -> float."""
+    return _seg_perp_side(seed, (cell[0] + 0.5, cell[1] + 0.5))
+
+
+def draw_reflection(ax, seed, segs, passed, cells=None, end_cells=None):
     """Overlay the reflection gate for one shared-crease pair. The seed crease is drawn as one
     arrow PER CHAIN (colored to match, split to either side like the images below it — two solid
     colors instead of one, since a single shared-color arrow read as an unintended blend of both
     chains' colors). When `cells` (each chain's base cell, aligned with `segs`) is given, each seed
     arrow is offset onto the side of the crease where that chain's own cell sits — otherwise it
     reads as swapped (chain A's arrow on B's side). Each chain's reflected image segment
-    (Fold.reflection_verdict's own segI/segJ — coincident on PASS) is drawn as its own full arrow on
-    a separate side of that centerline, dashed to distinguish it from the solid seed. Pass/fail
-    (✓ coincide / ✗ mismatch) is marked once at the seed's midpoint, tinted FOLD_BADGE/JAM_BADGE.
-    segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)). I/O: (ax, seg, list, bool, cells) -> None."""
+    (Fold.reflection_verdict's own segI/segJ — coincident on PASS) is drawn as its own full arrow,
+    dashed to distinguish it from the solid seed; when `end_cells` (each chain's reflected base-cell
+    image, aligned with `segs`) is given, that dashed arrow is likewise offset onto its own chain's
+    side of the ENDING footprint — so the starting and ending arrows never disagree — otherwise it
+    falls back to an index split. Pass/fail (✓ coincide / ✗ mismatch) is marked once at the seed's
+    midpoint, tinted FOLD_BADGE/JAM_BADGE. segs = list of (color, seg) with seg = ((x0,y0),(x1,y1)).
+    I/O: (ax, seg, list, bool, cells, end_cells) -> None."""
     n = len(segs)
     split = _split_sides(seed[0], seed[1], n)
     for k, (color, _) in enumerate(segs):
@@ -231,7 +239,11 @@ def draw_reflection(ax, seed, segs, passed, cells=None):
                                      lw=3.0, color=color, zorder=8, alpha=0.9))
 
     for k, (color, (p, q)) in enumerate(segs):
-        pk, qk = _split_sides(p, q, n)[k]
+        if end_cells is not None:
+            ec = (end_cells[k][0] + 0.5, end_cells[k][1] + 0.5)
+            pk, qk = _offset_seg(p, q, REFLECTION_SPLIT * _seg_perp_side((p, q), ec))
+        else:
+            pk, qk = _split_sides(p, q, n)[k]
         ax.add_patch(FancyArrowPatch(pk, qk, arrowstyle="-|>", mutation_scale=10, lw=2.0,
                                      color=color, ls=DASH, zorder=9, alpha=0.95))
 

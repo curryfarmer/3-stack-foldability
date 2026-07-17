@@ -114,6 +114,7 @@ def render_twist_111(uid, sol, m, n, out_path):
     flat = all(tj.is0(t) for t in tws)
     verdict = "FOLD (all Tw=0)" if flat else "JAM (some Tw!=0)"
     badge = fs.FOLD_BADGE if flat else fs.JAM_BADGE
-    fig.suptitle("TWIST — %s  %dx%d  1+1+1 pairwise loops:  Tw = Σ(σ·γ)  →  %s"
-                 % (uid, m, n, verdict), color=badge, fontsize=11, fontweight="bold")
+    decomp = sol.get("decomposition") or "+".join(["1"] * len(strands))   # 1+1+1, 1+1+1+1, ...
+    fig.suptitle("TWIST — %s  %dx%d  %s pairwise loops:  Tw = Σ(σ·γ)  →  %s"
+                 % (uid, m, n, decomp, verdict), color=badge, fontsize=11, fontweight="bold")
     return fs.save(fig, out_path)

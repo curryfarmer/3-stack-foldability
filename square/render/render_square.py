@@ -62,8 +62,15 @@ def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
     for pair in refl["pairs"]:
         seed = Fold._crease_segment(pair["Pi"], pair["Pj"])
         segs = [(fs.chain_color(pair["i"]), pair["segI"]), (fs.chain_color(pair["j"]), pair["segJ"])]
-        # each chain's base cell -> its seed arrow sits on its own side of the crease (not swapped)
-        fs.draw_reflection(ax, seed, segs, pair["pass"], cells=[pair["Pi"], pair["Pj"]])
+        # own-side arrows in BOTH footprints: the SEED arrow sits on the side of the START crease
+        # where each chain's base cell is; the dashed reflected-image arrow sits on the side of the
+        # ENDING footprint where that base cell's reflected image lands (so start/end never disagree).
+        tci = chains_for_gate[pair["i"]]["placements"][-1]["transformChain"]
+        tcj = chains_for_gate[pair["j"]]["placements"][-1]["transformChain"]
+        end_cells = [Fold._reflect_cell_through(pair["Pi"], tci),
+                     Fold._reflect_cell_through(pair["Pj"], tcj)]
+        fs.draw_reflection(ax, seed, segs, pair["pass"],
+                           cells=[pair["Pi"], pair["Pj"]], end_cells=end_cells)
 
     ax.set_title(title or "", color=fs.INK)
 
