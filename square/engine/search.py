@@ -453,6 +453,14 @@ def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False, sheet=None):
         "verdict": verdict,
         "canonicalHash": h,
     }
+    # Belt-and-suspenders invariant: any candidate the gates mark a real fold (exit-footprint passed
+    # AND twist decided FOLD) MUST have a coincident end footprint. exit_footprint_check already gates
+    # this upstream, but re-verify it here against the freshly-collected end cells -- independent of the
+    # branch logic above -- so a future gate reorder/relaxation can never silently emit a fold whose
+    # panels don't stack onto one congruent template (the "footprints don't match" failure mode).
+    if verdict["exitFootprint"] and verdict["twist"] is True:
+        if not exit_footprint_check(chains, fp["shape"], fp.get("panels", 3)):
+            raise AssertionError("emitted fold has non-coincident end footprint (hash=%s)" % h)
     return gates_passed, sol
 
 

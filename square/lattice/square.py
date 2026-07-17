@@ -137,7 +137,16 @@ class SquareLattice(Lattice):
                 if nV % 2 != 0:
                     return False
             else:
-                if nH % 2 != 0 or nV % 2 != 1:
+                # 1+1+1 (no A/B adjacency): the seam-parallel folds (nH, for the canonical
+                # horizontal-footprint fold) must be even. The old rule ALSO required `nV odd`,
+                # but that clause silently baked in the retired K-even arithmetic guard: with
+                # folds/chain = K-1, `nV odd` is satisfiable only when K = mn/panels is EVEN, so
+                # on K-odd grids (e.g. 3x3, K=3) it made parity mathematically impossible and
+                # hid the obviously-foldable column/row accordion (nH,nV)=(0,2)/(2,0). Dropping
+                # it is a no-op on every K-even grid (there nH even <=> nV odd, so the clause was
+                # redundant) and cannot false-accept -- the exact reflection + twist gates still
+                # run after parity. See vector_parity_check below for the preserved legacy column.
+                if nH % 2 != 0:
                     return False
         return True
 

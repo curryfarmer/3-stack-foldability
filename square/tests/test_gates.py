@@ -103,7 +103,9 @@ def test_parity_2plus1_horizontal_axis_requires_nH_even():
 
 
 def test_parity_1plus1plus1_legacy_rule():
-    # 3 chains -> parallel_fold_axis None -> legacy: each chain needs nH even and nV odd.
+    # 3 chains -> parallel_fold_axis None -> the 1+1+1 rule: each chain needs nH (seam-parallel
+    # folds) EVEN. The old rule additionally required nV odd, but that baked in the retired K-even
+    # guard and hid the K-odd accordion; it was dropped (see square.py parity_check `else` branch).
     good = [{"baseCells": [(0, 0)], "foldArrows": ["L", "R", "U"]},   # nH=2,nV=1
             {"baseCells": [(1, 0)], "foldArrows": ["U", "L", "R"]},
             {"baseCells": [(0, 1)], "foldArrows": ["D", "R", "L"]}]
@@ -112,6 +114,32 @@ def test_parity_1plus1plus1_legacy_rule():
            {"baseCells": [(1, 0)], "foldArrows": ["U", "L", "R"]},
            {"baseCells": [(0, 1)], "foldArrows": ["D", "R", "L"]}]
     assert Search.parity_check(bad) is False
+    # K-odd accordion (nH=0 even, nV=2 even): the fold-in-thirds of a 3x3 column. The dropped
+    # `nV odd` clause used to reject this genuine fold; nH even alone now admits it (reflection +
+    # twist still decide downstream).
+    accordion = [{"baseCells": [(0, 0)], "foldArrows": ["U", "U"]},   # nH=0,nV=2
+                 {"baseCells": [(1, 0)], "foldArrows": ["U", "U"]},
+                 {"baseCells": [(2, 0)], "foldArrows": ["U", "U"]}]
+    assert Search.parity_check(accordion) is True
+
+
+def test_3x3_1plus1plus1_folds_via_accordion():
+    """End-to-end regression for the K-odd parity false-reject ('3x3 1+1+1 yields nothing'). 3x3
+    (K=3, odd) 1+1+1 folds via exactly the two accordions -- fold-in-thirds along each axis -- both
+    straight-tromino (Rect) footprints. Before the fix parity was unsatisfiable on K-odd grids and
+    this yielded zero solutions."""
+    opts = {"m": 3, "n": 3, "stacks": 3,
+            "shapes": {"L": True, "Rect": True},
+            "decomps": {"2+1": False, "1+1+1": True},
+            "allowNonCorner": False, "dedup": True, "jobs": 1}
+    sols, _ctx, err = Search.run(opts)
+    assert err is None
+    foldable = [s for s in sols if s["verdict"]["twist"] is True]
+    assert len(foldable) == 2
+    for s in foldable:
+        assert s["footprint"]["shape"] == "Rect"
+        for c in s["chains"]:                       # pure accordion: folds on ONE axis only
+            assert (c["nH"] == 0) != (c["nV"] == 0)
 
 
 # ---------- canonical_hash invariances ----------
