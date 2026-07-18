@@ -27,7 +27,7 @@ import figstyle as fs                          # noqa: E402
 import twist_jump as tj                        # noqa: E402
 import render_square as rsq                    # noqa: E402
 import search as Search                        # noqa: E402
-from render_twist_2plus1 import build_loop     # noqa: E402
+from render_twist_2plus1 import build_loop, _cell_of, _step_kind   # noqa: E402  (new-style twist prims)
 
 REPO = os.path.dirname(os.path.dirname(HERE))
 FIGDIR = os.path.join(REPO, "report", "figures")
@@ -140,96 +140,116 @@ def twist_accumulation(fold, jam, out_path):
 
 # ------------------------------------------------------- Model B step strip ----
 
-def _grid_panel(ax, m, n, *, checker=False):
-    ax.set_xlim(-0.4, m + 0.4)
-    ax.set_ylim(n + 0.4, -0.4)
-    ax.set_aspect("equal")
-    ax.set_xticks([]); ax.set_yticks([])
-    fs.draw_grid_cells(ax, m, n, checker=checker)
+def _mb_seg(ax, p, q, color, lw, *, ls="-", z=4):
+    ax.plot([p[0], q[0]], [p[1], q[1]], color=color, lw=lw, ls=ls, zorder=z,
+            solid_capstyle="round")
+
+
+def _mb_arrow(ax, p, q, color, *, z=7):
+    from matplotlib.patches import FancyArrowPatch
+    ax.add_patch(FancyArrowPatch((p[0], p[1]), (q[0], q[1]), arrowstyle="-|>",
+                                 mutation_scale=11, color=color, lw=0, zorder=z))
 
 
 def model_b_steps(sol, out_dir):
-    """Model B story on a real 2+1 FOLD, as three SEPARATE single-panel figures (one file each,
-    meant to sit side by side in the report): (1) decompose + replay, (2) keep one strand, twin =
-    hole, along-axis fold = 3-jump, (3) close the loop -> twist total.
+    """Model B story on a real 2+1 FOLD, as three SEPARATE single-panel figures (one file each, meant
+    to sit side by side in the report), in the STANDARDISED twist style that render_twist_2plus1 uses:
+    parity checkerboard (sigma = (-1)^(x+y) tint), directed strands, red 3-jumps, green hub seams,
+    per-vertex sigma*gamma labels, right-hand legend, FOLD/JAM badge title. Steps: (1) decompose +
+    replay, (2) keep one strand (twin = hole, along-axis fold = 3-jump), (3) close the loop -> twist.
+    Geometry comes from build_loop — the same canonical strand the twist figure scores.
     I/O: (dict, dir) -> [path1, path2, path3]."""
     m, n = sol["m"], sol["n"]
+    info = build_loop(sol, m, n)                              # canonical body/path1/loop/terms/tw
+    body, path1, loop = info["body"], info["path1"], info["loop"]
+    terms, tw, K, idx = info["terms"], info["tw"], info["K"], info["idx"]
     two = next(c for c in sol["chains"] if len(c["baseCells"]) == 2)
     one = next(c for c in sol["chains"] if len(c["baseCells"]) == 1)
-    pls2 = tj.replay(two["baseCells"], two["foldArrows"], m, n)
-    pls1 = tj.replay(one["baseCells"], one["foldArrows"], m, n)
-    path1 = tj.strand_path(pls1, 0)
-    idx = tj.pick_canon_idx(pls2, path1)
-    body = tj.strand_path(pls2, idx)
-    twin = tj.strand_path(pls2, 1 - idx)
-    loop = body + list(reversed(path1))
-    terms = tj.loop_terms(loop)
-    tw = tj.tw_of(terms)
+    twin = tj.strand_path(tj.replay(two["baseCells"], two["foldArrows"], m, n), 1 - idx)
     BODY, PATH1 = fs.CHAIN[0], fs.CHAIN[1]
+    fp = sol.get("footprint", {}).get("cells", [])
     out_paths = []
 
-    # panel 1 — decompose + replay the fold arrows
-    fig, ax = plt.subplots(figsize=(6.0, 5.0))
-    _grid_panel(ax, m, n)
-    fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
+    def _panel():                                            # checker grid + footprint + legend gutter
+        fig, ax = fs.new_grid_axes(m, n, pad=0.5, extra_w=2.6, ticklabels=False)
+        fs.draw_grid_cells(ax, m, n, checker=True)
+        fs.draw_footprint(ax, fp)
+        return fig, ax
+
+    def _numbered(ax, strand, color, ms=4.5):
+        for k, p in enumerate(strand):
+            ax.plot(p[0], p[1], "o", ms=ms, color=color, zorder=8)
+            ax.annotate(str(k), (p[0], p[1]), textcoords="offset points", xytext=(3, 3),
+                        fontsize=6.5, color=color, zorder=9)
+
+    # panel 1 — decompose + replay: the domino (both parallel panels) + the monomino, both directed
+    fig, ax = _panel()
     fs.draw_base_cells(ax, fs.cells(two["baseCells"]), BODY, "A")
     fs.draw_base_cells(ax, fs.cells(one["baseCells"]), PATH1, "B")
-    fs.draw_fold_path(ax, body, BODY)
-    fs.draw_fold_path(ax, path1, PATH1)
-    ax.set_title("1.  Decompose (A = domino, B = monomino)\nand replay each fold sequence",
+    for strand in (body, twin):                              # rigid domino: two panels sweep parallel
+        for i in range(len(strand) - 1):
+            _mb_seg(ax, strand[i], strand[i + 1], BODY, 2.0)
+            _mb_arrow(ax, strand[i], strand[i + 1], BODY)
+    for i in range(len(path1) - 1):
+        _mb_seg(ax, path1[i], path1[i + 1], PATH1, 2.0)
+        _mb_arrow(ax, path1[i], path1[i + 1], PATH1)
+    ax.set_title("1.  Decompose (A = domino, B = monomino) and replay each fold sequence",
                  fontsize=10, fontweight="bold")
-    fig.tight_layout()
+    fs.legend_panel(ax, [fs.line_handle(BODY, "domino A (both panels)"),
+                         fs.line_handle(PATH1, "monomino B")])
     out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step1_decompose.png")))
 
-    # panel 2 — keep one strand, twin = hole, along-axis fold = 3-jump
-    fig, ax = plt.subplots(figsize=(6.0, 5.0))
-    _grid_panel(ax, m, n)
-    fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
-    # twin strand as hollow grey holes
+    # panel 2 — keep ONE strand; twin = hole; along-axis fold = 3-jump
+    fig, ax = _panel()
     for p in twin:
-        ax.plot(p[0], p[1], "o", ms=9, mfc="none", mec="#999999", mew=1.4, zorder=6)
-    # kept strand, numbered, with 3-jumps highlighted
+        ax.plot(p[0], p[1], "o", ms=9, mfc="none", mec=fs.MUTED, mew=1.4, zorder=6)
     for i in range(len(body) - 1):
-        p, q = body[i], body[i + 1]
-        dx, dy = abs(int(round(q[0] - p[0]))), abs(int(round(q[1] - p[1])))
-        is3 = (dx == 3 and dy == 0) or (dx == 0 and dy == 3)
-        ax.plot([p[0], q[0]], [p[1], q[1]], color=(fs.JUMP if is3 else BODY),
-                lw=(3.0 if is3 else 2.0), ls=(fs.DASH if is3 else "-"), zorder=4,
-                solid_capstyle="round")
-    for k, p in enumerate(body):
-        ax.plot(p[0], p[1], "o", ms=5, color=BODY, zorder=8)
-        ax.annotate(str(k), (p[0], p[1]), textcoords="offset points", xytext=(3, 3),
-                    fontsize=7, color=BODY, zorder=9)
+        is3 = _step_kind(_cell_of(body[i]), _cell_of(body[i + 1])) == "3JMP"
+        _mb_seg(ax, body[i], body[i + 1], fs.JUMP if is3 else BODY, 3.0 if is3 else 2.0,
+                ls=fs.DASH if is3 else "-", z=5 if is3 else 4)
+        _mb_arrow(ax, body[i], body[i + 1], fs.JUMP if is3 else BODY)
+    _numbered(ax, body, BODY)
     ax.set_title("2.  Keep ONE strand; the twin fills the gap (hole).\n"
-                 "An along-axis fold lands the strand 3 away — the 3-jump (red).",
+                 "An along-axis fold lands the strand 3 away — the 3-jump.",
                  fontsize=10, fontweight="bold")
-    fig.tight_layout()
+    fs.legend_panel(ax, [fs.line_handle(BODY, "kept strand (body)"),
+                         fs.patch_handle("none", "twin panel (hole)", alpha=1.0, edgecolor=fs.MUTED),
+                         fs.line_handle(fs.JUMP, "3-jump (along-axis fold)", ls=fs.DASH)])
     out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step2_strand.png")))
 
-    # panel 3 — close the loop -> twist total
-    fig, ax = plt.subplots(figsize=(6.0, 5.0))
-    _grid_panel(ax, m, n, checker=True)
-    fs.draw_footprint(ax, sol.get("footprint", {}).get("cells", []))
+    # panel 3 — close the loop; per-vertex sigma*gamma -> Tw (identical scoring to the twist figure)
+    fig, ax = _panel()
     nloop = len(loop)
-    K = len(body)
     seam_pairs = {(K - 1, K % nloop), (nloop - 1, 0)}
     for i in range(nloop):
         p, q = loop[i], loop[(i + 1) % nloop]
-        dx, dy = abs(int(round(q[0] - p[0]))), abs(int(round(q[1] - p[1])))
-        is3 = (dx == 3 and dy == 0) or (dx == 0 and dy == 3)
         if (i, (i + 1) % nloop) in seam_pairs:
-            col, lw, ls = fs.SEAM, 3.2, "-"
-        elif is3:
-            col, lw, ls = fs.JUMP, 3.0, fs.DASH
+            _mb_seg(ax, p, q, fs.SEAM, 3.4, z=5)
+        elif _step_kind(_cell_of(p), _cell_of(q)) == "3JMP":
+            _mb_seg(ax, p, q, fs.JUMP, 3.2, ls=fs.DASH, z=5)
         else:
-            col, lw, ls = (BODY if i < K - 1 else PATH1), 2.0, "-"
-        ax.plot([p[0], q[0]], [p[1], q[1]], color=col, lw=lw, ls=ls, zorder=4,
-                solid_capstyle="round")
+            _mb_seg(ax, p, q, BODY if i < K - 1 else PATH1, 2.2, z=4)
+        _mb_arrow(ax, p, q, BODY if i < K else PATH1)
+    _numbered(ax, body, BODY)
+    for p in path1:
+        ax.plot(p[0], p[1], "o", ms=3.2, color=PATH1, zorder=8)
+    for i in range(nloop):                                   # only turning vertices move the total
+        if abs(terms[i]) < 1e-6:
+            continue
+        contrib = (1 if i % 2 else -1) * terms[i]
+        piv = loop[(i + 1) % nloop]
+        ax.annotate(fs.pi_label(contrib), (piv[0], piv[1]), textcoords="offset points",
+                    xytext=(4, -10), fontsize=7.5, fontweight="bold",
+                    color=fs.POS if contrib > 0 else fs.NEG, zorder=10)
     verdict = "FOLD (flat)" if tj.is0(tw) else f"JAM (Tw = {fs.pi_label(tw)})"
-    ax.set_title(f"3.  Close: loop = body + reversed(path1) (green = hub seam).\n"
+    badge = fs.FOLD_BADGE if tj.is0(tw) else fs.JAM_BADGE
+    ax.set_title("3.  Close: loop = body + reversed(path1).   "
                  f"Tw = Σ σ·γ = {fs.pi_label(tw)}  →  {verdict}",
-                 fontsize=10, fontweight="bold")
-    fig.tight_layout()
+                 fontsize=10, fontweight="bold", color=badge)
+    fs.legend_panel(ax, [fs.line_handle(BODY, "2-chain kept strand (body)"),
+                         fs.line_handle(PATH1, "1-chain strand (path1)"),
+                         fs.line_handle(fs.JUMP, "3-jump (along-axis fold)", ls=fs.DASH),
+                         fs.line_handle(fs.SEAM, "hub seam (chains rejoin)")])
     out_paths.append(fs.save(fig, os.path.join(out_dir, "fig3_modelB_step3_close.png")))
 
     return out_paths

@@ -63,7 +63,7 @@ def test_make_sheet_surface():
     assert names == [
         "LatClass", "vcart", "tile_cart", "sigma", "chains", "footprint", "title", "out_name", "K",
         "verdict_note", "crease_override", "end_footprint", "rigid_override", "end_chirality",
-        "walk_chains",
+        "walk_chains", "chrome",
     ], "make_sheet parameter list drifted"
     # the first nine carry no default -> the required positional contract the engine depends on.
     required = [p.name for p in params if p.default is inspect.Parameter.empty]

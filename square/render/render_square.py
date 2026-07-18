@@ -23,10 +23,13 @@ import twist_jump as tj                                          # noqa: E402  (
 _verdict_line = fs.verdict_line                                  # back-compat alias (gate ✓/✗/– line)
 
 
-def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
+def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI, chrome=True):
     """Render one fold pattern (the detail_json sol dict) on an m×n grid to out_path (PNG/PDF by
-    extension). Returns out_path. I/O: (detail, m, n, out_path, ...) -> path."""
-    fig, ax = fs.new_grid_axes(m, n, extra_w=2.2, ticklabels=False)   # foldsheet: cells locate position
+    extension). Returns out_path. I/O: (detail, m, n, out_path, ...) -> path.
+    chrome=False renders the model BARE (no title / legend / sub-notes; grid + footprints + foldpath
+    + reflection arrows only) for report montages that carry their own per-panel title."""
+    extra_w = 2.2 if chrome else 0.0                                  # legend gutter only when chromed
+    fig, ax = fs.new_grid_axes(m, n, extra_w=extra_w, ticklabels=False)   # foldsheet: cells locate pos
     # Arbitrary drawn sheets carry a `sheetCells` mask (origin-normalized S region, stamped at
     # generation); draw only S, not the whole m×n bounding rectangle. Absent (rectangle sheet) -> None
     # -> the full grid, byte-identical to before.
@@ -72,20 +75,21 @@ def render(detail, m, n, out_path, *, title=None, dpi=fs.DPI):
         fs.draw_reflection(ax, seed, segs, pair["pass"],
                            cells=[pair["Pi"], pair["Pj"]], end_cells=end_cells)
 
-    ax.set_title(title or "", color=fs.INK)
+    if chrome:
+        ax.set_title(title or "", color=fs.INK)
 
-    # legend: one base-cell swatch per chain + footprint + the fold-direction glyph + reflection
-    handles = [fs.patch_handle(color, f"base cell {letter}") for letter, color in used_letters]
-    handles.append(fs.patch_handle("none", "footprint (folds-to stack)", alpha=1.0,
-                                   edgecolor=fs.FOOTPRINT_EDGE))
-    handles.append(fs.patch_handle("none", "ending footprint", alpha=1.0,
-                                   edgecolor=fs.FOOTPRINT_EDGE))
-    handles[-1].set_linestyle(fs.DASH)
-    handles.append(fs.line_handle(fs.INK, "fold direction (L/R/U/D)"))
-    handles.append(fs.line_handle(fs.FOLD_BADGE, "reflection: crease arrow (✓ coincide / ✗ mismatch)"))
-    handles.append(fs.line_handle(fs.INK, "reflection: reflected image (split by chain)", ls=fs.DASH))
-    fs.legend_panel(ax, handles)
+        # legend: one base-cell swatch per chain + footprint + the fold-direction glyph + reflection
+        handles = [fs.patch_handle(color, f"base cell {letter}") for letter, color in used_letters]
+        handles.append(fs.patch_handle("none", "footprint (folds-to stack)", alpha=1.0,
+                                       edgecolor=fs.FOOTPRINT_EDGE))
+        handles.append(fs.patch_handle("none", "ending footprint", alpha=1.0,
+                                       edgecolor=fs.FOOTPRINT_EDGE))
+        handles[-1].set_linestyle(fs.DASH)
+        handles.append(fs.line_handle(fs.INK, "fold direction (L/R/U/D)"))
+        handles.append(fs.line_handle(fs.FOLD_BADGE, "reflection: crease arrow (✓ coincide / ✗ mismatch)"))
+        handles.append(fs.line_handle(fs.INK, "reflection: reflected image (split by chain)", ls=fs.DASH))
+        fs.legend_panel(ax, handles)
 
-    sub = f"{detail.get('decomposition', '?')}   " + "   ".join(chain_notes)
-    fs.draw_subnotes(ax, [sub, fs.verdict_line(detail.get("verdict", {}))])
+        sub = f"{detail.get('decomposition', '?')}   " + "   ".join(chain_notes)
+        fs.draw_subnotes(ax, [sub, fs.verdict_line(detail.get("verdict", {}))])
     return fs.save(fig, out_path, dpi=dpi)

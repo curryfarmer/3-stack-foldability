@@ -133,7 +133,10 @@ def _legend_row(ax, lx, y, col, ls, lab):
 
 def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_name, K,
                verdict_note=None, crease_override=None, end_footprint=None, rigid_override=None,
-               end_chirality=None, walk_chains=None):
+               end_chirality=None, walk_chains=None, chrome=True):
+    # chrome=True (default): full printable sheet — title band + side panel (legend + physical notes).
+    # chrome=False: BARE model only — no title, no legend, no notes; the pattern fills the figure. Used
+    # for report montages that carry their own per-panel title (report_examples / tri montage builders).
     region = sorted(set().union(*[set(c) for c in chains]))
     sub = LatClass(cells=region)
     if crease_override is not None:              # caller supplies the fold-edge set directly
@@ -170,11 +173,16 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
     # figure-relative side panel for the title/legend/notes. The old single-axis layout reserved a
     # fixed ~5-data-unit legend column to the right of the region, which shrank compact patterns
     # (worst on scalene) into the corner; splitting the axes decouples pattern size from legend size.
-    fig = plt.figure(figsize=(12.0, 8.2))
-    ax = fig.add_axes([0.015, 0.02, 0.66, 0.90])
+    if chrome:
+        fig = plt.figure(figsize=(12.0, 8.2))
+        ax = fig.add_axes([0.015, 0.02, 0.66, 0.90])
+        axL = fig.add_axes([0.69, 0.02, 0.30, 0.90])      # side panel, own 0..1 coordinate system
+        axL.set_xlim(0, 1); axL.set_ylim(0, 1); axL.axis("off")
+    else:                                                 # bare model: pattern fills the whole figure
+        fig = plt.figure(figsize=(8.0, 8.0))
+        ax = fig.add_axes([0.01, 0.01, 0.98, 0.98])
+        axL = None
     ax.set_aspect("equal"); ax.axis("off")
-    axL = fig.add_axes([0.69, 0.02, 0.30, 0.90])          # side panel, own 0..1 coordinate system
-    axL.set_xlim(0, 1); axL.set_ylim(0, 1); axL.axis("off")
     for t in region:
         ax.add_patch(Polygon(tile_cart(t), closed=True, facecolor=TINT[cell_chain[t] % 3],
                              edgecolor=GRID_EDGE, lw=0.5, zorder=1))
@@ -225,38 +233,40 @@ def make_sheet(LatClass, vcart, tile_cart, sigma, chains, footprint, title, out_
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
 
     # title spans the full sheet width; legend + notes live on the side panel (axL, figure-relative).
-    fig.text(0.5, 0.985, title, ha="center", va="top", fontsize=13, fontweight="bold", color=INK)
-    lx, y, lh = 0.02, 0.985, 0.040
-    legend = [
-        (VLY, "solid", "FOLD — valley (toward you)"),
-        (MNT, "solid", "FOLD — mountain (away)"),
-        (CUT, "dash", "SLIT — cut (interior)"),
-        ("#222", "solid", "cut around outer boundary"),
-        (RIGID, "solid", "rigid — keep attached, flat (hub)"),
-        (FOOTPRINT_EDGE, "fill", "START footprint A/B/C (the hub)"),
-    ]
-    if end_chirality:
-        legend += [
-            (CHIR_COLOR["proper"], "endcol", "END aligned: proper rotation = FOLD"),
-            (CHIR_COLOR["mirror"], "endcol", "END mirror: sides swapped = JAM"),
-            (CHIR_COLOR["off-cell"], "endcol", "END off-cell: wrong cell = JAM"),
+    # Skipped entirely for a bare model (chrome=False) — the montage supplies its own per-panel title.
+    if chrome:
+        fig.text(0.5, 0.985, title, ha="center", va="top", fontsize=13, fontweight="bold", color=INK)
+        lx, y, lh = 0.02, 0.985, 0.040
+        legend = [
+            (VLY, "solid", "FOLD — valley (toward you)"),
+            (MNT, "solid", "FOLD — mountain (away)"),
+            (CUT, "dash", "SLIT — cut (interior)"),
+            ("#222", "solid", "cut around outer boundary"),
+            (RIGID, "solid", "rigid — keep attached, flat (hub)"),
+            (FOOTPRINT_EDGE, "fill", "START footprint A/B/C (the hub)"),
         ]
-    else:
-        legend.append((FOOTPRINT_EDGE, "endfp", "END footprint A/B/C (fold onto hub)"))
-    legend.append((INK, "text", "S L = START hub seam side-length"))
-    for col, ls, lab in legend:
-        _legend_row(axL, lx, y, col, ls, lab)
-        y -= lh
-    if end_chirality:                            # name the whole-footprint rigid-motion class
-        y = _draw_class_caption(axL, lx, y, end_chirality)
-    verdict = verdict_note or "predicted Tw=0 = foldable"
-    axL.text(lx, y - 0.015,
-             "K=%d, %d tiles. Cut the outer boundary + green slits\n"
-             "(leave grey hub seams attached); fold every red/blue\n"
-             "crease (red=mountain, blue=valley); the chains accordion\n"
-             "so the END footprint lands on the START hub (purple) as a\n"
-             "3-stack (%s). If it won't seat, flip ALL\n"
-             "mountain<->valley (a global symmetry) and retry."
-             % (K, len(region), verdict), ha="left", va="top", fontsize=7.5, color=MUTED)
+        if end_chirality:
+            legend += [
+                (CHIR_COLOR["proper"], "endcol", "END aligned: proper rotation = FOLD"),
+                (CHIR_COLOR["mirror"], "endcol", "END mirror: sides swapped = JAM"),
+                (CHIR_COLOR["off-cell"], "endcol", "END off-cell: wrong cell = JAM"),
+            ]
+        else:
+            legend.append((FOOTPRINT_EDGE, "endfp", "END footprint A/B/C (fold onto hub)"))
+        legend.append((INK, "text", "S L = START hub seam side-length"))
+        for col, ls, lab in legend:
+            _legend_row(axL, lx, y, col, ls, lab)
+            y -= lh
+        if end_chirality:                        # name the whole-footprint rigid-motion class
+            y = _draw_class_caption(axL, lx, y, end_chirality)
+        verdict = verdict_note or "predicted Tw=0 = foldable"
+        axL.text(lx, y - 0.015,
+                 "K=%d, %d tiles. Cut the outer boundary + green slits\n"
+                 "(leave grey hub seams attached); fold every red/blue\n"
+                 "crease (red=mountain, blue=valley); the chains accordion\n"
+                 "so the END footprint lands on the START hub (purple) as a\n"
+                 "3-stack (%s). If it won't seat, flip ALL\n"
+                 "mountain<->valley (a global symmetry) and retry."
+                 % (K, len(region), verdict), ha="left", va="top", fontsize=7.5, color=MUTED)
 
     return save(fig, os.path.join(OUT, out_name))

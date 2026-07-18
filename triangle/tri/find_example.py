@@ -313,7 +313,9 @@ def verdict_text(cand):
 
 
 def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=None,
-                schematic_only=False):
+                schematic_only=False, chrome=True):
+    # chrome=False renders the schematic BARE (no title/legend/notes) for report montages that carry
+    # their own per-panel title; default True is the full printable sheet (shipped bundles unchanged).
     # name_stem overrides the descriptive tag so the sheets can be keyed by a stable fold uid
     # (overlay_<uid>.png / foldsheet_<uid>.png) — see gen_testset --quadrants + render_fold.py.
     # schematic_only=True: the per-fold bundle wants ONE folding schematic (the foldsheet, now carrying
@@ -361,7 +363,8 @@ def render_case(tiling, decomp, holes_mode, lat, K, cand, suffix="", name_stem=N
     sheet = FS.make_sheet(g["LatClass"], g["vcart"], g["tile_cart"], g["sigma"],
                           sheet_chains, footprint, title, sheet_name, K,
                           verdict_note=verdict, crease_override=crease, end_footprint=end_footprint,
-                          rigid_override=rigid_ov, end_chirality=end_chir, walk_chains=cand["chains"])
+                          rigid_override=rigid_ov, end_chirality=end_chir, walk_chains=cand["chains"],
+                          chrome=chrome)
     return over, sheet, verdict
 
 

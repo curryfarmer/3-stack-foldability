@@ -48,8 +48,38 @@ def _strands(sol, m, n):
     return strands
 
 
-def _draw_loop(ax, m, n, sol, ci, cj, path_i, path_j):
-    """Draw the pairwise reduced loop strand_i + reversed(strand_j) on one panel; return its Tw."""
+def _hub_elbow(p, q, occ):
+    """If seam p->q is a unit diagonal (the two chain bases/ends only corner-touch), return the hub
+    cell that edge-connects both — the third chain's own base/end, which sits at one of the diagonal's
+    two elbow corners. None when the seam is axis-aligned (bases share the hub) or no cell fills the
+    elbow. Purely a DRAW hint: the reduced-loop twist is computed on the direct chord regardless, so this
+    only bends the seam's polyline through the middle cell without touching Tw."""
+    if abs(abs(p[0] - q[0]) - 1) > 1e-9 or abs(abs(p[1] - q[1]) - 1) > 1e-9:
+        return None                                        # not a unit diagonal -> straight seam
+    for c in ((p[0], q[1]), (q[0], p[1])):                 # the two elbow corners of the diagonal
+        if any(abs(c[0] - o[0]) < 1e-9 and abs(c[1] - o[1]) < 1e-9 for o in occ):
+            return c
+    return None
+
+
+def _draw_seam(ax, p, q, occ):
+    """Draw one closure seam p->q in the hub-seam colour, routed through the hub cell as an L-bend when
+    p,q only corner-touch (so every pairwise loop visibly passes through the middle/hub cell)."""
+    from matplotlib.patches import FancyArrowPatch
+
+    elbow = _hub_elbow(p, q, occ)
+    pts = [p, elbow, q] if elbow else [p, q]
+    for a, b in zip(pts, pts[1:]):
+        ax.plot([a[0], b[0]], [a[1], b[1]], color=fs.SEAM, lw=2.0, zorder=4, alpha=0.9,
+                solid_capstyle="round")
+        ax.add_patch(FancyArrowPatch(a, b, arrowstyle="-|>", mutation_scale=11,
+                                     color=fs.SEAM, lw=0, zorder=6))
+
+
+def _draw_loop(ax, m, n, sol, ci, cj, path_i, path_j, base_occ, end_occ):
+    """Draw the pairwise reduced loop strand_i + reversed(strand_j) on one panel; return its Tw.
+    The Tw / per-vertex labels come from the canonical direct-closure loop (engine-faithful); only the
+    two closure SEAMS are drawn hub-routed (see _draw_seam / _hub_elbow) — cosmetic, Tw unchanged."""
     from matplotlib.patches import FancyArrowPatch
 
     _setup_grid(ax, m, n)
@@ -62,11 +92,16 @@ def _draw_loop(ax, m, n, sol, ci, cj, path_i, path_j):
     tw = tj.tw_of(terms)
     nloop = len(loop)
     K = len(path_i)
-    seams = {K - 1, nloop - 1}                              # the two hub-seam edges (loop closure)
 
     for k in range(nloop):
         p, q = loop[k], loop[(k + 1) % nloop]
-        col = fs.SEAM if k in seams else (ic if k < K - 1 else jc)
+        if k == nloop - 1:                                 # base seam (path_j.base -> path_i.base)
+            _draw_seam(ax, p, q, base_occ)
+            continue
+        if k == K - 1:                                     # end seam (path_i.end -> path_j.end)
+            _draw_seam(ax, p, q, end_occ)
+            continue
+        col = ic if k < K - 1 else jc
         ax.plot([p[0], q[0]], [p[1], q[1]], color=col, lw=2.0, zorder=4, alpha=0.9,
                 solid_capstyle="round")
         ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=11,
@@ -99,7 +134,9 @@ def render_twist_111(uid, sol, m, n, out_path):
     from matplotlib import pyplot as plt
 
     strands = _strands(sol, m, n)
-    pairs = _pairs(len(strands)) or [(0, 0)]                # guard: degenerate single-chain record
+    base_occ = [s[0] for s in strands if s]                # every chain's base cell (hub-elbow lookup)
+    end_occ = [s[-1] for s in strands if s]                # every chain's end cell
+    pairs = _pairs(len(strands)) or [(0, 0)]               # guard: degenerate single-chain record
     fig, axes = plt.subplots(1, len(pairs), figsize=(max(4.5, m * 0.55 + 1.6) * len(pairs),
                                                       max(3.6, n * 0.55 + 1.4)), squeeze=False)
     tws = []
@@ -109,7 +146,7 @@ def render_twist_111(uid, sol, m, n, out_path):
             fs.draw_grid_cells(ax, m, n, checker=True)
             ax.set_title("single chain — no pairwise loop", color=fs.INK, fontsize=9)
             continue
-        tws.append(_draw_loop(ax, m, n, sol, ci, cj, strands[ci], strands[cj]))
+        tws.append(_draw_loop(ax, m, n, sol, ci, cj, strands[ci], strands[cj], base_occ, end_occ))
 
     flat = all(tj.is0(t) for t in tws)
     verdict = "FOLD (all Tw=0)" if flat else "JAM (some Tw!=0)"

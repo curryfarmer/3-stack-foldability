@@ -48,10 +48,11 @@ def _cand_from_record(rec, lat, K):
     return cand
 
 
-def render_fold(json_path, out_sub=None, schematic_only=False):
+def render_fold(json_path, out_sub=None, schematic_only=False, chrome=True):
     """Load a folds/<uid>.json and redraw it. Returns (overlay, sheet, verdict) — with
     schematic_only=True the overlay is None and the sheet is the single folding schematic
     (creases + footprints + foldpath), named schematic_<uid>.png (the per-fold bundle path).
+    chrome=False renders the sheet BARE (no title/legend/notes) for report montages.
     Output goes to report/tri/<out_sub> (default: the matrix folder that holds this fold)."""
     with open(json_path) as f:
         rec = json.load(f)
@@ -62,7 +63,7 @@ def render_fold(json_path, out_sub=None, schematic_only=False):
     lat = FE.build_lat(tiling, decomp, K)
     cand = _cand_from_record(rec, lat, K)
     return FE.render_case(tiling, decomp, rec.get("holes_mode", "allow"),
-                          lat, K, cand, name_stem=uid, schematic_only=schematic_only)
+                          lat, K, cand, name_stem=uid, schematic_only=schematic_only, chrome=chrome)
 
 
 def main():
