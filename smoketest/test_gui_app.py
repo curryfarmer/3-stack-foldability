@@ -53,6 +53,31 @@ def test_pick_select_fold_gate(app):
     assert app.fold_enabled is (len(app.geometry.ids) % 3 == 0)
 
 
+def test_preview_popup_enlarges(app):
+    """Double-clicking the preview opens a Toplevel holding the selected record's image at (up to) full
+    resolution, with the image pinned so Tk does not GC it out of the window."""
+    import tkinter as tk
+    from gui import results as results_mod
+    bundle = os.path.join(_REPO, "smoketest", "fixtures", "bundle", "fixtureaaaa1", "bundle.json")
+    rows, _ = results_mod.parse_bundle(bundle)
+    row = next(r for r in rows if r.get("files"))
+    try:
+        app._on_row(row)                        # populate preview state (picks a default image kind)
+        top = app._open_preview_popup()
+    except tk.TclError:
+        pytest.skip("no display / Tk image unavailable")
+    assert top is not None and top.winfo_exists()
+    assert app._popup_img is not None           # enlarged image kept alive
+    assert top.winfo_children()                 # the image label is packed into the popup
+    top.destroy()
+
+
+def test_preview_popup_noop_without_image(app):
+    """No selected record -> double-click is a harmless no-op (no window, no error)."""
+    app._on_row(None)
+    assert app._open_preview_popup() is None
+
+
 @pytest.mark.slow
 def test_scripted_end_to_end_square(app):
     app.pick("square", 3, 3)

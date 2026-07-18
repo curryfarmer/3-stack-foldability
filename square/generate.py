@@ -272,7 +272,8 @@ def main(argv=None):
               f"-> {args.out}/ ({len(solutions)} bundles)")
     else:
         print(f"search: {ctx['footprintsTried']}/{ctx['footprintsTotal']} footprint(s), "
-              f"{ctx['decompCount']} decomposition(s) explored -> exit {ctx['exitPass']}, "
+              f"{ctx['decompCount']} decomposition(s) explored, "
+              f"{ctx['coveredCount']} candidate(s) tried -> exit {ctx['exitPass']}, "
               f"parity {ctx['parityPass']}, reflection {ctx['reflPass']}, "
               f"after-dedup {ctx['afterDedup']}, twist-FOLD {ctx['twistPass']}")
         twist0 = sum(1 for s in solutions if s["verdict"]["twist"] is True)

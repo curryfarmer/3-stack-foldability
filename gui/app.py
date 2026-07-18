@@ -19,6 +19,7 @@ from gui import canvas as canvas_mod
 from gui import dispatch as dispatch_mod
 from gui import geometry_client
 from gui import results as results_mod
+from gui import runsummary
 from gui import thumbs
 from gui import tilings
 
@@ -74,6 +75,9 @@ class App:
         self._temp_dirs = []                            # unsaved-run scratch dirs to clean up
         self._preview_kind = tk.StringVar(value="")     # which image kind the viewer shows
         self._preview_row = None                        # the row currently in the viewer
+        self._summary_var = tk.StringVar(value="")      # bottom-left post-run search-effort summary
+        self._run_started = None                        # wall-clock start of the in-flight fold
+        self._progress = None                           # activity bar (built in _build)
         self._build()
 
     # ---- widgets ----
@@ -135,10 +139,23 @@ class App:
         self._kind_frame.pack(side="top", fill="x")
         self._thumb = ttk.Label(preview)
         self._thumb.pack(side="top", pady=4)
+        self._thumb.bind("<Double-Button-1>", self._open_preview_popup)   # enlarge in a popup
         self._preview_msg = ttk.Label(preview, text="", foreground="#666666")
         self._preview_msg.pack(side="top")
+        self._popup_img = None                          # keeps the enlarged image alive (Tk GC)
 
-        ttk.Label(self.root, textvariable=self._status, anchor="w").pack(side="bottom", fill="x", padx=6, pady=4)
+        # Bottom status bar. Bottom-LEFT: an indeterminate activity bar (so a running fold doesn't look
+        # frozen) + a post-run search-effort summary ("explored: N · foldable: F · Ts"); the running
+        # status message fills the rest. The fold runs on gui.dispatch's worker thread, so the Tk loop
+        # stays live to animate the bar (and the scripted wait=True path pumps root.update()).
+        statusbar = ttk.Frame(self.root)
+        statusbar.pack(side="bottom", fill="x")
+        self._progress = ttk.Progressbar(statusbar, mode="indeterminate", length=110)
+        self._progress.pack(side="left", padx=(6, 6), pady=4)
+        ttk.Label(statusbar, textvariable=self._summary_var, anchor="w",
+                  foreground="#2c3e50").pack(side="left", padx=(0, 8))
+        ttk.Label(statusbar, textvariable=self._status, anchor="w").pack(
+            side="left", fill="x", expand=True, padx=6, pady=4)
 
     # ---- public / testable ----
     def pick(self, tiling, m, n):
@@ -192,6 +209,9 @@ class App:
         self._fold_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._set_status("folding %d cells%s…" % (len(cells), " (first example)" if first else ""))
+        self._summary_var.set("")
+        self._run_started = time.time()
+        self._progress.start(15)
         self.dispatch.start(self.tiling, cells, out_dir=out_dir, stacks=stacks, decomps=decomps,
                             first=first, timeout=timeout, on_done=self._result_q.put)
         self.root.after(150, self._poll_result)
@@ -297,14 +317,24 @@ class App:
             return
         self._pending = False
         self._cancel_btn.config(state="disabled")
+        self._progress.stop()
+        elapsed = time.time() - self._run_started if self._run_started else 0.0
         if result.bundle_path:
             rows, gate = results_mod.parse_bundle(result.bundle_path)
             self.results.show(rows, gate)
             self._on_row(None)                          # clear any stale preview from a prior fold
+            # Search-effort summary, bottom-left: the engine's printed explored + candidate-tried
+            # ("folds attempted") counts + the bundle's authoritative foldable-record count (see
+            # gui.runsummary; coveredCount is now printed, so "attempted" is a real number here).
+            n_fold = sum(1 for r in rows if r.get("foldable") is True)
+            summary = runsummary.summarize(result.output, foldable=n_fold)
+            self._summary_var.set(("%s · %.1fs" % (summary, elapsed)) if summary
+                                  else "%.1fs" % elapsed)
             self._set_status("done: %d record(s)%s%s"
                              % (len(rows), " — unproven" if gate else "",
                                 "" if self._save_var.get() else " — not saved (temporary)"))
         else:
+            self._summary_var.set("no fold · %.1fs" % elapsed)
             self._set_status("no fold (rc=%s): %s"
                              % (result.returncode, _failure_reason(result.output)))
         self._refresh_fold_btn()
@@ -322,7 +352,7 @@ class App:
         kinds = self._preview_kinds(row)
         if not kinds:
             self._preview_kind.set("")
-            self._thumb.config(image="")
+            self._thumb.config(image="", cursor="")
             self._thumb_ref = None
             self._preview_msg.config(
                 text="" if row is None else "no image for this record")
@@ -351,13 +381,13 @@ class App:
         row, kind = self._preview_row, self._preview_kind.get()
         path = self._preview_path(row, kind)
         if not path or not os.path.isfile(path):
-            self._thumb.config(image="")
+            self._thumb.config(image="", cursor="")
             self._thumb_ref = None
             self._preview_msg.config(text="image file missing")
             return
         self._thumb_ref = thumbs.load(path, master=self.root, max_px=360)
-        self._thumb.config(image=self._thumb_ref)
-        self._preview_msg.config(text="")
+        self._thumb.config(image=self._thumb_ref, cursor="hand2")   # clickable -> popup
+        self._preview_msg.config(text="double-click image to enlarge")
 
     def _preview_path(self, row, kind):
         """Absolute path to `kind`'s image for `row`, resolved against the record's own directory (the
@@ -371,6 +401,35 @@ class App:
         if not anchor:
             return None
         return os.path.join(os.path.dirname(anchor), files[kind])
+
+    def _open_preview_popup(self, event=None):
+        """Double-click handler: open the selected record's current image in a large, resizable popup
+        centred on the screen (~90% of the smaller screen dimension). thumbs.load only downscales, so a
+        smaller PNG shows at full native resolution rather than a blurry upscale. Each popup pins its own
+        image on the Toplevel (Tk GCs an image with no live reference), so several can be open at once.
+        Returns the Toplevel (None when the row has no image) so it is assertable headless.
+        I/O: (tk event|None) -> tk.Toplevel|None."""
+        path = self._preview_path(self._preview_row, self._preview_kind.get())
+        if not path or not os.path.isfile(path):
+            return None
+        tk, ttk = self._tk, self._ttk
+        top = tk.Toplevel(self.root)
+        top.transient(self.root)
+        top.title(os.path.basename(path))
+        big = int(min(self.root.winfo_screenwidth(), self.root.winfo_screenheight()) * 0.9)
+        img = thumbs.load(path, master=top, max_px=max(big, 360))
+        top._img_ref = img                              # per-window ref (survives multiple popups)
+        self._popup_img = img                           # last-opened, for headless assertions
+        lbl = ttk.Label(top, image=img)
+        lbl.pack(fill="both", expand=True)
+        lbl.bind("<Double-Button-1>", lambda e: top.destroy())   # double-click again to close
+        top.bind("<Escape>", lambda e: top.destroy())
+        top.update_idletasks()                          # realise geometry before centring
+        w, h = top.winfo_width(), top.winfo_height()
+        x = (self.root.winfo_screenwidth() - w) // 2
+        y = (self.root.winfo_screenheight() - h) // 2
+        top.geometry("+%d+%d" % (max(x, 0), max(y, 0)))
+        return top
 
     def _refresh_fold_btn(self):
         self._fold_btn.config(state="normal" if self.fold_enabled else "disabled")
