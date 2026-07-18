@@ -394,26 +394,32 @@ automorphisms = SquareLattice.automorphisms
 def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False, sheet=None):
     """Run the per-candidate gates and build the solution record (no id, no dedup).
 
-    Returns (gates_passed, sol). gates_passed in 0..3 mirrors the serial counter bumps
-    (0 = failed exit; 1 = passed exit, failed parity; 2 = passed exit+parity, failed
-    reflection; 3 = passed all). Deterministic.
+    Returns (gates_passed, parity_ok, sol). The foldability funnel is exit-footprint ->
+    reflection -> twist; PARITY IS DEMOTED to a diagnostic column and no longer prunes (see
+    below). gates_passed in 0..2 mirrors that funnel (0 = failed exit; 1 = passed exit, failed
+    reflection; 2 = passed exit+reflection). parity_ok is the raw parity_check bit (None when
+    exit failed in pruned mode, so it was never computed). Deterministic.
 
-    store_all=False (legacy): short-circuits on the first failing gate and emits a sol ONLY
-    when gates_passed == 3, with the historic verdict block — byte-identical to past output.
+    store_all=False (legacy): short-circuits on the first failing FUNNEL gate and emits a sol
+    ONLY when gates_passed == 2 (exit + reflection); twist then decides FOLD vs JAM.
     store_all=True (Phase A): NO pruning — every COVERED candidate yields a sol carrying the
-    REAL gate verdicts plus the new `vectorParity` column, so the foldability tests become
+    REAL gate verdicts plus the `vectorParity` / `parity` columns, so the foldability tests are
     non-destructive filterable columns instead of pruners.
     """
     ev = exit_footprint_check(chains, fp["shape"], fp.get("panels", 3))
     if not store_all and not ev:
-        return 0, None
+        return 0, None, None
+    # Parity is DEMOTED to a diagnostic column (2026-07-18). Physical folds of the 6x4-corner
+    # 1+1+1 and 2+1 parity-sole-fail deciders confirmed the nH/nV parity rule OVER-rejects real
+    # folds, and every physical JAM in the corpus is caught by reflection or twist — never by
+    # parity alone (verified across the whole foldfindings ground-truth corpus). So parity_check
+    # is still computed for the verdict/telemetry but NEVER prunes; the true foldability criterion
+    # is exit-footprint ∧ reflection ∧ twist. (vectorParity was already non-gating.)
     pa = parity_check(chains)
-    if not store_all and not pa:
-        return 1, None
     rf = reflection_check(chains)
     if not store_all and not rf:
-        return 2, None
-    gates_passed = 3 if (ev and pa and rf) else 2 if (ev and pa) else 1 if ev else 0
+        return 1, pa, None
+    gates_passed = 2 if (ev and rf) else 1 if ev else 0
 
     set_fold_counts(chains)          # ensure nH/nV on EVERY chain (parity_check may have bailed early)
     h = canonical_hash(fp, chains, m, n, sheet)
@@ -428,9 +434,11 @@ def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False, sheet=None):
             "twist": (twist["pass"] if twist["decided"] else None),
         }
     else:
-        # Historic verdict literal (keys + order) — preserves byte-identical legacy JSON.
+        # Pruned-path verdict: reaches here only when exit + reflection passed, so those are True;
+        # parity now carries its REAL (possibly False) value — it is a diagnostic column, not a
+        # gate, so a fold may legitimately be emitted with parity False.
         verdict = {
-            "arithmetic": True, "exitFootprint": True, "parity": True,
+            "arithmetic": True, "exitFootprint": True, "parity": pa,
             "reflection": True,
             "twist": (twist["pass"] if twist["decided"] else None),
         }
@@ -461,7 +469,7 @@ def _evaluate_candidate(chains, fp, decomp, m, n, store_all=False, sheet=None):
     if verdict["exitFootprint"] and verdict["twist"] is True:
         if not exit_footprint_check(chains, fp["shape"], fp.get("panels", 3)):
             raise AssertionError("emitted fold has non-coincident end footprint (hash=%s)" % h)
-    return gates_passed, sol
+    return gates_passed, pa, sol
 
 
 def _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id):
@@ -540,12 +548,12 @@ def _run_footprint_chunk(payload):
             local_ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
-                if gp >= 1:
+                gp, pa, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
+                if gp >= 1:                       # gp>=1 <=> exit passed
                     local_ctx["exitPass"] += 1
-                if gp >= 2:
+                if gp >= 1 and pa:                # parity is diagnostic now: exit-pass AND parity-pass
                     local_ctx["parityPass"] += 1
-                if gp >= 3:
+                if gp >= 2:                       # gp>=2 <=> exit+reflection passed (the real gate)
                     local_ctx["reflPass"] += 1
                 if sol is not None:
                     records.append(sol)
@@ -686,12 +694,12 @@ def run(opts, on_solution=None, is_cancelled=None):
             ctx["decompCount"] += 1
 
             def on_candidate(chains, _fp=footprint, _decomp=decomp):
-                gp, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
-                if gp >= 1:
+                gp, pa, sol = _evaluate_candidate(chains, _fp, _decomp, m, n, store_all, sheet)
+                if gp >= 1:                       # gp>=1 <=> exit passed
                     ctx["exitPass"] += 1
-                if gp >= 2:
+                if gp >= 1 and pa:                # parity is diagnostic now: exit-pass AND parity-pass
                     ctx["parityPass"] += 1
-                if gp >= 3:
+                if gp >= 2:                       # gp>=2 <=> exit+reflection passed (the real gate)
                     ctx["reflPass"] += 1
                 if sol is not None:
                     _admit(sol, solutions, dedup, ctx, opts, on_solution, next_id)

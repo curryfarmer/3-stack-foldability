@@ -86,9 +86,12 @@ def test_legacy_verdict_block_byte_identical_shape():
     legacy, _, _ = Search.run(_opts(False))
     assert legacy, "legacy run should still yield gate-survivors"
     for s in legacy:
-        # historic key order + all-true gates preserved (no vectorParity leak into legacy JSON).
+        # historic key order preserved (no vectorParity leak into the pruned JSON). The FUNNEL gates
+        # (exitFootprint, reflection) are still all-True here — pruned mode emits only exit+reflection
+        # survivors — but PARITY was demoted 2026-07-18 to a diagnostic column and now carries its
+        # REAL value (a fold may legitimately be emitted with parity False).
         assert list(s["verdict"].keys()) == ["arithmetic", "exitFootprint", "parity",
                                              "reflection", "twist"]
         assert s["verdict"]["exitFootprint"] is True
-        assert s["verdict"]["parity"] is True
+        assert isinstance(s["verdict"]["parity"], bool)   # real value now, no longer hardcoded True
         assert s["verdict"]["reflection"] is True

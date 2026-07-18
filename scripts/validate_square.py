@@ -30,7 +30,8 @@ order change while still catching a REAL content difference (different footprint
 WHICH ENGINE CANDIDATES TO MATCH AGAINST. We run the search in the *default* (non `--store-all`)
 mode — the same mode `square/generate.py` runs without `--store-all`, and the one that plausibly
 produced the candidates John was shown to test. In that mode `_evaluate_candidate` only emits a
-solution once exitFootprint + parity + reflection ALL pass (`search.py._evaluate_candidate`); the
+solution once exitFootprint + reflection pass (`search.py._evaluate_candidate`; parity was demoted
+2026-07-18 to a non-filtering diagnostic column, so it no longer affects which candidates emit); the
 solution is emitted regardless of the twist verdict (twist is "non-filtering": decided-False JAMs
 and undecided candidates still appear in `solutions`, carrying `verdict["twist"]` as
 True/False/None). So a ground-truth record whose canonical identity is absent from that solution set

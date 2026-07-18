@@ -71,8 +71,9 @@ def _triples(m, n):
 
     ab = Tw(L_AB) = pair(0,1), ac = Tw(L_AC) = pair(0,2), bc = Tw(L_BC) = pair(1,2).
     engine_twist = solution['verdict']['twist'] (the engine's three-loop AND).
-    closing = passes exitFootprint & reflection & parity, i.e. it is a fold that actually closes --
-    the only population whose twist the gate ever consults.
+    closing = passes exitFootprint & reflection, i.e. it is a fold that actually closes -- the only
+    population whose twist the gate ever consults. (Parity was demoted 2026-07-18 to a diagnostic
+    column and no longer gates, so it is not part of the closing criterion.)
     """
     sols, ctx, err = Search.run(_opts(m, n))
     assert err is None, (m, n, err)
@@ -82,7 +83,7 @@ def _triples(m, n):
         v = s["verdict"]
         pm = {(p["i"], p["j"]): p["tw"] for p in s["twistPairs"]}
         assert set(pm) == {(0, 1), (0, 2), (1, 2)}, (m, n, sorted(pm))
-        closing = bool(v["exitFootprint"] and v["reflection"] and v["parity"])
+        closing = bool(v["exitFootprint"] and v["reflection"])
         yield pm[(0, 1)], pm[(0, 2)], pm[(1, 2)], v["twist"], closing
 
 

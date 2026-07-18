@@ -75,7 +75,9 @@ def closing_candidates(
     Mirrors the legacy py/vet_enumerate.enumerate_grid but with allow_non_corner / dedup as params, so
     physical deciders (which are off-corner) are reachable. A candidate 'closes' iff it folds
     back to a footprint-shaped 3-stack (exit_footprint_check); it is predicted FOLD iff
-    parity & reflection & (twist undecided or passes).
+    reflection & (twist undecided or passes). PARITY IS DIAGNOSTIC ONLY (demoted 2026-07-18): it
+    is still recorded in `fails` when it fails, but no longer affects `foldable` — matching the
+    engine funnel (exit ∧ reflection ∧ twist). So a candidate can be foldable with fails==['parity'].
     I/O: (m, n, allow_non_corner, dedup) -> (list of {shape,decomp,hash,foldable,fails,chains}, K).
     """
     K = m * n // 3
@@ -105,7 +107,9 @@ def closing_candidates(
                     fails.append("twist")
                 out.append({
                     "shape": _fp["shape"], "decomp": _dc["decomp"], "hash": h,
-                    "foldable": (par and ref and (not tw["decided"] or tw["pass"])),
+                    # parity DEMOTED: foldable = reflection ∧ (twist undecided|pass); `fails` still
+                    # records a parity failure as a diagnostic but it no longer gates foldable.
+                    "foldable": (ref and (not tw["decided"] or tw["pass"])),
                     "fails": fails,
                     "chains": [{"kind": c["kind"],
                                 "baseCells": [[b[0], b[1]] for b in c["baseCells"]],
