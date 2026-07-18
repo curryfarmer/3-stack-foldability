@@ -33,8 +33,10 @@ GOLDEN = os.path.join(HERE, "golden")
 LABELS = os.path.join(HERE, "fixtures", "twoplus1_labels.json")
 
 # Matrix rationale: every committed results/*.json uses allowNonCorner=False, so that IS the
-# canonical baseline (and its counts cross-check the committed manifest: 6x4->2, 6x5->3, 6x6->12,
-# 6x7->33, 9x4->19, 8x6->310, 12x4->90). allowNonCorner=True explodes combinatorially (6x6 nc=True
+# canonical baseline. Corner-only 3-stack counts under the parity-DEMOTED engine (2026-07-18):
+# 6x4->6, 6x5->11, 6x6->30, 6x7->145, 9x4->21 (were 2/3/12/33/19 under the old parity filter; the
+# manifest anchors 6x4/6x5). 8x6/12x4 are heavy and not reconfirmed post-demotion -- live goldens are
+# authoritative. allowNonCorner=True explodes combinatorially (6x6 nc=True
 # alone runs >10 min), so it is kept only for the two grids where it is fast, as an extra lock on
 # the off-corner code path.
 #
