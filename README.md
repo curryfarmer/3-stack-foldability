@@ -92,11 +92,28 @@ To leave the environment later, run `deactivate`.
 With `(.venv)` showing in your prompt:
 
 ```bash
-pip install -e ".[test]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
 ```
 
 `-e` is an *editable* install — edits to the source take effect immediately, with no reinstall. Drop
 `[test]` if you do not want pytest. This pulls in matplotlib and takes a minute or two.
+
+> **Use `python -m pip`, not bare `pip`.** They are not always the same program: bare `pip` is
+> whichever `pip` your PATH finds first, which on a machine with several Pythons can install into a
+> different one than the environment you just activated — the install "succeeds" and then
+> `sq-generate` is nowhere to be found. `python -m pip` is by definition the pip belonging to the
+> `python` you are running.
+
+If it fails, the message usually names the cause:
+
+| what it says | what to do |
+|---|---|
+| `ERROR: ... requires a different Python: 3.9.x not in '>=3.10'` | your Python is too old — redo step 1, and check `python --version` in the *activated* environment |
+| `has a 'pyproject.toml' and its build backend is missing the 'build_editable' hook` | pip is too old for editable installs — run the `--upgrade pip` line above first, then retry |
+| `zsh: no matches found: .[test]` | the quotes were dropped — `".[test]"` must be quoted, brackets are shell wildcards |
+| `'pip' is not recognized` / `command not found: pip` | you used bare `pip`; use `python -m pip` as above |
+| `error: externally-managed-environment` | you are installing into the system Python, not the venv — the venv is not activated, redo step 3 |
 
 ### 5. Check it worked
 
