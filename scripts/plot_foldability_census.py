@@ -153,12 +153,24 @@ def _sweep_footer(fig, prov, tiling="righttri", shapes=False, y=0.005):
     """Stamp the sweep width onto the figure. A raw count is "folds found by THIS sweep" -- a 2+1
     cell scales with --hubs -- so a figure that does not carry its sweep is not reproducible.
     Deduped bars are reproducible, but only above the saturation width, which is why the hub count
-    is still stamped when `shapes` is true. I/O: (fig, prov, tiling, shapes) -> None."""
-    n21 = _sweep_note(prov, (tiling, "2plus1"))
+    is still stamped when `shapes` is true.
+
+    `tiling` may be several, for a figure covering more than one. They do NOT always agree -- the
+    1+1+1 ambient sweep is 2 variants on righttri and 3 on scalene -- so the note reports the range
+    rather than one panel's number standing in for the sheet.
+    I/O: (fig, prov, str|seq, shapes) -> None."""
+    tilings = [tiling] if isinstance(tiling, str) else list(tiling)
+    n21 = " / ".join(sorted({_sweep_note(prov, (t, "2plus1")) for t in tilings}))
     # Derived, never asserted: how many ambient variants the 1+1+1 cells actually swept. A census
     # written before that field existed says so rather than claiming coverage it may not have had.
-    vs = {v for (_, v) in prov.get((tiling, "1plus1plus1"), ()) if v is not None}
-    n111 = ("%d ambient variant%s" % (max(vs), "" if max(vs) == 1 else "s")) if vs else "variants ?"
+    vs = {v for t in tilings for (_, v) in prov.get((t, "1plus1plus1"), ()) if v is not None}
+    if not vs:
+        n111 = "variants ?"
+    elif len(vs) == 1:
+        n = vs.pop()
+        n111 = "%d ambient variant%s" % (n, "" if n == 1 else "s")
+    else:
+        n111 = "%d–%d ambient variants" % (min(vs), max(vs))
     note = "sweep: 2+1 %s · 1+1+1 %s" % (n21, n111)
     note += ("  ·  bars are congruence classes (sweep-independent above saturation)" if shapes
              else "  ·  bars are placements, NOT deduped (scale with the sweep)")
@@ -267,15 +279,12 @@ def fig_violators(data):
     return TS.save(fig, os.path.join(OUT, "twoloop_violators.png"))
 
 
-def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
-    """Grouped log bars: flat-fold count vs N_t, 2+1 against 1+1+1.
+def _draw_count_vs_nt(ax, data, tiling, ymax=None):
+    """Draw the grouped log bars for one tiling onto `ax`; return (shapes, dropped, peak).
 
-    Formerly square/render/report_examples.py:census_count_vs_nt, where the counts were typed in as
-    module constants and had already drifted from the census. Everything here -- bar heights, the
-    cap, the growth factor in the legend -- is derived from the summaries."""
+    Split out of fig_count_vs_nt so the single-tiling figure and the side-by-side pair draw from
+    ONE routine -- two copies of this would be two chances for the panels to disagree."""
     import numpy as np
-    plt = TS.plt
-    prov = prov or {}
     cell21 = data.get((tiling, "2plus1"), {})
     cell111 = data.get((tiling, "1plus1plus1"), {})
     # BOTH-or-neither: 1+1+1 is censused at even K only, so a bar at a K it never searched would
@@ -290,7 +299,6 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
     shapes = _deduped(cell21) and _deduped(cell111)
     x = np.arange(len(nts))
     w = 0.38
-    fig, ax = plt.subplots(figsize=(7.6, 4.6))
 
     def plot_bars(ys, offset, color, label):
         ax.bar(x + offset, [y if y > 0 else 0.0 for y in ys], w, color=color, label=label, zorder=3)
@@ -315,7 +323,7 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
     plot_bars(y21, -w / 2, TS.CHAIN[0], "2+1  (bounded, %s)" % cap)
     plot_bars(y111, w / 2, TS.CHAIN[2], "1+1+1  (%s)" % grow)
     ax.set_yscale("log")
-    ax.set_ylim(0.8, max(60000, max(y111 + y21) * 3))
+    ax.set_ylim(0.8, ymax or max(60000, max(y111 + y21) * 3))
     ax.set_xticks(x)
     ax.set_xticklabels([str(k) for k in nts])
     ax.set_xlabel("sub-chain length  N_t  (%s tiling)" % TILE_LABEL.get(tiling, tiling))
@@ -323,10 +331,23 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
     # Say which one the bars are, so the axis cannot be read as the other.
     ax.set_ylabel("distinct flat (Tw = 0) folds  [log]" if shapes
                   else "flat (Tw = 0) folds found by this sweep  [log]")
-    ax.set_title("Why 2+1 is rare and 1+1+1 is common", fontsize=11, fontweight="bold")
     ax.legend(loc="upper left", fontsize=8, frameon=True)
     ax.grid(axis="y", which="both", color=TS.GRID_EDGE, lw=0.8, zorder=0)
     ax.set_axisbelow(True)
+    return shapes, dropped, max(y111 + y21)
+
+
+def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
+    """Grouped log bars: flat-fold count vs N_t, 2+1 against 1+1+1.
+
+    Formerly square/render/report_examples.py:census_count_vs_nt, where the counts were typed in as
+    module constants and had already drifted from the census. Everything here -- bar heights, the
+    cap, the growth factor in the legend -- is derived from the summaries."""
+    plt = TS.plt
+    prov = prov or {}
+    fig, ax = plt.subplots(figsize=(7.6, 4.6))
+    shapes, dropped, _ = _draw_count_vs_nt(ax, data, tiling)
+    ax.set_title("Why 2+1 is rare and 1+1+1 is common", fontsize=11, fontweight="bold")
     # Two separate bottom lines: the omitted-K list is long enough to run under a right-aligned
     # footer set at the same height, and the two overlapping renders as one unreadable smear.
     if dropped:
@@ -336,6 +357,94 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
     _sweep_footer(fig, prov, tiling, shapes, y=0.030)
     fig.tight_layout(rect=[0, 0.055, 1, 1])
     return TS.save(fig, out_path or os.path.join(OUT, "count_vs_nt_%s.png" % tiling))
+
+
+def _table_rows(data, tiling):
+    """Per-K `closing / flat-shapes` rows for one tiling, as (header, row21, row111) text lists."""
+    cell21 = data.get((tiling, "2plus1"), {})
+    cell111 = data.get((tiling, "1plus1plus1"), {})
+    ks = sorted(set(cell21) | set(cell111))
+    # Only the K where SOMETHING happens, else the row is a wall of 0/0 that hides the signal.
+    ks = [k for k in ks if (cell21.get(k) or [0])[0] or (cell111.get(k) or [0])[0]]
+
+    def num(n):
+        # Six-figure closing counts blow the column width out at any readable font size. Abbreviate
+        # only past 10 000, where the exact digit is not what the row is for -- the small counts,
+        # which ARE the finding, stay exact.
+        return str(n) if n < 10000 else ("%.0fk" % (n / 1000.0) if n >= 100000
+                                         else "%.1fk" % (n / 1000.0))
+
+    def cell(c, k):
+        if k not in c:
+            return "–"                       # not searched -- distinct from a searched zero
+        closing = c[k][0]
+        return "%s/%s" % (num(closing), num(_flat(c, k))) if closing else "0"
+
+    return (["N_t"] + [str(k) for k in ks],
+            ["2+1"] + [cell(cell21, k) for k in ks],
+            ["1+1+1"] + [cell(cell111, k) for k in ks])
+
+
+def fig_count_vs_nt_pair(data, prov=None, tilings=("righttri", "scalene"), out_path=None):
+    """The two both-decomposition tilings side by side, over their census tables.
+
+    One sheet rather than two figures: the finding is that the SAME shape appears on two different
+    tilings, and that is only visible when they share an axis scale. Both panels are drawn by
+    _draw_count_vs_nt with a common ymax so the bar heights are directly comparable."""
+    plt = TS.plt
+    prov = prov or {}
+    fig = plt.figure(figsize=(13.0, 6.9))
+    # No tight_layout below: a table Axes has no tight-layout geometry, and letting it run both
+    # warns and shoves the panels around. The margins here are set once, explicitly.
+    gs = fig.add_gridspec(2, len(tilings), height_ratios=[4.0, 1.0], hspace=0.34, wspace=0.12,
+                          left=0.055, right=0.985, top=0.855, bottom=0.075)
+
+    peak = max(max(_flat(data.get((t, d), {}), k) for d in ("2plus1", "1plus1plus1")
+                   for k in data.get((t, d), {})) for t in tilings)
+    ymax = max(60000, peak * 3)
+
+    shapes_all, dropped_any = True, []
+    for i, tiling in enumerate(tilings):
+        ax = fig.add_subplot(gs[0, i])
+        shapes, dropped, _ = _draw_count_vs_nt(ax, data, tiling, ymax=ymax)
+        ax.set_title(TILE_LABEL.get(tiling, tiling), fontsize=10, fontweight="bold")
+        if i:                                     # one y-label on the sheet, not one per panel
+            ax.set_ylabel("")
+            ax.tick_params(labelleft=False)
+        shapes_all = shapes_all and shapes
+        dropped_any += [(tiling, dropped)] if dropped else []
+
+        tax = fig.add_subplot(gs[1, i])
+        tax.axis("off")
+        header, r21, r111 = _table_rows(data, tiling)
+        tbl = tax.table(cellText=[r21, r111], colLabels=header, loc="center",
+                        cellLoc="center", colLoc="center", bbox=[0.0, 0.30, 1.0, 0.66])
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(7.0)
+        for (row, col), c in tbl.get_celld().items():
+            c.set_edgecolor(TS.GRID_EDGE)
+            c.set_linewidth(0.6)
+            if row == 0:
+                c.set_text_props(fontweight="bold")
+            elif col == 0:
+                c.set_text_props(fontweight="bold",
+                                 color=TS.CHAIN[0] if row == 1 else TS.CHAIN[2])
+        tax.text(0.5, 0.16, "closing placements / distinct flat shapes   ·   "
+                            "– = K not censused   ·   k = thousands",
+                 ha="center", va="top", transform=tax.transAxes,
+                 fontsize=6.5, color=TS.MUTED, style="italic")
+
+    fig.suptitle("Why 2+1 is rare and 1+1+1 is common", fontsize=13, fontweight="bold", y=0.965)
+    fig.text(0.5, 0.915, "the two triangle tilings that carry both decompositions — "
+                         "2+1 stops exactly where 1+1+1 starts, on each of them",
+             ha="center", fontsize=8.5, color=TS.MUTED, style="italic")
+    if dropped_any:
+        fig.text(0.005, 0.008, "bars omit the odd N_t, where 1+1+1 was censused at even K only "
+                               "(the tables keep them): %s"
+                 % "; ".join("%s %s" % (t, ", ".join(str(k) for k in d)) for t, d in dropped_any),
+                 fontsize=6, color=TS.MUTED, style="italic")
+    _sweep_footer(fig, prov, tilings, shapes_all, y=0.030)
+    return TS.save(fig, out_path or os.path.join(OUT, "count_vs_nt_pair.png"))
 
 
 def main(argv=None):
@@ -359,6 +468,10 @@ def main(argv=None):
                          ("scalene", "fig3_count_vs_Nt_scalene.png")):
         paths.append(fig_count_vs_nt(data, prov, tiling=tiling,
                                      out_path=os.path.join(REPORT_FIGS, name)))
+    # Both tilings on one sheet, over their census tables -- the standalone summary figure.
+    paths.append(fig_count_vs_nt_pair(data, prov))
+    paths.append(fig_count_vs_nt_pair(
+        data, prov, out_path=os.path.join(REPORT_FIGS, "fig3_count_vs_Nt_pair.png")))
     for p in paths:
         print("wrote", os.path.relpath(p, REPO))
 
