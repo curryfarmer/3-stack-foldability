@@ -25,8 +25,10 @@ Usage:
 """
 import argparse
 import gzip
+import itertools
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -53,10 +55,42 @@ CHECK_EVERY = 2000        # records between resource checks (RSS polling is not 
 
 # 2+1 START hubs to sweep. A "hub" is a distinct start trapezoid -- a different mid tile AND/OR a
 # different arm pair -- so hubs are genuinely different starting configurations, not translations of
-# one. A single hub yields only ~1 distinct foldable 2+1 region, which is why gen_testset._gen_for
-# sweeps 8; the census matches that so its counts are comparable with the prior k-stress tables.
-# (1+1+1 has no analogue: its start hub is fixed by build_ambient_*, selected by the --hub variant.)
-HUBS_21 = 8
+# one. Shared with the CLI (see find_example.DEFAULT_HUBS_21) so "the CLI found none" and "the census
+# counted zero" mean the same thing.
+#
+# WAS 8, matching gen_testset. That was too narrow: 8 central hubs reach only 4 of righttri's 8 hub
+# classes, so the counts it produced were undercounts, not censuses (righttri 2+1 K=4 reads 5 at 8
+# hubs and 12 at 20). Counts from this file are therefore NOT comparable with the pre-2026-07-21
+# k-stress tables or with figures built off them -- compare `hubs` in the summary first, which is
+# why that field now exists. (1+1+1's analogue is HUBS_111 below -- a discrete variant, not a count.)
+HUBS_21 = FE.DEFAULT_HUBS_21
+
+# 1+1+1 START-hub variants to sweep, per tiling. Unlike 2+1's `hubs` (a COUNT of central start
+# trapezoids) a 1+1+1 hub is a discrete AMBIENT variant: build_ambient_right/scalene lay a different
+# arm pair around the mid tile, and on a tiling whose tile has unequal sides those ambients are
+# genuinely inequivalent, not translations of one another. The census used to build only the
+# builder's default (righttri HL, scalene omitMG), so every published 1+1+1 count was a
+# single-variant undercount -- righttri LL alone adds 14 flat folds at K=14 (40 -> 54). hex and
+# equilateral have no variant: their builders take no hub.
+HUBS_111 = {"righttri": ["LL", "HL"], "scalene": ["omitVM", "omitMG", "omitVG"]}
+
+_GIT_COMMIT = ...          # sentinel: not probed yet (None is a legitimate "not a checkout" answer)
+
+
+def _git_commit():
+    """Short HEAD sha of the tree that produced this summary, or None outside a checkout. Provenance
+    is not decoration here: these counts are SWEEP-dependent, and fixing the hub coverage moved
+    published numbers (righttri 2+1 K=4: 5 -> 12), so a summary that cannot say which code and which
+    sweep width produced it cannot be compared with another one. Probed once per process."""
+    global _GIT_COMMIT
+    if _GIT_COMMIT is ...:
+        try:
+            out = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"],
+                                 capture_output=True, text=True, timeout=30)
+            _GIT_COMMIT = out.stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            _GIT_COMMIT = None
+    return _GIT_COMMIT
 
 # Funnel stages, in gate order, per decomposition. The two ladders are not identical -- 1+1+1 fuses
 # the exit-footprint and parity gates into the enumerator (a candidate failing either is never
@@ -169,14 +203,22 @@ def run_cell(tiling, decomp, K, cap=CAP_SEC, outdir=OUTDIR, hubs=HUBS_21,
     t0 = time.time()
     stats = Counter({"tried": 0, "topology_pass": 0, "closure_pass": 0, "holes_filtered": 0})
 
+    variants = None                              # 1+1+1 only; recorded as provenance below
     if decomp == "2plus1":
         # equilateral 2+1 routes here too (gen_eq delegates to gen_21 for the unified domino model),
         # but gen_eq's signature has no `hubs`, so call gen_21 directly to sweep them.
-        lat, it = FE.gen_21(tiling, K, hubs=hubs, stats=stats, budget=cap, t0=t0)
+        it = FE.gen_21(tiling, K, hubs=hubs, stats=stats, budget=cap, t0=t0)[1]
     elif tiling == "equilateral":
-        lat, it = FE.gen_eq(decomp, K, stats=stats, budget=cap, t0=t0)
+        it = FE.gen_eq(decomp, K, stats=stats, budget=cap, t0=t0)[1]
     else:
-        lat, it = FE.gen_111(tiling, K, hub=None, stats=stats, budget=cap, t0=t0)
+        # Every inequivalent ambient variant, chained into ONE cell -- a census cell means "all
+        # closing folds at this (tiling, decomp, K)", and a variant never built is a missing fold,
+        # not a duplicate. Lazily: the chain builds each ambient only when the previous is drained.
+        # `cap`/`t0` are shared, so the cell's ceilings still bound the variants COMBINED (an
+        # overrun mid-variant is flagged truncated exactly as before, not silently short).
+        variants = HUBS_111.get(tiling, [None])
+        it = itertools.chain.from_iterable(
+            FE.gen_111(tiling, K, hub=h, stats=stats, budget=cap, t0=t0)[1] for h in variants)
 
     os.makedirs(outdir, exist_ok=True)
     stem = "%s_%s_K%d" % (tiling, decomp, K)
@@ -229,6 +271,16 @@ def run_cell(tiling, decomp, K, cap=CAP_SEC, outdir=OUTDIR, hubs=HUBS_21,
     summary = {
         "tiling": tiling, "decomp": decomp, "K": K,
         "closing": closing, "tw0": tw0,
+        # Provenance -- WHICH SWEEP produced these counts. Without it a summary is uncomparable:
+        # `closing` is a function of the hub sample, not of (tiling, decomp, K) alone, and the
+        # figures built off these files stamp this in their caption.
+        "hubs": hubs if decomp == "2plus1" else None,
+        "hub_variants": variants,
+        "git_commit": _git_commit(),
+        # The CEILINGS, not just `stop`. A truncated count is a lower bound whose value depends on
+        # the cap that produced it, and the previous sweep ran hex at 900s and everything else at
+        # 3600s -- so its cells were not mutually comparable and nothing on disk said so.
+        "caps": {"sec": cap, "rss_mb": cap_rss, "records": cap_records},
         "truncated": truncated, "stop": stop, "dt": round(dt, 1),
         "peak_rss_mb": round(peak_rss),
         "funnel": {k: stats[k] for k in (FUNNEL_21 if decomp == "2plus1" else FUNNEL_111)},
@@ -336,7 +388,9 @@ def main():
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 4))
     ap.add_argument("--outdir", default=OUTDIR)
     ap.add_argument("--hubs", type=int, default=HUBS_21,
-                    help="2+1 start hubs to sweep (default %d, matching the prior census)" % HUBS_21)
+                    help="2+1 start hubs to sweep (default %d, well past the measured saturation "
+                         "point of 4 -- see find_example.DEFAULT_HUBS_21; 8 reproduces the narrower "
+                         "pre-2026-07-21 sweep)" % HUBS_21)
     ap.add_argument("--all-K-111", action="store_true",
                     help="also enumerate 1+1+1 at odd K (default: even K only)")
     ap.add_argument("--all", action="store_true", help="every tiling x every decomp")
@@ -357,6 +411,10 @@ def main():
     print("census: %d cells, %d jobs, caps %.0fs / %dMB / %d recs per cell -> %s"
           % (len(cells), jobs, args.cap, args.cap_rss, args.cap_records,
              os.path.relpath(args.outdir, REPO)), flush=True)
+    # The sweep width is the single most important thing to read back off a run: the counts are a
+    # function of it, so print it up front as well as recording it per cell.
+    print("  hubs: 2+1 sweeps %d start trapezoids; 1+1+1 sweeps ambient variants %s  [commit %s]"
+          % (args.hubs, {t: HUBS_111.get(t, [None]) for t in tilings}, _git_commit()), flush=True)
 
     done = []
     ex = ProcessPoolExecutor(max_workers=jobs)

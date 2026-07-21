@@ -121,6 +121,36 @@ def central_trapezoid(lat, interior_deg):
     return next(f for f in lat.all_trapezoids() if f[1] == mid)
 
 
+# Default number of 2+1 START hubs to sweep. 1 hub is NOT representative: a righttri tile has one
+# hypotenuse and two legs, so its arm PAIRS are not congruent. A 1-hub search reported "none" at
+# K=6 and K=8 where a wider sweep finds folds -- a false obstruction, which is what this default
+# exists to prevent.
+#
+# The value is set from measurement, not from a symmetry argument. Counting righttri START
+# trapezoids up to congruence suggests only 2 classes are needed (N/E/S/W mids are related by 90
+# deg rotation, leaving leg+leg and hyp+leg) -- but that is WRONG, and the table below is why: a
+# hub's congruence class does not carry its whole fold, because the region also has to fit the
+# finite lattice. Distinct congruence classes of closing righttri 2+1 folds, by hubs swept:
+#
+#     K \ hubs   1   2   3   4   6   8  12  20
+#          4     1   1   1   1   1   1   1   1
+#          6     0   0   1   1   1   1   1   1
+#          7     2   2   2   2   2   2   2   2
+#          8     0   0   0   3   3   3   3   3
+#         10     0   0   0   0   0   0   0   0
+#
+# h<4 yields false zeros; the count saturates at h=4 and is flat out to h=20. 20 keeps a wide
+# margin over the observed saturation point (and over-covers the other tilings, whose trapezoids
+# are fewer). Note the RAW placement count never saturates -- it keeps climbing with h (K=7: 4 at
+# h=4, 18 at h=20) because no caller dedups by congruence. Anything that reports a fold COUNT
+# rather than a yes/no must therefore dedup, or it is reporting the sweep width.
+#
+# census.HUBS_21 reads this SAME constant deliberately: it makes "the CLI found none" and "the
+# census counted zero" the same statement by construction, instead of two samples that can disagree.
+# Callers that want the old narrower sample (gen_testset, the test suite) pass hubs=8 explicitly.
+DEFAULT_HUBS_21 = 20
+
+
 def central_hubs(lat, interior_deg, n):
     """The n most-central start trapezoids (distinct hubs). Each interior tile can be the middle of
     several trapezoids (different arm pairs), and nearby mids give more — a single central hub yields
@@ -258,35 +288,67 @@ def build_lat(tiling, decomp, K):
     return gen_111(tiling, K, hub=None)[0]
 
 
-# --------------------------------------------------------------------------- search (find first)
-def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget, stats=None):
-    """March K upward; PREFER a foldable (Tw=0) closing fold matching the hole mode, returning it
-    immediately. If none turns up within the K range / time budget, fall back to the first closing
-    JAM example that matched the hole mode (a proof-of-concept is still useful even when it jams).
+# --------------------------------------------------------------------------- search
+def iter_candidates(tiling, decomp, K, hub=None, hubs=None, holes_mode="allow",
+                    budget=None, t0=None, stats=None):
+    """(lat, iterator) over every closing candidate at a SINGLE K, seam-gated and holes-filtered.
 
-    `stats`, if given, is threaded into whichever gen_* this calls (see their docstrings) and also
-    gets "holes_filtered" bumped here for candidates skipped by holes_mode -- pure counters, no
-    effect on which candidate is returned."""
-    t0 = time.time()
+    The one dispatch point for "which candidates exist at (tiling, decomp, K)". find_first takes the
+    first hit off this and tri-generate --all drains it, so find-one and find-all cannot report
+    different candidate sets -- which is the whole failure mode this module has already had once
+    (the CLI searching 1 hub while the census searched 8, and the two then disagreeing in print).
+
+    Dispatch is on DECOMP first. Equilateral 2+1 must route to gen_21 directly: gen_eq only delegates
+    2+1 onward and its signature has no `hubs`, so a tiling-first order silently pins equilateral 2+1
+    to gen_21's 1-hub default."""
+    hubs = DEFAULT_HUBS_21 if hubs is None else hubs
+    t0 = time.time() if t0 is None else t0
     interior_deg = 3 if tiling != "hex" else 6
-    fallback = None
-    for K in range(K0, kcap + 1, step):
-        if tiling == "equilateral":
-            lat, gen = gen_eq(decomp, K, stats=stats, budget=budget, t0=t0)
-        elif decomp == "1plus1plus1":
-            lat, gen = gen_111(tiling, K, hub, stats=stats, budget=budget, t0=t0)
-        else:
-            lat, gen = gen_21(tiling, K, stats=stats, budget=budget, t0=t0)
+    if decomp == "2plus1":
+        lat, gen = gen_21(tiling, K, hubs=hubs, stats=stats, budget=budget, t0=t0)
+    elif tiling == "equilateral":
+        lat, gen = gen_eq(decomp, K, stats=stats, budget=budget, t0=t0)
+    else:
+        lat, gen = gen_111(tiling, K, hub, stats=stats, budget=budget, t0=t0)
+
+    def it():
         for cand in gen:
-            SFILT.apply(lat, cand)          # STRICT START<->END seam gate: demote a mirror/off-cell FOLD to JAM
+            SFILT.apply(lat, cand)      # STRICT START<->END seam gate: demote a mirror/off-cell FOLD to JAM
             hc = len(HF.holes(lat, cand["region"], interior_deg))
             cand["holes"] = hc
             if holes_mode == "none" and hc > 0:
                 if stats is not None:
                     stats["holes_filtered"] += 1
-                if time.time() - t0 > budget:
-                    return fallback
+                if budget is not None and time.time() - t0 > budget:
+                    return
                 continue
+            yield cand
+            if budget is not None and time.time() - t0 > budget:
+                return
+
+    return lat, it()
+
+
+def find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget, stats=None, hubs=None):
+    """March K upward; PREFER a foldable (Tw=0) closing fold matching the hole mode, returning it
+    immediately. If none turns up within the K range / time budget, fall back to the first closing
+    JAM example that matched the hole mode (a proof-of-concept is still useful even when it jams).
+
+    `hub` (2+1: unused; 1+1+1: the ambient variant) and `hubs` (2+1: how many start trapezoids to
+    sweep, default DEFAULT_HUBS_21) are unrelated knobs despite the near-identical names. This used
+    to call gen_21 with NO hubs argument, silently taking its single-example default of 1 and
+    reporting "none found" for K where 8 hubs find several -- so a not-found here was never evidence
+    of an obstruction. See DEFAULT_HUBS_21.
+
+    `stats`, if given, is threaded into whichever gen_* this calls (see their docstrings) and also
+    gets "holes_filtered" bumped here for candidates skipped by holes_mode -- pure counters, no
+    effect on which candidate is returned."""
+    t0 = time.time()
+    fallback = None
+    for K in range(K0, kcap + 1, step):
+        lat, gen = iter_candidates(tiling, decomp, K, hub=hub, hubs=hubs, holes_mode=holes_mode,
+                                   budget=budget, t0=t0, stats=stats)
+        for cand in gen:
             if cand["foldable"]:
                 return lat, K, cand                 # Tw=0 -> take it right away
             if fallback is None:
@@ -392,7 +454,7 @@ def _jsonable(cand):
 
 # --------------------------------------------------------------------------- one case
 def run_case(tiling, decomp, holes_mode, K0=None, step=None, kcap=None, hub=None, budget=120.0,
-             kmin=None, suffix="", quiet=False):
+             kmin=None, suffix="", quiet=False, hubs=None):
     pk, ps, pc = KPLAN[(tiling, decomp)]
     K0 = K0 or pk
     step = step or ps
@@ -401,11 +463,15 @@ def run_case(tiling, decomp, holes_mode, K0=None, step=None, kcap=None, hub=None
         while K0 < kmin:
             K0 += step
         kcap = max(kcap, K0 + (pc - pk))
-    res = find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget)
+    res = find_first(tiling, decomp, holes_mode, K0, step, kcap, hub, budget, hubs=hubs)
     if res is None:
         if not quiet:
-            print("  [%s %s holes=%s%s] NONE found (K %d..%d, budget %.0fs)"
-                  % (tiling, decomp, holes_mode, suffix, K0, kcap, budget))
+            # State the hub SCOPE: "none found" is a statement about the sample searched, not about
+            # the tiling (see find_first / DEFAULT_HUBS_21).
+            scope = ("%d hubs" % (DEFAULT_HUBS_21 if hubs is None else hubs)
+                     if decomp == "2plus1" else "hub %s" % (hub or "default"))
+            print("  [%s %s holes=%s%s] NONE found (K %d..%d, %s, budget %.0fs)"
+                  % (tiling, decomp, holes_mode, suffix, K0, kcap, scope, budget))
         return None
     lat, K, cand = res
     over, sheet, verdict = render_case(tiling, decomp, holes_mode, lat, K, cand, suffix=suffix)
@@ -440,7 +506,11 @@ def main():
     ap.add_argument("--K", type=int)
     ap.add_argument("--step", type=int)
     ap.add_argument("--kcap", type=int)
-    ap.add_argument("--hub", help="righttri: LL/HL ; scalene: omitVM/omitMG/omitVG")
+    ap.add_argument("--hub", help="1+1+1 ambient variant — righttri: LL/HL ; scalene: omitVM/omitMG/omitVG")
+    ap.add_argument("--hubs", type=int, default=None,
+                    help="2+1: how many distinct START trapezoids to sweep (default %d). Unrelated to "
+                         "--hub. Lower it for speed; a not-found at few hubs proves nothing."
+                         % DEFAULT_HUBS_21)
     ap.add_argument("--budget", type=float, default=120.0, help="per-case wall-clock budget (s)")
     ap.add_argument("--kmin", type=int, help="enforce chain length K >= this (raises start K)")
     ap.add_argument("--suffix", default="", help="appended to output filenames (separate battery)")
@@ -458,7 +528,7 @@ def main():
                 for holes in ("allow", "none"):
                     print("=== %s / %s / holes=%s ===" % (tiling, decomp, holes), flush=True)
                     r = run_case(tiling, decomp, holes, budget=args.budget,
-                                 kmin=args.kmin, suffix=args.suffix)
+                                 kmin=args.kmin, suffix=args.suffix, hubs=args.hubs)
                     rows.append(r if r else {"tiling": tiling, "decomp": decomp, "holes": holes,
                                              "K": None, "verdict": "NONE found"})
         print("\n================ SUMMARY ================")
@@ -471,7 +541,7 @@ def main():
     if not (args.tiling and args.decomp):
         ap.error("give --tiling and --decomp (or --all)")
     run_case(args.tiling, args.decomp, args.holes, K0=args.K, step=args.step, kcap=args.kcap,
-             hub=args.hub, budget=args.budget, kmin=args.kmin, suffix=args.suffix)
+             hub=args.hub, budget=args.budget, kmin=args.kmin, suffix=args.suffix, hubs=args.hubs)
 
 
 if __name__ == "__main__":
