@@ -128,21 +128,29 @@ def central_trapezoid(lat, interior_deg):
 #
 # The value is set from measurement, not from a symmetry argument. Counting righttri START
 # trapezoids up to congruence suggests only 2 classes are needed (N/E/S/W mids are related by 90
-# deg rotation, leaving leg+leg and hyp+leg) -- but that is WRONG, and the table below is why: a
+# deg rotation, leaving leg+leg and hyp+leg) -- but that is WRONG, and the tables below are why: a
 # hub's congruence class does not carry its whole fold, because the region also has to fit the
-# finite lattice. Distinct congruence classes of closing righttri 2+1 folds, by hubs swept:
+# finite lattice. Distinct congruence classes of closing 2+1 folds, by hubs swept:
 #
-#     K \ hubs   1   2   3   4   6   8  12  20
-#          4     1   1   1   1   1   1   1   1
-#          6     0   0   1   1   1   1   1   1
-#          7     2   2   2   2   2   2   2   2
-#          8     0   0   0   3   3   3   3   3
-#         10     0   0   0   0   0   0   0   0
+#   righttri              scalene
+#   K \ h  1  2  3  4  8 20 32    K \ h  1  2  3  4  8 12 20 32
+#       4  1  1  1  1  1  1  1        4  1  1  1  1  2  2  2  2
+#       6  0  0  1  1  1  1  1        6  0  0  1  1  1  1  1  1
+#       7  2  2  2  2  2  2  2        8  0  0  0  0  0  0  4  4   <-- 20 needed
+#       8  0  0  0  3  3  3  3        9  0  0  5  5  5  5  5  5
+#      10  0  0  0  0  0  0  0       10  0  0  2  2  3  3  3  3
+#                                    12  0  0  4  4  4  4  4  4
 #
-# h<4 yields false zeros; the count saturates at h=4 and is flat out to h=20. 20 keeps a wide
-# margin over the observed saturation point (and over-covers the other tilings, whose trapezoids
-# are fewer). Note the RAW placement count never saturates -- it keeps climbing with h (K=7: 4 at
-# h=4, 18 at h=20) because no caller dedups by congruence. Anything that reports a fold COUNT
+# DO NOT read a single tiling's saturation point as the rule. righttri saturates at h=4; scalene
+# does not, and its K=8 cell is a hard counter-example -- ZERO folds out to 12 hubs, 4 shapes at 20.
+# The saturation point is not even monotone in K (scalene K=9 saturates at 3, K=8 needs 20), so a
+# zero at any fixed width is evidence about the sweep and not about the tiling until it has been
+# re-checked wider. 20 is the smallest width that covers every cell measured across both tilings;
+# h=32 was checked and adds nothing, so this sits AT the observed boundary, not comfortably past it.
+# Raise it before trusting a new zero, especially on a tiling not in the tables above.
+#
+# Note the RAW placement count never saturates -- it keeps climbing with h (righttri K=7: 4 at h=4,
+# 18 at h=20, 24 at h=32) because no caller dedups by congruence. Anything that reports a fold COUNT
 # rather than a yes/no must therefore dedup, or it is reporting the sweep width.
 #
 # census.HUBS_21 reads this SAME constant deliberately: it makes "the CLI found none" and "the

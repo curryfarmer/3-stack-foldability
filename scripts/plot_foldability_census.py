@@ -64,9 +64,16 @@ def _viol_from_spectrum(spec):
 def load(census_dir=None):
     """<census_dir>/*.summary.json -> (data, prov).
 
-    data[(tiling, decomp)][K] = (closing, foldable, viol, trunc)
+    data[(tiling, decomp)][K] = (closing, foldable, viol, trunc, distinct, distinct_flat)
     prov[(tiling, decomp)]    = set of `hubs` values seen ({None} for cells written before the
                                 field existed) -- the sweep width behind those counts.
+
+    `closing`/`foldable` are PLACEMENT counts: every candidate every start hub yielded, with
+    congruent folds at different positions counted separately. They grow with the sweep width even
+    when no new shape appears, so they are not reproducible. `distinct`/`distinct_flat` are
+    congruence classes, stamped in by triangle.tri.census_distinct; they fall back to the placement
+    counts on summaries written before that pass existed, so an un-deduped census still plots (and
+    _sweep_footer says which it was).
     I/O: (census_dir | None -> results/census) -> (data, prov)."""
     data, prov = {}, {}
     for p in glob.glob(os.path.join(census_dir or CENSUS, "*.summary.json")):
@@ -74,15 +81,32 @@ def load(census_dir=None):
             d = json.load(fh)
         key = (d["tiling"], d["decomp"])
         viol = _viol_from_spectrum(d.get("spectrum", {})) if d["decomp"] == "1plus1plus1" else None
-        data.setdefault(key, {})[d["K"]] = (d["closing"], d["tw0"], viol, bool(d["truncated"]))
-        prov.setdefault(key, set()).add(d.get("hubs"))
+        data.setdefault(key, {})[d["K"]] = (d["closing"], d["tw0"], viol, bool(d["truncated"]),
+                                            d.get("distinct"), d.get("distinct_tw0"))
+        variants = d.get("hub_variants")
+        prov.setdefault(key, set()).add((d.get("hubs"),
+                                         len(variants) if variants else None))
     return data, prov
+
+
+def _flat(cell, K):
+    """The flat-fold count to PLOT at this K: distinct shapes when the census has been deduped,
+    otherwise the raw placement count. Never mix the two silently in one series -- see _deduped."""
+    rec = cell[K]
+    return rec[1] if len(rec) < 6 or rec[5] is None else rec[5]
+
+
+def _deduped(cell):
+    """True iff every K in this series carries a distinct count (so the series is shapes, not
+    placements). A partially-deduped census would otherwise draw two different quantities on one
+    axis and label them the same."""
+    return bool(cell) and all(len(r) >= 6 and r[5] is not None for r in cell.values())
 
 
 def _sweep_note(prov, key):
     """One-line human description of how wide the sweep behind a series was.
     I/O: (prov, (tiling, decomp)) -> str, e.g. "20 hubs" / "8 hubs" / "hubs ?"."""
-    seen = {h for h in prov.get(key, ()) if h is not None}
+    seen = {h for (h, _) in prov.get(key, ()) if h is not None}
     if not seen:
         return "hubs ?"                      # pre-provenance census -- unknowable from the file
     if len(seen) == 1:
@@ -124,14 +148,20 @@ def _nocompute_band(ax):
             fontsize=6.5, color=TS.MUTED, linespacing=1.1)
 
 
-def _sweep_footer(fig, prov, tiling="righttri"):
-    """Stamp the sweep width onto the figure. A count here is "folds found by THIS sweep", and a
-    2+1 cell scales with --hubs while a 1+1+1 cell is one ambient hub variant -- so a figure that
-    does not carry its sweep is not reproducible. I/O: (fig, prov, tiling) -> None."""
+def _sweep_footer(fig, prov, tiling="righttri", shapes=False, y=0.005):
+    """Stamp the sweep width onto the figure. A raw count is "folds found by THIS sweep" -- a 2+1
+    cell scales with --hubs -- so a figure that does not carry its sweep is not reproducible.
+    Deduped bars are reproducible, but only above the saturation width, which is why the hub count
+    is still stamped when `shapes` is true. I/O: (fig, prov, tiling, shapes) -> None."""
     n21 = _sweep_note(prov, (tiling, "2plus1"))
-    n111 = _sweep_note(prov, (tiling, "1plus1plus1"))
-    fig.text(0.995, 0.005, "sweep: 2+1 %s · 1+1+1 %s (single ambient variant)" % (n21, n111),
-             ha="right", va="bottom", fontsize=6, color=TS.MUTED, style="italic")
+    # Derived, never asserted: how many ambient variants the 1+1+1 cells actually swept. A census
+    # written before that field existed says so rather than claiming coverage it may not have had.
+    vs = {v for (_, v) in prov.get((tiling, "1plus1plus1"), ()) if v is not None}
+    n111 = ("%d ambient variant%s" % (max(vs), "" if max(vs) == 1 else "s")) if vs else "variants ?"
+    note = "sweep: 2+1 %s · 1+1+1 %s" % (n21, n111)
+    note += ("  ·  bars are congruence classes (sweep-independent above saturation)" if shapes
+             else "  ·  bars are placements, NOT deduped (scale with the sweep)")
+    fig.text(0.995, y, note, ha="right", va="bottom", fontsize=6, color=TS.MUTED, style="italic")
 
 
 def fig_headline(data, prov=None):
@@ -254,8 +284,9 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri"):
     if not nts:
         raise SystemExit("no K is present for both decomps of %s -- nothing to plot" % tiling)
 
-    y21 = [cell21[k][1] for k in nts]
-    y111 = [cell111[k][1] for k in nts]
+    y21 = [_flat(cell21, k) for k in nts]
+    y111 = [_flat(cell111, k) for k in nts]
+    shapes = _deduped(cell21) and _deduped(cell111)
     x = np.arange(len(nts))
     w = 0.38
     fig, ax = plt.subplots(figsize=(7.6, 4.6))
@@ -287,17 +318,22 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri"):
     ax.set_xticks(x)
     ax.set_xticklabels([str(k) for k in nts])
     ax.set_xlabel("sub-chain length  N_t  (%s tiling)" % TILE_LABEL.get(tiling, tiling))
-    ax.set_ylabel("flat (Tw = 0) folds found by this sweep  [log]")
+    # A placement count is a fact about the sweep as much as about the tiling; a shape count is not.
+    # Say which one the bars are, so the axis cannot be read as the other.
+    ax.set_ylabel("distinct flat (Tw = 0) folds  [log]" if shapes
+                  else "flat (Tw = 0) folds found by this sweep  [log]")
     ax.set_title("Why 2+1 is rare and 1+1+1 is common", fontsize=11, fontweight="bold")
     ax.legend(loc="upper left", fontsize=8, frameon=True)
     ax.grid(axis="y", which="both", color=TS.GRID_EDGE, lw=0.8, zorder=0)
     ax.set_axisbelow(True)
+    # Two separate bottom lines: the omitted-K list is long enough to run under a right-aligned
+    # footer set at the same height, and the two overlapping renders as one unreadable smear.
     if dropped:
         ax.text(0.005, 0.005, "K not searched for both decomps, omitted: %s"
                 % ", ".join(str(k) for k in dropped),
                 transform=fig.transFigure, fontsize=6, color=TS.MUTED, style="italic")
-    _sweep_footer(fig, prov, tiling)
-    fig.tight_layout()
+    _sweep_footer(fig, prov, tiling, shapes, y=0.030)
+    fig.tight_layout(rect=[0, 0.055, 1, 1])
     return TS.save(fig, os.path.join(OUT, "count_vs_nt_%s.png" % tiling))
 
 
@@ -309,8 +345,12 @@ def main(argv=None):
     data, prov = load(args.census_dir)
     if not data:
         raise SystemExit("no summaries under %s" % (args.census_dir or CENSUS))
-    paths = [fig_headline(data, prov), fig_smallmultiples(data), fig_violators(data),
-             fig_count_vs_nt(data, prov)]
+    # count_vs_nt is per tiling: righttri and scalene are the two where BOTH decompositions have
+    # flat folds, so the 2+1-bounded / 1+1+1-explodes contrast is visible on one axis. Equilateral
+    # 1+1+1 is a proven obstruction (no flat fold at any K) and every hex cell is truncated, so
+    # neither carries a comparison; they are covered by fig_smallmultiples instead.
+    paths = [fig_headline(data, prov), fig_smallmultiples(data), fig_violators(data)]
+    paths += [fig_count_vs_nt(data, prov, tiling=t) for t in ("righttri", "scalene")]
     for p in paths:
         print("wrote", os.path.relpath(p, REPO))
 
