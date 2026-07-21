@@ -114,6 +114,9 @@ If it fails, the message usually names the cause:
 | `zsh: no matches found: .[test]` | the quotes were dropped — `".[test]"` must be quoted, brackets are shell wildcards |
 | `'pip' is not recognized` / `command not found: pip` | you used bare `pip`; use `python -m pip` as above |
 | `error: externally-managed-environment` | you are installing into the system Python, not the venv — the venv is not activated, redo step 3 |
+| Windows: `Program 'pip.exe' failed to run: An Application Control policy has blocked this file` | a managed-Windows policy blocks the `pip.exe` launcher, not pip itself — `python -m pip` runs the same code without launching that file, so use it and carry on |
+| `SSLError` / `CERTIFICATE_VERIFY_FAILED` while downloading | a corporate proxy is inspecting TLS. Ask IT for the proxy's root certificate and point pip at it: `python -m pip install --cert C:\path\to\corp-root.crt -e ".[test]"` |
+| `does not appear to be a Python project: neither 'setup.py' nor 'pyproject.toml' found` | wrong folder. `ls` (or `dir`) should list `pyproject.toml`; if you downloaded the ZIP the folder is `3-stack-foldability-main` and it may contain *another* folder of the same name — `cd` until you see `pyproject.toml` |
 
 ### 5. Check it worked
 
