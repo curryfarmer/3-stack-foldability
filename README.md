@@ -14,10 +14,10 @@ subpackage, its own `_bootstrap.py`, and its own pair of CLIs. They happen to bo
 module name `lattice` internally, so **never import both packages in the same Python process** —
 run them in separate processes (every script in this repo already does this).
 
-Two ways to drive the engines: the raw per-package CLIs below (`sq-generate` / `tri-generate`), or
-the higher-level [`gui/`](gui/) front-ends — an interactive **draw-and-fold window** and a matching
-**headless CLI** — that let you fold a hand-drawn sheet with example-vs-full search and result
-filtering ([jump to that section](#draw-and-fold--the-gui-front-ends)).
+Most people should drive them through the [`gui/`](gui/) front-ends — an interactive **draw-and-fold
+window** and a matching **headless CLI** — which let you draw a sheet, fold it, and filter the
+results ([jump to that section](#draw-and-fold--start-here)). The per-package CLIs `sq-generate` and
+`tri-generate` are underneath, for sweeping whole grids rather than one hand-drawn sheet.
 
 ## Install
 
@@ -131,112 +131,17 @@ sq-generate --m 6 --n 4
 Takes a few seconds and should report **6 solutions**, leaving six folders in `out/`. If you get
 `command not found`, the environment is not activated — go back to step 3.
 
-You are set up. The rest of this page is what the tools can do.
+You are set up. Start with the draw-and-fold window below.
 
 ---
 
-The install puts four console scripts on your PATH:
+## Draw-and-fold — start here
 
-| command        | package  | search scope                                    | does                                                        |
-|-----------------|----------|-------------------------------------------------|--------------------------------------------------------------|
-| `sq-generate`   | square   | full — all footprints × decomps on the `m×n` grid | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
-| `sq-render`     | square   | none — redraws a saved record                    | re-render an existing `out/<uid>/<uid>.json` record           |
-| `tri-generate`  | triangle | first hit only — one (tiling, decomp, K) per invocation | search one tiling/decomposition/K for a closing fold          |
-| `tri-render`    | triangle | none — redraws a saved record                    | re-render an existing triangle record                          |
-
-**Find one vs. find all.** `sq-generate` enumerates everything by default; `--first` short-circuits
-it at the first foldable example. `tri-generate` is the other way round — in `--tiling/--decomp/--K`
-mode it is **always** find-first and cannot be made to enumerate (its `--first` flag applies only to
-`--grid-file` mode, where it stops the exact-region enumeration early). The exhaustive triangle
-search is a separate tool:
-
-```bash
-python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8
-python -m triangle.tri.census --all --jobs 12        # every (tiling, decomp, K) cell
-```
-
-It drives the same generators `tri-generate` does, but drains them instead of stopping at the first
-hit, and writes per-cell `.jsonl.gz` (every closing candidate) + `.summary.json` (counts, gate
-funnel, twist spectrum, provenance) under `results/census/`. A cell that hits its wall-clock, memory
-or record cap is recorded `truncated: true` rather than passed off as a smaller exhaustive count.
-
-<details>
-<summary><b>Search width, and why a "none found" may not mean anything</b> — only matters if you are
-counting folds or reporting a zero</summary>
-
-<br>
-
-Neither tool enumerates *every* start configuration by default:
-
-| flag | applies to | meaning |
-|------|-----------|---------|
-| `--hubs N` | 2+1 | sweep the `N` most central START trapezoids (default 20) |
-| `--hub V` | 1+1+1 | ambient lattice variant — righttri `LL`/`HL`, scalene `omitVM`/`omitMG`/`omitVG` |
-
-These are unrelated knobs with confusingly similar names. Both bound the search, so **"no closing
-example found" rules out only what was searched** — it is not a proof of obstruction. Narrow sweeps
-produce outright false zeros (righttri 2+1 reports none at K=6 and K=8 below 4 hubs, where folds
-exist); see `find_example.DEFAULT_HUBS_21` for the measured saturation table. For a proven negative
-use `triangle.tri.prove_obstruction`.
-
-Because the sweep width is a free parameter, a raw fold **count** is partly an artifact of it — the
-census stores placements, and congruent folds at different positions are counted separately. Collapse
-them before reporting or plotting:
-
-```bash
-python -m triangle.tri.census_distinct results/census --jobs 8   # adds distinct/distinct_tw0
-```
-
-</details>
-
-## Output format
-
-Both engines write the same on-disk contract: one self-contained folder per fold, named after a
-12-hex content hash (`uid`, `sha1(lattice \| MxN \| canonical-geometry)`):
-
-```
-out/<uid>/
-  <uid>.json              full record: chains, footprint, verdict, geometry
-  schematic_<uid>.png      folding schematic: footprint + base cells + foldpath
-  twist_<uid>.png          twist-enumeration diagram (jump-strand for 2+1, pairwise loops for
-                           1+1+1, turn-angle analysis for 2-stack)
-  <uid>_analysis.json     triangle only: per-loop twist enumeration + seam/reflection verdict
-                           (subsumes the retired reflect_ / overlay_ images)
-```
-
-Both tracks now emit the same standardised **two-image** bundle (schematic + twist); the triangle
-track adds a small `<uid>_analysis.json` in place of its old reflection/overlay PNGs.
-
-`*-render` re-derives the same image bundle from a saved `.json` with zero search — regenerating
-a record and re-rendering it are the same code path, so the two are always byte-consistent.
-
-## Examples
-
-```bash
-sq-generate --m 6 --n 6                            # 3-stack, both decomps, corner footprints
-sq-generate --m 6 --n 5 --decomps 2+1 --allow-non-corner
-sq-generate --stacks 2 --m 6 --n 5                 # RSPA 2-stack (Hamiltonian circuits)
-sq-generate --stacks 4 --m 4 --n 8                 # n-stack: all-singleton 1+1+1+1
-sq-generate --list                                  # summarize out/'s bundles
-sq-render out/<uid>/<uid>.json --out somewhere/
-
-tri-generate --tiling righttri --decomp 1plus1plus1 --K 16
-tri-generate --tiling righttri --decomp 1plus1plus1 --K 16 --hub LL   # the other ambient variant
-tri-generate --tiling scalene --decomp 2plus1 --K 4
-tri-generate --tiling righttri --decomp 2plus1 --K 8 --hubs 40        # widen a "none found"
-tri-render out/<uid>/<uid>.json
-
-python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8   # count, don't stop
-python -m triangle.tri.census_distinct results/census --jobs 8                      # placements -> shapes
-```
-
-## Draw-and-fold — the `gui/` front-ends
-
-Beyond the raw engine CLIs there is a small **tkinter app** that lets you *draw* a sheet on any tiling
-and fold it, plus a **headless twin** that does the same from a script. Both drive the engines only
-through the `scripts/fold_grid.py` orchestrator (subprocess-only — `gui/` imports no engine, keeping
-the never-co-import invariant), so they fold and filter identically; one renders to a window, the
-other to stdout.
+The main way in is a **window you draw in**: pick a tiling, click out a sheet, press Fold, and read
+the results. There is also a **headless twin** that does the same from a script. Both drive the
+engines through the `scripts/fold_grid.py` orchestrator (subprocess-only — `gui/` imports no engine,
+keeping the never-co-import invariant), so they fold and filter identically; one renders to a window,
+the other to stdout.
 
 `gui/` is **not** an installed console script — run it from the repo root:
 
@@ -355,6 +260,104 @@ engine hard-failed on — a crash or internal error), **2** bad arguments or an 
 wrong-schema grid file (a schema-bad grid is caught here, before any engine runs).
 
 </details>
+
+## The engine CLIs
+
+Underneath the GUI, each package ships its own pair of commands. Use these to sweep a whole `m×n`
+grid or a whole tiling, rather than one drawn sheet. The install puts all four on your PATH:
+
+| command        | package  | search scope                                    | does                                                        |
+|-----------------|----------|-------------------------------------------------|--------------------------------------------------------------|
+| `sq-generate`   | square   | full — all footprints × decomps on the `m×n` grid | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
+| `sq-render`     | square   | none — redraws a saved record                    | re-render an existing `out/<uid>/<uid>.json` record           |
+| `tri-generate`  | triangle | first hit only — one (tiling, decomp, K) per invocation | search one tiling/decomposition/K for a closing fold          |
+| `tri-render`    | triangle | none — redraws a saved record                    | re-render an existing triangle record                          |
+
+**Find one vs. find all.** `sq-generate` enumerates everything by default; `--first` short-circuits
+it at the first foldable example. `tri-generate` is the other way round — in `--tiling/--decomp/--K`
+mode it is **always** find-first and cannot be made to enumerate (its `--first` flag applies only to
+`--grid-file` mode, where it stops the exact-region enumeration early). The exhaustive triangle
+search is a separate tool:
+
+```bash
+python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8
+python -m triangle.tri.census --all --jobs 12        # every (tiling, decomp, K) cell
+```
+
+It drives the same generators `tri-generate` does, but drains them instead of stopping at the first
+hit, and writes per-cell `.jsonl.gz` (every closing candidate) + `.summary.json` (counts, gate
+funnel, twist spectrum, provenance) under `results/census/`. A cell that hits its wall-clock, memory
+or record cap is recorded `truncated: true` rather than passed off as a smaller exhaustive count.
+
+<details>
+<summary><b>Search width, and why a "none found" may not mean anything</b> — only matters if you are
+counting folds or reporting a zero</summary>
+
+<br>
+
+Neither tool enumerates *every* start configuration by default:
+
+| flag | applies to | meaning |
+|------|-----------|---------|
+| `--hubs N` | 2+1 | sweep the `N` most central START trapezoids (default 20) |
+| `--hub V` | 1+1+1 | ambient lattice variant — righttri `LL`/`HL`, scalene `omitVM`/`omitMG`/`omitVG` |
+
+These are unrelated knobs with confusingly similar names. Both bound the search, so **"no closing
+example found" rules out only what was searched** — it is not a proof of obstruction. Narrow sweeps
+produce outright false zeros (righttri 2+1 reports none at K=6 and K=8 below 4 hubs, where folds
+exist); see `find_example.DEFAULT_HUBS_21` for the measured saturation table. For a proven negative
+use `triangle.tri.prove_obstruction`.
+
+Because the sweep width is a free parameter, a raw fold **count** is partly an artifact of it — the
+census stores placements, and congruent folds at different positions are counted separately. Collapse
+them before reporting or plotting:
+
+```bash
+python -m triangle.tri.census_distinct results/census --jobs 8   # adds distinct/distinct_tw0
+```
+
+</details>
+
+## Output format
+
+Both engines write the same on-disk contract: one self-contained folder per fold, named after a
+12-hex content hash (`uid`, `sha1(lattice \| MxN \| canonical-geometry)`):
+
+```
+out/<uid>/
+  <uid>.json              full record: chains, footprint, verdict, geometry
+  schematic_<uid>.png      folding schematic: footprint + base cells + foldpath
+  twist_<uid>.png          twist-enumeration diagram (jump-strand for 2+1, pairwise loops for
+                           1+1+1, turn-angle analysis for 2-stack)
+  <uid>_analysis.json     triangle only: per-loop twist enumeration + seam/reflection verdict
+                           (subsumes the retired reflect_ / overlay_ images)
+```
+
+Both tracks now emit the same standardised **two-image** bundle (schematic + twist); the triangle
+track adds a small `<uid>_analysis.json` in place of its old reflection/overlay PNGs.
+
+`*-render` re-derives the same image bundle from a saved `.json` with zero search — regenerating
+a record and re-rendering it are the same code path, so the two are always byte-consistent.
+
+## Examples
+
+```bash
+sq-generate --m 6 --n 6                            # 3-stack, both decomps, corner footprints
+sq-generate --m 6 --n 5 --decomps 2+1 --allow-non-corner
+sq-generate --stacks 2 --m 6 --n 5                 # RSPA 2-stack (Hamiltonian circuits)
+sq-generate --stacks 4 --m 4 --n 8                 # n-stack: all-singleton 1+1+1+1
+sq-generate --list                                  # summarize out/'s bundles
+sq-render out/<uid>/<uid>.json --out somewhere/
+
+tri-generate --tiling righttri --decomp 1plus1plus1 --K 16
+tri-generate --tiling righttri --decomp 1plus1plus1 --K 16 --hub LL   # the other ambient variant
+tri-generate --tiling scalene --decomp 2plus1 --K 4
+tri-generate --tiling righttri --decomp 2plus1 --K 8 --hubs 40        # widen a "none found"
+tri-render out/<uid>/<uid>.json
+
+python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8   # count, don't stop
+python -m triangle.tri.census_distinct results/census --jobs 8                      # placements -> shapes
+```
 
 <details>
 <summary><b>Validating against physical ground truth</b> — the acceptance oracle; needs the
