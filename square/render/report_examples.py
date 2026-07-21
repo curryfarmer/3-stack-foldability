@@ -257,52 +257,16 @@ def model_b_steps(sol, out_dir):
 
 # --------------------------------------------------- census: 2+1 vs 1+1+1 ----
 
-# Right-triangle (tetrakis) flat-fold counts per sub-chain length N_t, from the EXHAUSTIVE store-all
-# census (results/census/, driver triangle/tri/census.py; tables in
-# docs/research/FINDINGS_nonsquare_2026-07.md §5.0). Both decompositions live on this tiling, so it is
-# the clean single-tiling contrast. Every cell below ran to exhaustion — no time-budget floors, which
-# is why the old '>= 931' at N_t=16 is now an exact 953 and N_t=18 exists at all.
-RIGHTTRI_2P1 = {4: 5, 6: 2, 8: 4, 10: 0, 12: 0, 14: 0, 16: 0, 18: 0}
-RIGHTTRI_111 = {4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 14: 40, 16: 953, 18: 18936}
-FLOOR_111 = set()   # exhaustive: no '>=' floors
-
-
-def census_count_vs_nt(out_path):
-    """Grouped log-bar chart: right-triangle flat-fold count vs N_t for 2+1 (bounded, dies after N_t=8)
-    vs 1+1+1 (zero until N_t=14, then explodes). I/O: (path) -> path."""
-    fs.apply_style()
-    nts = sorted(set(RIGHTTRI_2P1) | set(RIGHTTRI_111))
-    import numpy as np
-    x = np.arange(len(nts))
-    w = 0.38
-    fig, ax = plt.subplots(figsize=(7.6, 4.6))
-
-    def plot_bars(data, floors, offset, color, label):
-        heights = [max(data.get(k, 0), 0) for k in nts]
-        plotted = [h if h > 0 else 0.0 for h in heights]
-        bars = ax.bar(x + offset, plotted, w, color=color, label=label, zorder=3)
-        for xi, h, k in zip(x + offset, heights, nts):
-            if h == 0:
-                ax.text(xi, 1.15, "0", ha="center", va="bottom", fontsize=8, color=color)
-            else:
-                tag = ("≥" if k in floors else "") + str(h)
-                ax.text(xi, h * 1.08, tag, ha="center", va="bottom", fontsize=8,
-                        color=color, fontweight="bold")
-        return bars
-
-    plot_bars(RIGHTTRI_2P1, set(), -w / 2, fs.CHAIN[0], "2+1  (bounded, caps ≤ N_t = 8)")
-    plot_bars(RIGHTTRI_111, FLOOR_111, w / 2, fs.CHAIN[2], "1+1+1  (grows ~20× per +2)")
-    ax.set_yscale("log")
-    ax.set_ylim(0.8, 60000)
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(k) for k in nts])
-    ax.set_xlabel("sub-chain length  N_t  (right-triangle tiling)")
-    ax.set_ylabel("number of flat (Tw = 0) folds  [log]")
-    ax.set_title("Why 2+1 is rare and 1+1+1 is common", fontsize=11, fontweight="bold")
-    ax.legend(loc="upper left", fontsize=8, frameon=True)
-    ax.grid(axis="y", which="both", color="#eeeeee", zorder=0)
-    fig.tight_layout()
-    return fs.save(fig, out_path)
+# MOVED 2026-07-21 -> scripts/plot_foldability_census.py:fig_count_vs_nt (writes
+# report/tri/foldability/count_vs_nt_righttri.png).
+#
+# This figure plots TRIANGLE census data and lived here, in the square package, with its counts
+# typed in as module constants (RIGHTTRI_2P1 / RIGHTTRI_111) rather than read from
+# results/census/. Those literals had already drifted: they said 2+1 = {4:5, 6:2, 8:4} where a
+# sweep covering all 8 righttri hub classes gives {4:12, 6:6, 8:8} -- the published numbers came
+# from an 8-hub census that reached only 4 of the 8 classes. A figure that cannot be regenerated
+# from the data it claims to show will drift again, so it now lives beside the other census
+# figures and derives every bar (and the cap / growth-factor legend text) from the summaries.
 
 
 # ----------------------------------------------- sparsity vs wrapping (schematic)
@@ -454,8 +418,9 @@ def main():
         made.append(foldsheet_montage(items111, os.path.join(FIGDIR, "fig4_1plus1_grids.png"),
                     "The 1+1+1 decomposition on different square grids"))
 
-    # (c) rarity — census bars + sparsity/wrapping schematic
-    made.append(census_count_vs_nt(os.path.join(FIGDIR, "fig3_count_vs_Nt.png")))
+    # (c) rarity — sparsity/wrapping schematic
+    # (the census bar chart moved to scripts/plot_foldability_census.py so it reads
+    #  results/census/ instead of hardcoded counts — run that script for it)
     made.append(sparsity_vs_wrapping(os.path.join(FIGDIR, "fig3_sparsity_vs_wrapping.png")))
 
     # (d) gate funnel — per-grid gate-survival, one chart per decomposition

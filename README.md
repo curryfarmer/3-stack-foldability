@@ -32,11 +32,46 @@ This installs four console scripts:
 |-----------------|----------|-------------------------------------------------|--------------------------------------------------------------|
 | `sq-generate`   | square   | full — all footprints × decomps on the `m×n` grid | search for folds on an `m×n` grid, write `out/<uid>/` bundles |
 | `sq-render`     | square   | none — redraws a saved record                    | re-render an existing `out/<uid>/<uid>.json` record           |
-| `tri-generate`  | triangle | partial — one (tiling, decomp, K) per invocation | search one tiling/decomposition/K for a closing fold          |
+| `tri-generate`  | triangle | first hit only — one (tiling, decomp, K) per invocation | search one tiling/decomposition/K for a closing fold          |
 | `tri-render`    | triangle | none — redraws a saved record                    | re-render an existing triangle record                          |
 
-Passing `--first` to either `sq-generate` or `tri-generate` short-circuits the search at the first
-foldable example (find-first mode) instead of enumerating everything.
+**Find one vs. find all.** `sq-generate` enumerates everything by default; `--first` short-circuits
+it at the first foldable example. `tri-generate` is the other way round — in `--tiling/--decomp/--K`
+mode it is **always** find-first and cannot be made to enumerate (its `--first` flag applies only to
+`--grid-file` mode, where it stops the exact-region enumeration early). The exhaustive triangle
+search is a separate tool:
+
+```bash
+python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8
+python -m triangle.tri.census --all --jobs 12        # every (tiling, decomp, K) cell
+```
+
+It drives the same generators `tri-generate` does, but drains them instead of stopping at the first
+hit, and writes per-cell `.jsonl.gz` (every closing candidate) + `.summary.json` (counts, gate
+funnel, twist spectrum, provenance) under `results/census/`. A cell that hits its wall-clock, memory
+or record cap is recorded `truncated: true` rather than passed off as a smaller exhaustive count.
+
+**Search width, and why a "none found" may not mean anything.** Neither tool enumerates *every*
+start configuration by default:
+
+| flag | applies to | meaning |
+|------|-----------|---------|
+| `--hubs N` | 2+1 | sweep the `N` most central START trapezoids (default 20) |
+| `--hub V` | 1+1+1 | ambient lattice variant — righttri `LL`/`HL`, scalene `omitVM`/`omitMG`/`omitVG` |
+
+These are unrelated knobs with confusingly similar names. Both bound the search, so **"no closing
+example found" rules out only what was searched** — it is not a proof of obstruction. Narrow sweeps
+produce outright false zeros (righttri 2+1 reports none at K=6 and K=8 below 4 hubs, where folds
+exist); see `find_example.DEFAULT_HUBS_21` for the measured saturation table. For a proven negative
+use `triangle.tri.prove_obstruction`.
+
+Because the sweep width is a free parameter, a raw fold **count** is partly an artifact of it — the
+census stores placements, and congruent folds at different positions are counted separately. Collapse
+them before reporting or plotting:
+
+```bash
+python -m triangle.tri.census_distinct results/census --jobs 8   # adds distinct/distinct_tw0
+```
 
 ## Output format
 
@@ -70,8 +105,13 @@ sq-generate --list                                  # summarize out/'s bundles
 sq-render out/<uid>/<uid>.json --out somewhere/
 
 tri-generate --tiling righttri --decomp 1plus1plus1 --K 16
+tri-generate --tiling righttri --decomp 1plus1plus1 --K 16 --hub LL   # the other ambient variant
 tri-generate --tiling scalene --decomp 2plus1 --K 4
+tri-generate --tiling righttri --decomp 2plus1 --K 8 --hubs 40        # widen a "none found"
 tri-render out/<uid>/<uid>.json
+
+python -m triangle.tri.census --tiling righttri --decomp 2plus1 --kmin 3 --kmax 8   # count, don't stop
+python -m triangle.tri.census_distinct results/census --jobs 8                      # placements -> shapes
 ```
 
 ## Draw-and-fold — the `gui/` front-ends
