@@ -40,6 +40,7 @@ from matplotlib.lines import Line2D   # noqa: E402
 
 CENSUS = os.path.join(REPO, "results", "census")
 OUT = os.path.join(REPO, "report", "tri", "foldability")
+REPORT_FIGS = os.path.join(REPO, "report", "figures")     # the slots report/draft.md embeds
 
 C111, C21 = TS.CHAIN[0], TS.CHAIN[1]            # blue = 1+1+1, orange = 2+1 (house palette)
 TILE_ORDER = ["equilateral", "righttri", "scalene", "hex"]
@@ -266,7 +267,7 @@ def fig_violators(data):
     return TS.save(fig, os.path.join(OUT, "twoloop_violators.png"))
 
 
-def fig_count_vs_nt(data, prov=None, tiling="righttri"):
+def fig_count_vs_nt(data, prov=None, tiling="righttri", out_path=None):
     """Grouped log bars: flat-fold count vs N_t, 2+1 against 1+1+1.
 
     Formerly square/render/report_examples.py:census_count_vs_nt, where the counts were typed in as
@@ -334,7 +335,7 @@ def fig_count_vs_nt(data, prov=None, tiling="righttri"):
                 transform=fig.transFigure, fontsize=6, color=TS.MUTED, style="italic")
     _sweep_footer(fig, prov, tiling, shapes, y=0.030)
     fig.tight_layout(rect=[0, 0.055, 1, 1])
-    return TS.save(fig, os.path.join(OUT, "count_vs_nt_%s.png" % tiling))
+    return TS.save(fig, out_path or os.path.join(OUT, "count_vs_nt_%s.png" % tiling))
 
 
 def main(argv=None):
@@ -351,6 +352,13 @@ def main(argv=None):
     # neither carries a comparison; they are covered by fig_smallmultiples instead.
     paths = [fig_headline(data, prov), fig_smallmultiples(data), fig_violators(data)]
     paths += [fig_count_vs_nt(data, prov, tiling=t) for t in ("righttri", "scalene")]
+    # Also emit under report/figures/ at the names report/draft.md embeds. Those slots used to be
+    # filled by square/render/report_examples.py from module constants that had drifted from the
+    # census; regenerating them from the summaries is what keeps the draft's figures honest.
+    for tiling, name in (("righttri", "fig3_count_vs_Nt.png"),
+                         ("scalene", "fig3_count_vs_Nt_scalene.png")):
+        paths.append(fig_count_vs_nt(data, prov, tiling=tiling,
+                                     out_path=os.path.join(REPORT_FIGS, name)))
     for p in paths:
         print("wrote", os.path.relpath(p, REPO))
 
