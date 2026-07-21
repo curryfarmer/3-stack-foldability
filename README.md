@@ -67,8 +67,19 @@ button, choose **Download ZIP**, and unpack it. The unpacked folder is called
 cd 3-stack-foldability-main
 ```
 
-Everything below assumes you are **inside that folder**. If a command says it cannot find
-`pyproject.toml`, you are in the wrong folder.
+**Now check you are in the right folder** — this trips up nearly everyone, because unpacking a ZIP
+often puts a folder of the same name *inside* the folder it made:
+
+```bash
+dir        # on Windows. On macOS and Linux the command is: ls
+```
+
+The listing must include **`pyproject.toml`**. If instead you see another `3-stack-foldability-main`
+folder, run `cd 3-stack-foldability-main` again and check once more. Keep going until
+`pyproject.toml` is in the listing.
+
+Everything below assumes you are **inside that folder**. If a later command says it cannot find
+`pyproject.toml`, come back here.
 
 ### 3. Create and activate a virtual environment
 
