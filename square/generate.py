@@ -208,14 +208,26 @@ def _print_manifest(out_dir):
         print(f"(no records found under {out_dir}/)")
         return
     for rec in entries:
-        lattice = rec.get("lattice", "?")
-        m, n = rec.get("m", "?"), rec.get("n", "?")
-        if lattice == LATTICE_2STACK:
-            verdict = "FOLD" if rec.get("verdict", {}).get("foldable") else "JAM"
+        # tri-generate writes its bundles into the SAME out/ by default, so this listing has to
+        # survive a foreign record: a triangle one is keyed on (tiling, K) with no m/n, and carries
+        # its verdict as a plain STRING rather than the square engine's per-gate dict. Reading it as
+        # a dict is an AttributeError that takes the whole listing down.
+        lattice = rec.get("lattice") or rec.get("tiling", "?")
+        if "K" in rec and "m" not in rec:
+            size = "K=%s" % rec["K"]
         else:
-            tw = rec.get("verdict", {}).get("twist")
+            size = "%sx%s" % (rec.get("m", "?"), rec.get("n", "?"))
+        v = rec.get("verdict")
+        if isinstance(v, str):
+            verdict = v
+        elif not isinstance(v, dict):
+            verdict = "?"
+        elif lattice == LATTICE_2STACK:
+            verdict = "FOLD" if v.get("foldable") else "JAM"
+        else:
+            tw = v.get("twist")
             verdict = "FOLD" if tw is True else ("JAM" if tw is False else "?")
-        print(f"  {rec.get('uid')}  {lattice}  {m}x{n}  {verdict}")
+        print(f"  {rec.get('uid')}  {lattice}  {size}  {verdict}")
     print(f"{len(entries)} record(s) under {out_dir}/")
 
 

@@ -32,36 +32,43 @@ You need **Python 3.10 or newer**. Check whether you already have it:
 python --version
 ```
 
-If that prints `Python 3.10.x` or higher, skip ahead. If it errors, or prints 3.9 or lower, get it
-from [python.org/downloads](https://www.python.org/downloads/). **On Windows, tick "Add python.exe
-to PATH" on the first screen of the installer** — without it the `python` command will not be found.
-Close and reopen your terminal afterwards, then check the version again.
+If that prints `Python 3.10` or higher, skip ahead. If it shows an error, or a version below 3.10,
+install Python from [python.org/downloads](https://www.python.org/downloads/). **On Windows, tick
+"Add python.exe to PATH" on the first screen of the installer** — without it your terminal will not
+find the `python` command. Then close your terminal, open a new one, and check the version again.
 
-> On some systems the command is `python3` rather than `python`. If `python --version` fails, try
-> `python3 --version` and use `python3` everywhere below.
+> On some computers the command is `python3` rather than `python`. If `python --version` does not
+> work, try `python3 --version`, and use `python3` in place of `python` everywhere below.
 
 ### 2. Get the code
 
-**Option A — with git** (recommended: `git pull` later fetches updates without re-downloading).
-Install git from [git-scm.com/downloads](https://git-scm.com/downloads) if `git --version` errors,
-then:
+**Option A — with git.** Recommended, because later on `git pull` updates your copy instead of you
+downloading it all again. First check whether you already have git:
+
+```bash
+git --version
+```
+
+If that prints a version number, you have it. If it says the command was not found, install git from
+[git-scm.com/downloads](https://git-scm.com/downloads) — accept the installer's defaults — then close
+your terminal and open a new one. Now download the code:
 
 ```bash
 git clone https://github.com/curryfarmer/3-stack-foldability.git
 cd 3-stack-foldability
 ```
 
-**Option B — no git.** Open
+**Option B — without git.** Open
 [the repository](https://github.com/curryfarmer/3-stack-foldability), click the green **Code**
-button, choose **Download ZIP**, and unpack it. Then `cd` into the unpacked folder — it will be named
-`3-stack-foldability-main`:
+button, choose **Download ZIP**, and unpack it. The unpacked folder is called
+`3-stack-foldability-main`, so move into it with:
 
 ```bash
 cd 3-stack-foldability-main
 ```
 
-Everything below assumes you are **inside that folder**. If a command reports that it cannot find
-`pyproject.toml`, you are in the wrong directory.
+Everything below assumes you are **inside that folder**. If a command says it cannot find
+`pyproject.toml`, you are in the wrong folder.
 
 ### 3. Create and activate a virtual environment
 
@@ -71,8 +78,8 @@ A virtual environment keeps this project's packages out of your system Python. C
 python -m venv .venv
 ```
 
-Then **activate** it. This is the step people miss, and it must be repeated in every new terminal
-you open — you will know it worked because your prompt gains a `(.venv)` prefix.
+Then **activate** it. This is the step people miss, and you have to repeat it every time you open a
+new terminal. You will know it worked because your prompt gains a `(.venv)` prefix.
 
 | your system | command |
 |---|---|
@@ -85,8 +92,6 @@ you open — you will know it worked because your prompt gains a `(.venv)` prefi
 > script execution, not a problem with this project. Allow it for your user account once:
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then run the activate line again.
 
-To leave the environment later, run `deactivate`.
-
 ### 4. Install the project
 
 With `(.venv)` showing in your prompt:
@@ -96,16 +101,13 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[test]"
 ```
 
-`-e` is an *editable* install — edits to the source take effect immediately, with no reinstall. Drop
-`[test]` if you do not want pytest. This pulls in matplotlib and takes a minute or two.
+Takes a minute or two. Use `python -m pip`, not bare `pip` — bare `pip` may belong to a different
+Python than the one you activated.
 
-> **Use `python -m pip`, not bare `pip`.** They are not always the same program: bare `pip` is
-> whichever `pip` your PATH finds first, which on a machine with several Pythons can install into a
-> different one than the environment you just activated — the install "succeeds" and then
-> `sq-generate` is nowhere to be found. `python -m pip` is by definition the pip belonging to the
-> `python` you are running.
+<details>
+<summary>Install failed? — the message usually names the cause</summary>
 
-If it fails, the message usually names the cause:
+<br>
 
 | what it says | what to do |
 |---|---|
@@ -118,22 +120,16 @@ If it fails, the message usually names the cause:
 | `SSLError` / `CERTIFICATE_VERIFY_FAILED` while downloading | a corporate proxy is inspecting TLS. Ask IT for the proxy's root certificate and point pip at it: `python -m pip install --cert C:\path\to\corp-root.crt -e ".[test]"` |
 | `does not appear to be a Python project: neither 'setup.py' nor 'pyproject.toml' found` | wrong folder. `ls` (or `dir`) should list `pyproject.toml`; if you downloaded the ZIP the folder is `3-stack-foldability-main` and it may contain *another* folder of the same name — `cd` until you see `pyproject.toml` |
 
+</details>
+
 ### 5. Check it worked
 
 ```bash
 sq-generate --m 6 --n 4
 ```
 
-That searches a 6×4 square grid and takes a few seconds. You should see a run of `-> out\...` lines
-and a final summary reporting **6 solutions**, leaving six folders in `out/`, each holding one
-fold's JSON record and its two PNGs. If instead you get `command not found`, the environment is not
-activated — go back to step 3.
-
-Then try the other engine:
-
-```bash
-tri-generate --tiling righttri --decomp 2plus1 --K 4
-```
+Takes a few seconds and should report **6 solutions**, leaving six folders in `out/`. If you get
+`command not found`, the environment is not activated — go back to step 3.
 
 You are set up. The rest of this page is what the tools can do.
 
@@ -390,31 +386,17 @@ from a cold cache it takes **two invocations** — the per-grid cache survives a
 </details>
 
 <details>
-<summary><b>Tests</b> — how to run the three suites, and why they can never share an
-interpreter</summary>
+<summary><b>Tests</b></summary>
 
 <br>
 
 ```bash
-python scripts/run_tests.py     # the gate: all three suites, each in its own interpreter
-pytest                          # smoketest/ only (what a bare pytest is configured to run)
+python scripts/run_tests.py     # all three suites (smoketest/, square/tests/, triangle/tests/)
 ```
 
-There are three tracked suites, and they can **never share an interpreter** — `square/` and
-`triangle/` each put their own bare-named `lattice` on `sys.path`, so collecting both in one process
-races whichever `_bootstrap` ran second. `run_tests.py` dispatches each separately:
-
-| suite            | covers                                                        |
-|------------------|---------------------------------------------------------------|
-| `smoketest/`     | packaging / import / CLI smoke — offline, ground-truth-free     |
-| `square/tests/`  | the square engine: gates, goldens, canonical hashing, n-stack   |
-| `triangle/tests/`| the triangle engine: per-tiling geometry, closure, fold validity |
-
-Expensive engine sweeps are marked `slow` and **deselected by default** (`pytest.ini`'s
-`addopts = -m "not slow"`). Run them with `pytest -m slow`; some honour `FOLD_JOBS=N` to parallelize.
-
-Passing tests are not the same as agreeing with reality — for that, see *Validating against physical
-ground truth* above.
+About a minute. Each suite runs in its own interpreter — `square/` and `triangle/` both put a
+bare-named `lattice` on `sys.path`, so they can never share a process. Expensive sweeps are marked
+`slow` and deselected by default; run them with `pytest -m slow`.
 
 </details>
 
