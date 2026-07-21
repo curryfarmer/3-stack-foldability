@@ -21,12 +21,105 @@ filtering ([jump to that section](#draw-and-fold--the-gui-front-ends)).
 
 ## Install
 
+Never used Python from a terminal before? Follow this start to finish and you will have a working
+copy in about five minutes. Every step is a line you paste into a terminal.
+
+### 1. Install Python
+
+You need **Python 3.10 or newer**. Check whether you already have it:
+
 ```bash
-python -m venv .venv
-.venv/Scripts/pip install -e .          # editable install; add [test] for pytest
+python --version
 ```
 
-This installs four console scripts:
+If that prints `Python 3.10.x` or higher, skip ahead. If it errors, or prints 3.9 or lower, get it
+from [python.org/downloads](https://www.python.org/downloads/). **On Windows, tick "Add python.exe
+to PATH" on the first screen of the installer** — without it the `python` command will not be found.
+Close and reopen your terminal afterwards, then check the version again.
+
+> On some systems the command is `python3` rather than `python`. If `python --version` fails, try
+> `python3 --version` and use `python3` everywhere below.
+
+### 2. Get the code
+
+**Option A — with git** (recommended: `git pull` later fetches updates without re-downloading).
+Install git from [git-scm.com/downloads](https://git-scm.com/downloads) if `git --version` errors,
+then:
+
+```bash
+git clone https://github.com/curryfarmer/3-stack-foldability.git
+cd 3-stack-foldability
+```
+
+**Option B — no git.** Open
+[the repository](https://github.com/curryfarmer/3-stack-foldability), click the green **Code**
+button, choose **Download ZIP**, and unpack it. Then `cd` into the unpacked folder — it will be named
+`3-stack-foldability-main`:
+
+```bash
+cd 3-stack-foldability-main
+```
+
+Everything below assumes you are **inside that folder**. If a command reports that it cannot find
+`pyproject.toml`, you are in the wrong directory.
+
+### 3. Create and activate a virtual environment
+
+A virtual environment keeps this project's packages out of your system Python. Create it once:
+
+```bash
+python -m venv .venv
+```
+
+Then **activate** it. This is the step people miss, and it must be repeated in every new terminal
+you open — you will know it worked because your prompt gains a `(.venv)` prefix.
+
+| your system | command |
+|---|---|
+| Windows — PowerShell | `.venv\Scripts\Activate.ps1` |
+| Windows — Command Prompt (cmd) | `.venv\Scripts\activate.bat` |
+| Windows — Git Bash | `source .venv/Scripts/activate` |
+| macOS / Linux | `source .venv/bin/activate` |
+
+> **PowerShell refuses with "running scripts is disabled on this system"?** That is Windows blocking
+> script execution, not a problem with this project. Allow it for your user account once:
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then run the activate line again.
+
+To leave the environment later, run `deactivate`.
+
+### 4. Install the project
+
+With `(.venv)` showing in your prompt:
+
+```bash
+pip install -e ".[test]"
+```
+
+`-e` is an *editable* install — edits to the source take effect immediately, with no reinstall. Drop
+`[test]` if you do not want pytest. This pulls in matplotlib and takes a minute or two.
+
+### 5. Check it worked
+
+```bash
+sq-generate --m 6 --n 4
+```
+
+That searches a 6×4 square grid and takes a few seconds. You should see a run of `-> out\...` lines
+and a final summary reporting **6 solutions**, leaving six folders in `out/`, each holding one
+fold's JSON record and its two PNGs. If instead you get `command not found`, the environment is not
+activated — go back to step 3.
+
+Then try the other engine:
+
+```bash
+tri-generate --tiling righttri --decomp 2plus1 --K 4
+```
+
+You are set up. The rest of this page is what the tools can do.
+
+---
+
+The install puts four console scripts on your PATH:
 
 | command        | package  | search scope                                    | does                                                        |
 |-----------------|----------|-------------------------------------------------|--------------------------------------------------------------|
