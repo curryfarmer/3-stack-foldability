@@ -289,7 +289,11 @@ search-shaping row above does that). Filter by:
 Triangle records carry a single verdict *string* (no structured per-gate vector), so any vector
 filter drops them.
 
-## Headless folding — `python -m gui.cli`
+<details>
+<summary><b>Headless folding — <code>python -m gui.cli</code></b> — the same folding from a script or
+CI, and the <code>fold-grid/1</code> region format</summary>
+
+<br>
 
 The same core with no window — for scripts and CI. It reads a drawn region and prints the filtered
 verdict table:
@@ -334,7 +338,13 @@ Note the singular/plural split: `--decomps` (plural) *shapes the search*; `--dec
 engine hard-failed on — a crash or internal error), **2** bad arguments or an unreadable /
 wrong-schema grid file (a schema-bad grid is caught here, before any engine runs).
 
-## Validating against physical ground truth
+</details>
+
+<details>
+<summary><b>Validating against physical ground truth</b> — the acceptance oracle; needs the
+maintainer's local research data, so it no-ops on a fresh clone</summary>
+
+<br>
 
 The engines make falsifiable claims about paper: every fold on record was physically folded by hand,
 and the engine's verdict must still match that outcome. Both tools below **re-derive** a fresh
@@ -357,7 +367,13 @@ broke, so **nothing was proven either way**); conflating those two is what made 
 this oracle untrustworthy. Note its 4h default timeout is smaller than a fully-cold square run, so
 from a cold cache it takes **two invocations** — the per-grid cache survives a kill, so just re-run.
 
-## Tests
+</details>
+
+<details>
+<summary><b>Tests</b> — how to run the three suites, and why they can never share an
+interpreter</summary>
+
+<br>
 
 ```bash
 python scripts/run_tests.py     # the gate: all three suites, each in its own interpreter
@@ -377,7 +393,10 @@ races whichever `_bootstrap` ran second. `run_tests.py` dispatches each separate
 Expensive engine sweeps are marked `slow` and **deselected by default** (`pytest.ini`'s
 `addopts = -m "not slow"`). Run them with `pytest -m slow`; some honour `FOLD_JOBS=N` to parallelize.
 
-Passing tests are not the same as agreeing with reality — for that, see below.
+Passing tests are not the same as agreeing with reality — for that, see *Validating against physical
+ground truth* above.
+
+</details>
 
 ## Repository layout
 
