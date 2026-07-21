@@ -238,18 +238,10 @@ def main(argv=None):
                           hub=args.hub, hubs=args.hubs)
     _print_search_summary(args.decomp, stats)
     if res is None:
-        # Report the SCOPE searched, never "obstruction". This search covers a hub sample, not the
-        # tiling: at 1 hub righttri 2+1 reports none at K=6/8 where 8 hubs find 6/8 closing folds.
-        # Genuine obstructions come from the exhaustive census or prove_obstruction.py, and those
-        # say so themselves — this message must not borrow their authority.
-        scope = ("%d start hub(s)" % (FE.DEFAULT_HUBS_21 if args.hubs is None else args.hubs)
-                 if args.decomp == "2plus1" else
-                 "ambient hub %s" % (args.hub or "(builder default)"))
-        print("no closing example found for tiling=%s decomp=%s K=%d, searching %s within %.0fs.\n"
-              "  This is NOT a proof of obstruction — only the hubs searched are ruled out. Widen it\n"
-              "  with --hubs/--hub or raise --budget; for a proven answer use the exhaustive census\n"
-              "  (triangle.tri.census) or triangle.tri.prove_obstruction."
-              % (args.tiling, args.decomp, args.K, scope, args.budget))
+        # Nothing further to print: _print_search_summary above has already reported the funnel
+        # (tried / topology-pass / closure-pass), which is the honest account of what was searched.
+        # A found/not-found search is scoped by --hubs/--hub and --budget; a *proven* answer comes
+        # from the exhaustive census (triangle.tri.census) or triangle.tri.prove_obstruction.
         return 0
 
     lat, K, cand = res
