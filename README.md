@@ -144,8 +144,13 @@ hit, and writes per-cell `.jsonl.gz` (every closing candidate) + `.summary.json`
 funnel, twist spectrum, provenance) under `results/census/`. A cell that hits its wall-clock, memory
 or record cap is recorded `truncated: true` rather than passed off as a smaller exhaustive count.
 
-**Search width, and why a "none found" may not mean anything.** Neither tool enumerates *every*
-start configuration by default:
+<details>
+<summary><b>Search width, and why a "none found" may not mean anything</b> — only matters if you are
+counting folds or reporting a zero</summary>
+
+<br>
+
+Neither tool enumerates *every* start configuration by default:
 
 | flag | applies to | meaning |
 |------|-----------|---------|
@@ -165,6 +170,8 @@ them before reporting or plotting:
 ```bash
 python -m triangle.tri.census_distinct results/census --jobs 8   # adds distinct/distinct_tw0
 ```
+
+</details>
 
 ## Output format
 
