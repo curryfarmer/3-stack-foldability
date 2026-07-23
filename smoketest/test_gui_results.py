@@ -5,6 +5,7 @@ carries the three shapes that matter: a proven square record ({json, foldsheet})
 record (full triangle set incl. reflect), and a proven equilateral record with NO reflect. ResultsView
 is exercised against a hidden Tk root.
 """
+import json
 import os
 import sys
 
@@ -18,7 +19,7 @@ _BUNDLE = os.path.join(_REPO, "smoketest", "fixtures", "bundle", "fixtureaaaa1",
 
 
 def test_parse_bundle_rows_and_gate():
-    rows, gate = results.parse_bundle(_BUNDLE)
+    rows, gate, _diag = results.parse_bundle(_BUNDLE)
     assert len(rows) == 3
     assert [r["proven"] for r in rows] == [True, False, True]
     assert gate is True                              # any(not proven) -> unproven bundle
@@ -41,7 +42,7 @@ def test_pick_thumb_preference_and_fallback():
 
 
 def test_results_view_populates(tk_root):
-    rows, gate = results.parse_bundle(_BUNDLE)
+    rows, gate, _diag = results.parse_bundle(_BUNDLE)
     view = results.ResultsView(tk_root)
     view.show(rows, gate)
     assert view.rows() == rows                         # full set stored regardless of filter
@@ -68,7 +69,7 @@ def test_results_view_filter_bar_dedup(tk_root):
 
 def test_foldable_filter_narrows_then_restores(tk_root):
     """The foldable tristate still bites: 'no' shows exactly the not-foldable rows; 'any' shows all."""
-    rows, gate = results.parse_bundle(_BUNDLE)
+    rows, gate, _diag = results.parse_bundle(_BUNDLE)
     view = results.ResultsView(tk_root)
     view.show(rows, gate)
     not_foldable = [r for r in rows if r["foldable"] is False]
@@ -79,6 +80,58 @@ def test_foldable_filter_narrows_then_restores(tk_root):
     view._foldable_var.set("any")
     view._render()
     assert len(view.tree.get_children()) == len(rows)
+
+
+# --------------------------------------------------------------------------- the empty-result diagnosis
+
+def _write_empty_bundle(tmp_path, diagnosis):
+    """A records-empty fold-bundle/1 carrying `diagnosis`, as the triangle path writes on a no-fold
+    region (e.g. the hexagon-of-six). No engine subprocess -- parse_bundle is pure."""
+    b = {"schema": "fold-bundle/1", "gridUid": "deadbeef", "tiling": "equilateral",
+         "sheetCells": [], "stacks": [3], "configs": [{"stacks": 3, "status": "ok", "nRecords": 0}],
+         "gateValidityUnproven": False, "diagnosis": diagnosis, "records": []}
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return str(p)
+
+
+def test_parse_bundle_returns_the_diagnosis():
+    """The third return value carries the reason; it is None when the bundle has no diagnosis key
+    (e.g. the committed square/hex fixture), so older bundles keep parsing."""
+    rows, gate, diag = results.parse_bundle(_BUNDLE)
+    assert diag is None                                  # fixture predates the diagnosis field
+
+
+def test_parse_bundle_surfaces_a_point_pivot_diagnosis(tmp_path):
+    diag = {"kind": "fold-outside-model", "certain": True,
+            "message": "a genuine 3-stack fold of this shape exists ... folds about a shared point ..."}
+    rows, gate, got = results.parse_bundle(_write_empty_bundle(tmp_path, diag))
+    assert rows == [] and got == diag
+
+
+def test_diagnosis_headline_maps_each_kind():
+    assert "cannot fold" in results.diagnosis_headline({"kind": "no-fold"})
+    assert "cannot reach" in results.diagnosis_headline({"kind": "fold-outside-model"})
+    assert "budget" in results.diagnosis_headline({"kind": "undetermined"})
+    assert results.diagnosis_headline(None) == "0 records — nothing folded"       # plain fallback
+    assert results.diagnosis_headline({"kind": "weird"}) == "0 records — nothing folded"
+
+
+def test_empty_table_shows_the_diagnosis_headline(tk_root, tmp_path):
+    """The view's zero-record line leads with the reason, not a bare 'nothing folded', when a
+    diagnosis is present."""
+    diag = {"kind": "fold-outside-model", "certain": True, "message": "…"}
+    rows, gate, got = results.parse_bundle(_write_empty_bundle(tmp_path, diag))
+    view = results.ResultsView(tk_root)
+    view.show(rows, gate, got)
+    assert "cannot reach" in view._count.cget("text")
+
+
+def test_empty_table_without_diagnosis_keeps_plain_message(tk_root, tmp_path):
+    rows, gate, got = results.parse_bundle(_write_empty_bundle(tmp_path, None))
+    view = results.ResultsView(tk_root)
+    view.show(rows, gate, got)
+    assert view._count.cget("text") == "0 records — nothing folded"
 
 
 # tk_root is the shared, Tk-unavailable-skipping fixture from smoketest/conftest.py.

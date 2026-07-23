@@ -59,7 +59,7 @@ def test_preview_popup_enlarges(app):
     import tkinter as tk
     from gui import results as results_mod
     bundle = os.path.join(_REPO, "smoketest", "fixtures", "bundle", "fixtureaaaa1", "bundle.json")
-    rows, _ = results_mod.parse_bundle(bundle)
+    rows, _, _diag = results_mod.parse_bundle(bundle)
     row = next(r for r in rows if r.get("files"))
     try:
         app._on_row(row)                        # populate preview state (picks a default image kind)

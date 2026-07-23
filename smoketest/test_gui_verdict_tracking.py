@@ -36,7 +36,7 @@ def test_verdict_tracks_through_display_default_gate(tk_root, tmp_path):
     assert res.returncode == 0, res.output
     assert res.bundle_path and os.path.isfile(res.bundle_path), res.output
 
-    rows, gate = results.parse_bundle(res.bundle_path)
+    rows, gate, _diag = results.parse_bundle(res.bundle_path)
     assert len(rows) >= 1
     assert any(r["foldable"] is True for r in rows), [r["foldable"] for r in rows]
     for r in rows:
@@ -69,7 +69,7 @@ def test_nstack_fold_tracks_requested_stack_count(tmp_path):
     res = dispatch.fold_once("square", _RECT_2x4, out_dir=str(tmp_path), stacks=[4], timeout=300)
     assert res.returncode == 0, res.output
     assert res.bundle_path and os.path.isfile(res.bundle_path), res.output
-    rows, _gate = results.parse_bundle(res.bundle_path)
+    rows, _gate, _diag = results.parse_bundle(res.bundle_path)
     assert all(r["stacks"] == 4 for r in rows), [r["stacks"] for r in rows]
     assert all(r["decomp"] in ("1+1+1+1", None) for r in rows), [r["decomp"] for r in rows]
 
@@ -81,5 +81,5 @@ def test_reject_at_n3_produces_no_foldable_records(tmp_path):
     res = dispatch.fold_once("square", _RING8, out_dir=str(tmp_path), stacks=[3], timeout=300)
     assert res.returncode == 0, res.output
     assert res.bundle_path and os.path.isfile(res.bundle_path), res.output
-    rows, _gate = results.parse_bundle(res.bundle_path)
+    rows, _gate, _diag = results.parse_bundle(res.bundle_path)
     assert not any(r["foldable"] is True for r in rows), [r["foldable"] for r in rows]

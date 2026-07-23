@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import congruence as CG       # noqa: E402  --distinct: collapse placements into congruence classes
 import find_example as FE     # noqa: E402  find_first / verdict_text (the existing search entry point)
 import foldgrid_tri as FG     # noqa: E402  arbitrary drawn-region ingest (--grid-file, 1+1+1 only)
+import foldoracle as OR       # noqa: E402  geometry-exact 2nd opinion: WHY a region did/should not fold
 import gen_testset as GT      # noqa: E402  fold_uid / _fold_record (the existing record schema)
 import seam_filter as SFILT   # noqa: E402  tile_chirality (per-tile orientation read-out for the record)
 import render as RENDER       # noqa: E402  render_record_json — the SAME out/<uid>/ packaging as tri-render
@@ -116,10 +117,30 @@ def _run_grid_file(args):
         if args.render:
             RENDER.render_record_json(json_path, uid, args.out)
         print("  wrote %s/%s.json  %s%s" % (uid, uid, verdict, "  +PNGs" if args.render else ""))
-    if not records:
-        print("no closing 1+1+1 fold covers this region "
-              "(a valid outcome -- the region may admit no 3-stack closure)")
+    # A second-opinion diagnosis on EVERY run: when the hub search finds nothing, the oracle says
+    # whether the region truly cannot 3-stack or the search merely missed a real (e.g. point-pivot)
+    # fold; when it does find folds, diagnose() short-circuits to 'engine-folds' (no oracle search).
+    # Written to <out>/diagnosis.json -- one level above the <uid>/<uid>.json bundles, so the S7
+    # orchestrator (which scans only <uid>/<uid>.json) can pick the reason up without it looking like
+    # a fold record. See foldoracle.py for what a YES/NO verdict does and does not prove.
+    _write_diagnosis(args.out, tiling, lat, records)
     return 0
+
+
+def _write_diagnosis(out, tiling, lat, records):
+    """Compute foldoracle.diagnose over the region and write <out>/diagnosis.json (schema
+    'fold-diagnosis/1'); also echo the human message. Columns (when present) are emitted as native
+    id LISTS so a consumer can render the missed fold without re-deriving it."""
+    d = OR.diagnose(lat, records)
+    diag = {"schema": "fold-diagnosis/1", "tiling": tiling, "cells": 3, "nTiles": len(lat.tris),
+            "engineFolds": len(records), "kind": d["kind"], "certain": d["certain"],
+            "message": d["message"],
+            "columns": [[list(t) for t in col] for col in d["columns"]] if d["columns"] else None}
+    os.makedirs(os.path.abspath(out), exist_ok=True)
+    with open(os.path.join(os.path.abspath(out), "diagnosis.json"), "w") as f:
+        json.dump(diag, f, indent=1)
+    if not records:
+        print("diagnosis [%s]: %s" % (d["kind"], d["message"]))
 
 
 def _write_fold(args, lat, K, cand, render=True):

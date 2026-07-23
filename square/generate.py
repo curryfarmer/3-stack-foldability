@@ -29,6 +29,8 @@ import runner as Runner            # noqa: E402
 import twostack as TwoStack        # noqa: E402
 import render_bundle as RenderB    # noqa: E402
 import gridfile as GridFile        # noqa: E402  (fold-grid/1 ingest)
+import foldoracle as OR            # noqa: E402  (geometry-exact second opinion -> diagnosis.json)
+from lattice.square import SquareLattice  # noqa: E402  (region lattice the oracle reasons over)
 
 LATTICE_3STACK = "square"
 LATTICE_2STACK = "square2stack"
@@ -193,6 +195,32 @@ def make_uid(lattice_name, m, n, canonical_hash):
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
+def _write_diagnosis(out, opts, solutions):
+    """foldoracle's engine-agnostic second opinion for the footprint (N>=3) path: WHY this region
+    produced the records it did (or none). Writes <out>/diagnosis_<N>.json (schema fold-diagnosis/1,
+    byte-identical to the triangle worker's) and, when nothing folded, prints the one-line reason so a
+    bare `--grid-file` run says more than "generated 0 solutions". The orchestrator globs every
+    diagnosis_*.json a bundle's per-N runs leave behind. 2-stack is a different fold model (RSPA
+    Hamiltonian circuits, not a footprint stack) so it is not diagnosed here.
+
+    `solutions` is the engine's written records for this N: non-empty -> the oracle defers (no search).
+    """
+    cells = opts.get("panels", 3)
+    region = [tuple(c) for c in opts["sheet"]] if opts.get("sheet") is not None else None
+    lat = SquareLattice(opts["m"], opts["n"], cells=region)
+    d = OR.diagnose(lat, solutions, cells=cells)
+    diag = {"schema": "fold-diagnosis/1", "lattice": LATTICE_3STACK, "cells": cells,
+            "nTiles": len(lat.tris), "engineFolds": len(solutions), "kind": d["kind"],
+            "certain": d["certain"], "message": d["message"],
+            "columns": [[list(t) for t in col] for col in d["columns"]] if d["columns"] else None}
+    os.makedirs(os.path.abspath(out), exist_ok=True)
+    with open(os.path.join(os.path.abspath(out), "diagnosis_%d.json" % cells), "w",
+              encoding="utf-8") as f:
+        json.dump(diag, f, indent=1)
+    if not solutions:
+        print("diagnosis [%s]: %s" % (d["kind"], d["message"]))
+
+
 def _print_manifest(out_dir):
     if not os.path.isdir(out_dir):
         print(f"(no manifest -- {out_dir}/ does not exist yet)")
@@ -291,6 +319,7 @@ def main(argv=None):
         twist0 = sum(1 for s in solutions if s["verdict"]["twist"] is True)
         print(f"generated {len(solutions)} solutions (Tw=0 decided: {twist0}) "
               f"-> {args.out}/ ({len(solutions)} bundles)")
+        _write_diagnosis(args.out, opts, solutions)   # foldoracle reason (footprint path only)
     return 0
 
 

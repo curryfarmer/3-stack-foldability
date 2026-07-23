@@ -30,6 +30,7 @@ footprint engine is oracle-gated); triangle equilateral 1+1+1 is the validated s
 triangle family is a model/closure prediction -> false.
 """
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -311,10 +312,38 @@ def _reject_reason(out):
     return "rejected (no reason line captured)"
 
 
+# Best-news order: a real fold the search missed beats an out-of-budget beats a definitive no-fold
+# beats a bare engine-folds. When a square bundle runs several N (one diagnosis_<N>.json each), the
+# summary the front-ends show is the most informative across them (e.g. "folds as a 4-stack, search
+# misses it" over "cannot 3-stack").
+_DIAG_RANK = {"fold-outside-model": 3, "undetermined": 2, "no-fold": 1, "engine-folds": 0}
+
+
+def _read_diagnosis(workdir):
+    """foldoracle's second opinion(s) on WHY a region did / should not fold, or None. Each engine
+    worker writes a <workdir>/diagnosis*.json (triangle: one `diagnosis.json`; square: one
+    `diagnosis_<N>.json` per stack count) one level above the <uid>/<uid>.json records, so it is not a
+    fold record — it is a plain reason the front-ends surface when nothing (or nothing flat) folded.
+    Globs them all and returns the single most-informative one (see _DIAG_RANK); the channel is
+    engine-agnostic, so square and triangle plug into the same field."""
+    diags = []
+    for path in sorted(glob.glob(os.path.join(workdir, "diagnosis*.json"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                diags.append(json.load(f))
+        except (OSError, json.JSONDecodeError):
+            continue                            # a malformed reason must never sink the bundle
+    if not diags:
+        return None
+    return max(diags, key=lambda d: _DIAG_RANK.get(d.get("kind"), -1))
+
+
 def _build_bundle(grid_uid, tiling, sheet_cells, resolved, configs, workdir):
     """Scan the workdir's records and assemble bundle.json. `proven` per record + the roll-up
     `gateValidityUnproven` (True iff ANY record is unproven). configs' nRecords is filled from the
-    records each N actually produced (grouped by the record's self-reported stack count)."""
+    records each N actually produced (grouped by the record's self-reported stack count). A
+    `diagnosis` (foldoracle's reason, or None) rides alongside so the GUI can say WHY on an empty
+    result instead of a bare "nothing folded"."""
     records = []
     for uid, rec, files in _collect_records(workdir):
         records.append({
@@ -341,6 +370,7 @@ def _build_bundle(grid_uid, tiling, sheet_cells, resolved, configs, workdir):
         "stacks": resolved,
         "configs": configs,
         "gateValidityUnproven": any(not r["proven"] for r in records),
+        "diagnosis": _read_diagnosis(workdir),
         "records": records,
     }
 

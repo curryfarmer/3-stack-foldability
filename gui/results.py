@@ -32,10 +32,12 @@ def _pick_thumb(bundle_dir, rec_dir, files):
 
 
 def parse_bundle(bundle_path):
-    """Read a fold-bundle/1 into (rows, gate_unproven). Each row = {uid, stacks, foldable, proven,
-    verdict, decomp, vector, dir, files, thumb}; decomp/vector are the normalized filter keys
+    """Read a fold-bundle/1 into (rows, gate_unproven, diagnosis). Each row = {uid, stacks, foldable,
+    proven, verdict, decomp, vector, dir, files, thumb}; decomp/vector are the normalized filter keys
     fold_grid stamps (decomp None + vector None for records lacking them); thumb is resolved against
-    the bundle's own directory. I/O: (str) -> (list[dict], bool)."""
+    the bundle's own directory. `diagnosis` is the engine's fold-diagnosis/1 reason dict (or None) --
+    why nothing (or nothing flat) folded -- so an empty table can say something true instead of a
+    bare "nothing folded". I/O: (str) -> (list[dict], bool, dict|None)."""
     with open(bundle_path, encoding="utf-8") as f:
         bundle = json.load(f)
     bundle_dir = os.path.dirname(os.path.abspath(bundle_path))
@@ -55,7 +57,21 @@ def parse_bundle(bundle_path):
             "files": files,
             "thumb": _pick_thumb(bundle_dir, rec_dir, files),
         })
-    return rows, bool(bundle.get("gateValidityUnproven", False))
+    return rows, bool(bundle.get("gateValidityUnproven", False)), bundle.get("diagnosis")
+
+
+def diagnosis_headline(diagnosis):
+    """One short line for an EMPTY result table, keyed on the diagnosis `kind`. None / unknown kind ->
+    the plain fallback. The full sentence lives in diagnosis['message'] (shown in the status bar).
+    I/O: (dict|None) -> str."""
+    kind = (diagnosis or {}).get("kind")
+    if kind == "fold-outside-model":
+        return "0 records — but a real fold exists that this search cannot reach (see note below)"
+    if kind == "no-fold":
+        return "0 records — this shape cannot fold into a 3-stack at all"
+    if kind == "undetermined":
+        return "0 records — no fold found; a full check did not finish in budget"
+    return "0 records — nothing folded"
 
 
 class ResultsView:
@@ -139,10 +155,11 @@ class ResultsView:
         return {"require_vector": require_vector or None, "foldable": foldable}
 
     # ---- populate ----
-    def show(self, rows, gate_unproven):
-        """Store the full row set + badge, then render through the current filter. I/O:
-        (list[dict], bool) -> None."""
+    def show(self, rows, gate_unproven, diagnosis=None):
+        """Store the full row set + badge (+ the empty-result diagnosis), then render through the
+        current filter. I/O: (list[dict], bool, dict|None) -> None."""
         self._rows = rows
+        self._diagnosis = diagnosis
         self.badge_visible = bool(gate_unproven)
         self._badge.config(
             text="unproven — exploratory heuristic; physical fold is ground truth"
@@ -160,7 +177,7 @@ class ResultsView:
         total = len(self._rows)
         shown = len(self._shown)
         if total == 0:
-            self._count.config(text="0 records — nothing folded")
+            self._count.config(text=diagnosis_headline(getattr(self, "_diagnosis", None)))
         elif shown == total:
             self._count.config(text="%d record(s) — click one to preview" % total)
         else:

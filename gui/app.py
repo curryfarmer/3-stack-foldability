@@ -320,8 +320,8 @@ class App:
         self._progress.stop()
         elapsed = time.time() - self._run_started if self._run_started else 0.0
         if result.bundle_path:
-            rows, gate = results_mod.parse_bundle(result.bundle_path)
-            self.results.show(rows, gate)
+            rows, gate, diagnosis = results_mod.parse_bundle(result.bundle_path)
+            self.results.show(rows, gate, diagnosis)
             self._on_row(None)                          # clear any stale preview from a prior fold
             # Search-effort summary, bottom-left: the engine's printed explored + candidate-tried
             # ("folds attempted") counts + the bundle's authoritative foldable-record count (see
@@ -330,9 +330,14 @@ class App:
             summary = runsummary.summarize(result.output, foldable=n_fold)
             self._summary_var.set(("%s · %.1fs" % (summary, elapsed)) if summary
                                   else "%.1fs" % elapsed)
-            self._set_status("done: %d record(s)%s%s"
-                             % (len(rows), " — unproven" if gate else "",
-                                "" if self._save_var.get() else " — not saved (temporary)"))
+            # On an EMPTY table, lead the status with the oracle's reason (why nothing folded, and
+            # whether a real fold exists that the search can't reach) rather than a bare count.
+            if not rows and diagnosis and diagnosis.get("message"):
+                self._set_status("no fold: %s" % diagnosis["message"])
+            else:
+                self._set_status("done: %d record(s)%s%s"
+                                 % (len(rows), " — unproven" if gate else "",
+                                    "" if self._save_var.get() else " — not saved (temporary)"))
         else:
             self._summary_var.set("no fold · %.1fs" % elapsed)
             self._set_status("no fold (rc=%s): %s"

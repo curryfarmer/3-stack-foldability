@@ -76,5 +76,5 @@ def test_fold_once_real_square(tmp_path):
     assert res.grid_uid and res.bundle_path and os.path.isfile(res.bundle_path)
     assert any("gridUid=" in ln for ln in lines)
     from gui import results
-    rows, gate = results.parse_bundle(res.bundle_path)
+    rows, gate, _diag = results.parse_bundle(res.bundle_path)
     assert rows and isinstance(rows[0]["proven"], bool)

@@ -119,7 +119,7 @@ def main(argv=None):
               file=sys.stderr)
         return 1
 
-    rows, gate_unproven = results.parse_bundle(result.bundle_path)
+    rows, gate_unproven, diagnosis = results.parse_bundle(result.bundle_path)
     shown = foldfilter.apply(
         rows,
         decomps=(args.decomp.split(",") if args.decomp else None),
@@ -128,12 +128,17 @@ def main(argv=None):
     )
     if args.json:
         json.dump({"gridUid": result.grid_uid, "gateValidityUnproven": gate_unproven,
-                   "shown": len(shown), "total": len(rows), "records": shown}, sys.stdout, indent=1)
+                   "shown": len(shown), "total": len(rows), "diagnosis": diagnosis,
+                   "records": shown}, sys.stdout, indent=1)
         sys.stdout.write("\n")
     else:
         print("\n%d of %d record(s)%s -> %s"
               % (len(shown), len(rows), " (unproven)" if gate_unproven else "", result.bundle_path))
         _print_table(shown)
+        # No records to show: print WHY (the oracle's reason), so the headless twin is as informative
+        # as the window on an empty result instead of a silent "0 of 0".
+        if not rows and diagnosis and diagnosis.get("message"):
+            print("diagnosis [%s]: %s" % (diagnosis.get("kind"), diagnosis["message"]))
     return 0
 
 

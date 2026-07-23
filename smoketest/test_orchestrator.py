@@ -292,13 +292,17 @@ def test_triangle_hex_roundtrip_unproven_with_pngs(tmp_path):
     assert all(not r["proven"] for r in bundle["records"])
     assert bundle["gateValidityUnproven"] is True
     r0 = bundle["records"][0]
-    assert "foldsheet" in r0["files"] and "overlay" in r0["files"]   # --render produced the PNGs
+    assert "schematic" in r0["files"] and "twist" in r0["files"]   # --render produced the PNGs
+    # (render_record_json emits schematic_/twist_/analysis per triangle/tri/render.py; the older
+    # foldsheet_/overlay_ names this once checked no longer exist.)
 
 
 @pytest.mark.slow
 def test_equilateral_empty_result_exits_zero(tmp_path):
-    """Equilateral 1+1+1 is a proven obstruction: a valid region yields 0 closing folds, exit 0, an
-    empty (but written) bundle."""
+    """A valid region that admits no closing 1+1+1 fold still exits 0 with an empty (but written)
+    bundle. The 6-tile strip yields nothing because its dual graph has degree-1 ends, NOT because of
+    the equilateral obstruction -- that one is about flatness (Tw = 0) and only applies to folds that
+    close in the first place. triangle/tests/test_grid_edge_cases.py catalogues these zero shapes."""
     strip = [[0, 0, "U"], [0, 0, "D"], [1, 0, "U"], [1, 0, "D"], [2, 0, "U"], [2, 0, "D"]]
     grid = _write_grid(tmp_path, "eq.json", "equilateral", strip, [3])
     rc, bundle = _run_orchestrator(grid, str(tmp_path / "out"))
@@ -306,3 +310,20 @@ def test_equilateral_empty_result_exits_zero(tmp_path):
     assert bundle["records"] == []
     assert bundle["gateValidityUnproven"] is False       # any() over no records
     assert {c["stacks"]: c["status"] for c in bundle["configs"]} == {3: "ok"}
+
+
+@pytest.mark.slow
+def test_equilateral_hexagon_of_six_is_an_empty_bundle_not_a_crash(tmp_path):
+    """The reported shape, end to end through the path the GUI actually drives: six equilateral
+    triangles round one vertex. It is edge-connected and 6 % 3 == 0, so it is NOT rejected -- it is
+    searched, and legitimately yields nothing (the region's dual graph is a 6-cycle, so no trapezoid
+    hub can seat three 2-tile chains; see triangle/tests/test_grid_edge_cases.py for the argument).
+    What this pins is that the orchestrator reports that as a normal empty result rather than an
+    error, so the GUI's "no fold" is a searched answer and not a swallowed failure."""
+    hexagon = [[1, 0, "U"], [0, 0, "D"], [1, 0, "D"], [0, 1, "U"], [1, 1, "U"], [0, 1, "D"]]
+    grid = _write_grid(tmp_path, "hexagon.json", "equilateral", hexagon, [3])
+    rc, bundle = _run_orchestrator(grid, str(tmp_path / "out"))
+    assert rc == 0 and bundle is not None
+    assert bundle["records"] == []
+    assert {c["stacks"]: c["status"] for c in bundle["configs"]} == {3: "ok"}
+    assert bundle["configs"][0]["nRecords"] == 0         # searched, not rejected
