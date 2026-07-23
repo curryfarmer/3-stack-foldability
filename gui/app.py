@@ -61,6 +61,11 @@ class App:
 
         self._tk = tk
         self._ttk = ttk
+        # No-fold verdicts pop as a message box (not only the bottom status line). Injectable so the
+        # headless scripted end-to-end can swap in a non-blocking recorder -- a real modal showinfo
+        # would wait on a click the tests never make.
+        from tkinter import messagebox
+        self._notify = messagebox.showinfo
         self._m = tk.IntVar(value=3)
         self._n = tk.IntVar(value=3)
         self._tiling_var = tk.StringVar(value=tilings.names()[0])
@@ -338,11 +343,27 @@ class App:
                 self._set_status("done: %d record(s)%s%s"
                                  % (len(rows), " — unproven" if gate else "",
                                     "" if self._save_var.get() else " — not saved (temporary)"))
+            if not rows:                       # nothing folded -> pop the verdict, not only status it
+                self._announce_no_fold(diagnosis)
         else:
             self._summary_var.set("no fold · %.1fs" % elapsed)
-            self._set_status("no fold (rc=%s): %s"
-                             % (result.returncode, _failure_reason(result.output)))
+            reason = "no fold (rc=%s): %s" % (result.returncode, _failure_reason(result.output))
+            self._set_status(reason)
+            self._announce_no_fold(None, fallback=reason)
         self._refresh_fold_btn()
+
+    def _announce_no_fold(self, diagnosis, fallback=None):
+        """Surface a no-fold result as a message box. `diagnosis` is the oracle's reason (or None); the
+        title is keyed on its kind so a real fold the search can't reach reads differently from a
+        genuine impossibility. `fallback` is the plain message for a bundle-less hard failure. Routes
+        through self._notify, which the scripted tests replace with a non-blocking recorder."""
+        if diagnosis and diagnosis.get("message"):
+            title = {"no-fold": "Cannot fold",
+                     "fold-outside-model": "Folds — but the search can't reach it",
+                     "undetermined": "Fold undetermined"}.get(diagnosis.get("kind"), "No fold")
+            self._notify(title, diagnosis["message"])
+        else:
+            self._notify("No fold", fallback or "No fold was found for this region.")
 
     def _on_load(self):
         self.pick(self._tiling_var.get(), int(self._m.get()), int(self._n.get()))

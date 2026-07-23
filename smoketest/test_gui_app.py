@@ -78,6 +78,24 @@ def test_preview_popup_noop_without_image(app):
     assert app._open_preview_popup() is None
 
 
+def test_announce_no_fold_routes_title_by_kind(app):
+    """The no-fold popup keys its title on the oracle's kind (a real fold the search can't reach reads
+    differently from a genuine impossibility) and falls back to a plain message with no diagnosis.
+    Routed through the injectable notifier, so nothing modal blocks the test."""
+    seen = []
+    app._notify = lambda title, msg: seen.append((title, msg))
+    app._announce_no_fold({"kind": "no-fold", "message": "cannot at all"})
+    app._announce_no_fold({"kind": "fold-outside-model", "message": "exists, missed"})
+    app._announce_no_fold({"kind": "undetermined", "message": "budget"})
+    app._announce_no_fold(None, fallback="hard fail")
+    app._announce_no_fold(None)
+    assert seen[0] == ("Cannot fold", "cannot at all")
+    assert seen[1] == ("Folds — but the search can't reach it", "exists, missed")
+    assert seen[2] == ("Fold undetermined", "budget")
+    assert seen[3] == ("No fold", "hard fail")
+    assert seen[4][0] == "No fold"                       # generic body when no diagnosis + no fallback
+
+
 @pytest.mark.slow
 def test_scripted_end_to_end_square(app):
     app.pick("square", 3, 3)
@@ -88,3 +106,21 @@ def test_scripted_end_to_end_square(app):
     rows = app.results.rows()
     assert rows and isinstance(rows[0]["proven"], bool)
     assert app.badge_visible == any(not r["proven"] for r in rows)
+
+
+@pytest.mark.slow
+def test_no_fold_region_pops_the_verdict(app):
+    """A drawn region the search cannot fold pops its verdict as a message box, not only the bottom
+    status line. A 1x6 strip 3-stacks by folding in half, which the footprint search misses, so the
+    oracle's reason reaches the notifier."""
+    seen = []
+    app._notify = lambda title, msg: seen.append((title, msg))
+    app.pick("square", 6, 1)
+    app.select(list(range(len(app.geometry.ids))))       # the whole 1x6 strip
+    assert app.fold_enabled
+    app.fold(timeout=180, wait=True)
+    assert app.results.rows() == []                      # nothing folded
+    assert seen, "no-fold popup never fired"
+    title, msg = seen[-1]
+    assert title == "Folds — but the search can't reach it"
+    assert "genuine 3-stack fold of this shape exists" in msg
